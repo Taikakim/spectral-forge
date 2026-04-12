@@ -1,6 +1,7 @@
 pub mod dsp;
 pub mod editor;
 pub mod params;
+pub mod bridge;
 
 use nih_plug::prelude::*;
 use params::SpectralForgeParams;
