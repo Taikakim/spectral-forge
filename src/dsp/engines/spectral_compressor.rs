@@ -80,7 +80,11 @@ impl SpectralEngine for SpectralCompressorEngine {
         let n   = bins.len(); // caller guarantees == num_bins (asserted above)
 
         // Pre-pass — update spectral envelope for relative threshold mode.
-        // Computes a 3-bin median magnitude per bin, smoothed over 50 ms.
+        // The envelope is always derived from the main input bins (not the sidechain).
+        // When sidechain detection is active, `level_linear` is the sidechain magnitude
+        // normalised against the main signal's spectral shape — compression responds to
+        // sidechain peaks relative to the main signal's own spectral contour.
+        // TODO: expose the 50 ms smoothing time as a SpectralEnvelopeTime param.
         if params.relative_mode {
             let env_coeff = Self::ms_to_coeff(50.0, sample_rate, hop);
             for k in 0..n {
