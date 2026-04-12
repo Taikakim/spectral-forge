@@ -141,13 +141,6 @@ impl SpectralEngine for SpectralCompressorEngine {
             self.gr_db[k]     = Self::gain_computer(self.env_db[k], threshold_db, ratio, knee_db);
         }
 
-        // Update auto-makeup long-term average (~1000ms smoothing at hop rate)
-        let coeff_slow = Self::ms_to_coeff(1000.0, sample_rate, hop);
-        for k in 0..n {
-            self.auto_makeup_db[k] = coeff_slow * self.auto_makeup_db[k]
-                + (1.0 - coeff_slow) * self.gr_db[k];
-        }
-
         // Pass 2 — 3-tap weighted average to smooth gain reduction across adjacent bins
         for k in 0..n {
             let w0   = 0.5_f32;
@@ -155,6 +148,16 @@ impl SpectralEngine for SpectralCompressorEngine {
             let prev = if k > 0     { self.gr_db[k - 1] } else { self.gr_db[k] };
             let next = if k + 1 < n { self.gr_db[k + 1] } else { self.gr_db[k] };
             self.smooth_buf[k] = w0 * self.gr_db[k] + w1 * prev + w1 * next;
+        }
+
+        // Update auto-makeup long-term average (~1000ms smoothing at hop rate).
+        // Tracks the mix-weighted spatially-smoothed GR (smooth_buf * mix) — i.e. the
+        // GR actually applied to the audio — so compensation is exact at any mix setting.
+        let coeff_slow = Self::ms_to_coeff(1000.0, sample_rate, hop);
+        for k in 0..n {
+            let effective_gr = self.smooth_buf[k] * params.mix[k].clamp(0.0, 1.0);
+            self.auto_makeup_db[k] = coeff_slow * self.auto_makeup_db[k]
+                + (1.0 - coeff_slow) * effective_gr;
         }
 
         // Pass 3 — apply smoothed gain reduction + makeup + mix

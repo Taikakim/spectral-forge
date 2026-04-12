@@ -231,10 +231,12 @@ impl Pipeline {
         let sc_envelope = &self.sc_envelope;
         let sidechain_arg: Option<&[f32]> = if sc_active { Some(sc_envelope) } else { None };
 
-        // Delta monitor: capture dry signal before any processing
+        // Delta monitor: capture dry signal before any processing.
+        // MAX_BLOCK_SIZE is an assumed upper bound on nih-plug block sizes.
         if delta_monitor {
             let mut dry_idx = 0usize;
             for sample_block in buffer.iter_samples() {
+                debug_assert!(dry_idx < MAX_BLOCK_SIZE, "block size exceeded MAX_BLOCK_SIZE={MAX_BLOCK_SIZE}");
                 for (ch_idx, sample) in sample_block.into_iter().enumerate() {
                     let idx = ch_idx * MAX_BLOCK_SIZE + dry_idx;
                     if idx < self.dry_buf.len() {
