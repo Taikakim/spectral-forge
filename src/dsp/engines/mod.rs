@@ -19,17 +19,21 @@ pub trait SpectralEngine: Send {
     /// Called once per STFT hop on the audio thread.
     /// Must not allocate, lock, or perform I/O.
     /// Write |gain_reduction_db| per bin into suppression_out for GUI stalactites.
+    ///
+    /// Callers guarantee: `bins.len() == suppression_out.len() == fft_size/2+1`
+    /// and `sidechain`, if present, has the same length.
     fn process_bins(
         &mut self,
         bins: &mut [Complex<f32>],
-        sidechain: Option<&[f32]>,     // pre-smoothed sidechain magnitude, or None
-        params: &BinParams,
+        sidechain: Option<&[f32]>,     // pre-smoothed sidechain magnitude per bin, or None
+        params: &BinParams<'_>,
         sample_rate: f32,
         suppression_out: &mut [f32],
     );
 
     /// Tail after silence. Override for engines with extended tails (e.g. Freeze).
     fn tail_length(&self, fft_size: usize) -> u32 {
+        debug_assert!(fft_size <= u32::MAX as usize);
         fft_size as u32
     }
 

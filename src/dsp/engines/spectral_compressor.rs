@@ -1,10 +1,11 @@
 use num_complex::Complex;
 use super::{SpectralEngine, BinParams};
 
+#[derive(Default)]
 pub struct SpectralCompressorEngine;
 
 impl SpectralCompressorEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self { Self::default() }
 }
 
 impl SpectralEngine for SpectralCompressorEngine {
@@ -14,7 +15,7 @@ impl SpectralEngine for SpectralCompressorEngine {
         &mut self,
         _bins: &mut [Complex<f32>],
         _sidechain: Option<&[f32]>,
-        _params: &BinParams,
+        _params: &BinParams<'_>,
         _sample_rate: f32,
         suppression_out: &mut [f32],
     ) {

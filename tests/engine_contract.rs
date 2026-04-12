@@ -22,8 +22,13 @@ fn run_engine(engine: &mut Box<dyn SpectralEngine>, bins: &mut Vec<Complex<f32>>
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
     };
-    let mut suppression = vec![0.0f32; n];
+    // NaN sentinel: if engine forgets to write suppression_out, the assertion
+    // in callers will catch it (NaN >= 0.0 is false).
+    let mut suppression = vec![f32::NAN; n];
     engine.process_bins(bins, None, &params, 44100.0, &mut suppression);
+    for &s in &suppression {
+        assert!(s.is_finite() && s >= 0.0, "suppression must be finite and non-negative, got {s}");
+    }
 }
 
 #[test]
@@ -62,5 +67,24 @@ fn suppression_out_filled() {
     // All values must be >= 0 (gain reduction magnitude)
     for &s in &suppression {
         assert!(s >= 0.0, "suppression must be non-negative");
+    }
+}
+
+#[test]
+fn sidechain_some_does_not_panic() {
+    let mut engine = create_engine(EngineSelection::SpectralCompressor);
+    engine.reset(44100.0, 2048);
+    let n = 1025;
+    let mut bins = vec![Complex::new(0.5f32, 0.0); n];
+    let sidechain_mag = vec![0.5f32; n];
+    let mut suppression = vec![f32::NAN; n];
+    let (th, ra, at, re, kn, mk, mx) = make_params(n);
+    let params = BinParams {
+        threshold_db: &th, ratio: &ra, attack_ms: &at,
+        release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
+    };
+    engine.process_bins(&mut bins, Some(&sidechain_mag), &params, 44100.0, &mut suppression);
+    for &s in &suppression {
+        assert!(s.is_finite() && s >= 0.0, "suppression must be finite and non-negative with sidechain");
     }
 }
