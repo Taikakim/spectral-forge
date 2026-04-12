@@ -148,7 +148,8 @@ impl Pipeline {
         let spectrum_buf      = &mut self.spectrum_buf;
         let suppression_buf   = &mut self.suppression_buf;
         let channel_supp_buf  = &mut self.channel_supp_buf;
-        // Reset accumulators for peak-hold across channels
+        // Reset peak-hold accumulators. channel_supp_buf is not zeroed here
+        // because process_bins fully overwrites it before the fold below.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
         let bp_threshold = &self.bp_threshold;

@@ -69,15 +69,13 @@ pub fn create_editor(
                     // Spectrum background bars
                     if let Some(ref rx_arc) = spectrum_rx {
                         if let Some(mut rx) = rx_arc.try_lock() {
-                            let mags = rx.read().clone();
-                            crate::editor::spectrum_display::paint_spectrum(ui.painter(), curve_rect, &mags);
+                            crate::editor::spectrum_display::paint_spectrum(ui.painter(), curve_rect, rx.read());
                         }
                     }
                     // Suppression stalactites (top)
                     if let Some(ref rx_arc) = suppression_rx {
                         if let Some(mut rx) = rx_arc.try_lock() {
-                            let supp = rx.read().clone();
-                            crate::editor::suppression_display::paint_suppression(ui.painter(), curve_rect, &supp);
+                            crate::editor::suppression_display::paint_suppression(ui.painter(), curve_rect, rx.read());
                         }
                     }
 
