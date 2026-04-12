@@ -65,4 +65,16 @@ mod tests {
         let s: Option<u8> = Some(1);
         assert!(is_ready(&s));
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn flush_denormals_sets_ftz_daz() {
+        flush_denormals();
+        let mut mxcsr: u32 = 0;
+        unsafe {
+            core::arch::asm!("stmxcsr [{0}]", in(reg) &mut mxcsr, options(nostack));
+        }
+        assert!(mxcsr & 0x8000 != 0, "FTZ bit not set");
+        assert!(mxcsr & 0x0040 != 0, "DAZ bit not set");
+    }
 }
