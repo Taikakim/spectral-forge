@@ -27,12 +27,13 @@ pub fn create_editor(
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(th::BG))
                 .show(ctx, |ui| {
+                    let active_idx = *params.active_curve.lock() as usize;
+
                     // Parameter selector row
                     ui.horizontal(|ui| {
                         ui.add_space(4.0);
-                        let active = *params.active_curve.lock();
                         for (i, label) in CURVE_LABELS.iter().enumerate() {
-                            let is_active = active == i as u8;
+                            let is_active = active_idx == i;
                             let (fill, text_color) = if is_active {
                                 (th::BTN_ACTIVE, th::BTN_TEXT_ON)
                             } else {
@@ -60,15 +61,30 @@ pub fn create_editor(
                     // Curve area
                     let curve_rect = ui.available_rect_before_wrap();
                     ui.allocate_rect(curve_rect, egui::Sense::hover());
-
-                    let active_idx = *params.active_curve.lock() as usize;
                     let mut nodes = params.curve_nodes.lock()[active_idx];
                     let sr = sample_rate.as_ref().map(|a| a.load()).unwrap_or(44100.0);
 
-                    // Paint response curve (using display resolution of 512 bins)
-                    let display_gains = crate::editor::curve::compute_curve_response(
-                        &nodes, 512, sr, 2048,
-                    );
+                    // Paint response curve (using display resolution of 512 bins), cached per frame
+                    let cache_key = ui.id().with("display_gains");
+                    let cached: Option<(Vec<[crate::editor::curve::CurveNode; 6]>, Vec<f32>)> =
+                        ui.data(|d| d.get_temp(cache_key));
+                    let display_gains = if let Some((cached_nodes, cached_gains)) = cached {
+                        if cached_nodes[active_idx] == nodes {
+                            cached_gains
+                        } else {
+                            let g = crate::editor::curve::compute_curve_response(
+                                &nodes, 512, sr, crate::dsp::pipeline::FFT_SIZE,
+                            );
+                            ui.data_mut(|d| d.insert_temp(cache_key, (params.curve_nodes.lock().clone(), g.clone())));
+                            g
+                        }
+                    } else {
+                        let g = crate::editor::curve::compute_curve_response(
+                            &nodes, 512, sr, crate::dsp::pipeline::FFT_SIZE,
+                        );
+                        ui.data_mut(|d| d.insert_temp(cache_key, (params.curve_nodes.lock().clone(), g.clone())));
+                        g
+                    };
                     crate::editor::curve::paint_response_curve(ui, curve_rect, &display_gains);
 
                     // Handle node interaction
@@ -77,7 +93,7 @@ pub fn create_editor(
                         // Push full-resolution gains to audio bridge
                         if num_bins > 0 {
                             let full_gains = crate::editor::curve::compute_curve_response(
-                                &nodes, num_bins, sr, 2048,
+                                &nodes, num_bins, sr, crate::dsp::pipeline::FFT_SIZE,
                             );
                             if let Some(tx_arc) = curve_tx.get(active_idx) {
                                 if let Some(mut tx) = tx_arc.try_lock() {

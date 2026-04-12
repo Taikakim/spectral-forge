@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CurveNode {
     pub x: f32,  // [0.0, 1.0] normalised log-frequency
     pub y: f32,  // [-1.0, +1.0] gain: 0.0 = neutral
@@ -117,17 +117,8 @@ pub fn compute_curve_response(
 fn x_to_screen(x: f32, rect: nih_plug_egui::egui::Rect) -> f32 {
     rect.left() + x * rect.width()
 }
-#[allow(dead_code)]
-fn screen_to_x(px: f32, rect: nih_plug_egui::egui::Rect) -> f32 {
-    ((px - rect.left()) / rect.width()).clamp(0.0, 1.0)
-}
 fn y_to_screen(y: f32, rect: nih_plug_egui::egui::Rect) -> f32 {
     rect.top() + (1.0 - (y + 1.0) / 2.0) * rect.height()
-}
-#[allow(dead_code)]
-fn screen_to_y(py: f32, rect: nih_plug_egui::egui::Rect) -> f32 {
-    let norm = 1.0 - (py - rect.top()) / rect.height();
-    (norm * 2.0 - 1.0).clamp(-1.0, 1.0)
 }
 
 /// Draw the 6-node EQ curve and handle drag/scroll/double-click interaction.
@@ -159,13 +150,13 @@ pub fn curve_widget(
         if resp.dragged() {
             let delta = resp.drag_delta();
             nodes[i].x = (nodes[i].x + delta.x / rect.width()).clamp(0.0, 1.0);
-            nodes[i].y = (nodes[i].y - delta.y / rect.height() * 2.0).clamp(-1.0, 1.0);
+            nodes[i].y = (nodes[i].y - (delta.y / rect.height()) * 2.0).clamp(-1.0, 1.0);
             changed = true;
         }
 
         let scroll = ui.input(|inp| {
             if node_rect.contains(inp.pointer.hover_pos().unwrap_or(Pos2::ZERO)) {
-                inp.smooth_scroll_delta.y
+                inp.raw_scroll_delta.y
             } else {
                 0.0
             }
@@ -203,7 +194,7 @@ pub fn paint_response_curve(
     use nih_plug_egui::egui::{Pos2, Shape, Stroke};
     use crate::editor::theme as th;
 
-    if gains.is_empty() {
+    if gains.len() < 2 {
         return;
     }
     let n = gains.len();
