@@ -10,6 +10,7 @@ pub struct BinParams<'a> {
     pub makeup_db:     &'a [f32],  // makeup gain dB per bin
     pub mix:           &'a [f32],  // dry/wet per bin [0.0, 1.0]
     pub relative_mode: bool,       // true = detect relative to local spectral envelope
+    pub auto_makeup:   bool,       // if true, add long-term average GR compensation per bin
 }
 
 pub trait SpectralEngine: Send {

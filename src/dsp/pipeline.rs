@@ -8,6 +8,10 @@ pub const FFT_SIZE: usize = 2048;
 pub const NUM_BINS: usize = FFT_SIZE / 2 + 1;
 pub const OVERLAP: usize = 4; // 75% overlap → hop = 512
 
+/// Maximum block size assumed for the delta monitor dry buffer.
+/// nih-plug typically processes in blocks of ≤ 8192 samples.
+const MAX_BLOCK_SIZE: usize = 8192;
+
 pub struct Pipeline {
     stft: StftHelper,
     fft_plan:  std::sync::Arc<dyn realfft::RealToComplex<f32>>,
@@ -30,6 +34,9 @@ pub struct Pipeline {
     bp_knee:      Vec<f32>,
     bp_makeup:    Vec<f32>,
     bp_mix:       Vec<f32>,
+    /// Pre-allocated dry signal buffer for delta monitor: [ch0 samples | ch1 samples]
+    /// Layout: channel c starts at c * MAX_BLOCK_SIZE.
+    dry_buf: Vec<f32>,
     sample_rate: f32,
 }
 
@@ -74,6 +81,8 @@ impl Pipeline {
             bp_knee:      vec![6.0;   NUM_BINS],
             bp_makeup:    vec![0.0;   NUM_BINS],
             bp_mix:       vec![1.0;   NUM_BINS],
+            // 2 channels × MAX_BLOCK_SIZE for delta monitor dry capture
+            dry_buf: vec![0.0f32; 2 * MAX_BLOCK_SIZE],
             sample_rate,
         }
     }
@@ -84,6 +93,7 @@ impl Pipeline {
         self.sc_stft = StftHelper::new(2, FFT_SIZE, 0);
         self.sc_envelope  = vec![0.0f32; NUM_BINS];
         self.sc_env_state = vec![0.0f32; NUM_BINS];
+        self.dry_buf.fill(0.0);
         self.engine.reset(sample_rate, FFT_SIZE);
         self.engine_r.reset(sample_rate, FFT_SIZE);
     }
@@ -197,6 +207,16 @@ impl Pipeline {
             self.bp_mix[k] = (mx * global_mix).clamp(0.0, 1.0);
         }
 
+        // Read lookahead parameter.
+        // TODO: implement per-channel delay ring buffer for actual lookahead.
+        // Currently the STFT latency (FFT_SIZE samples) provides effective lookahead;
+        // `lookahead_ms` is reserved for a future delay-line implementation.
+        let _lookahead_ms = params.lookahead_ms.value();
+
+        // Read boolean feature flags
+        let auto_makeup   = params.auto_makeup.value();
+        let delta_monitor = params.delta_monitor.value();
+
         // Read stereo link mode
         use crate::params::StereoLink;
         let stereo_link    = params.stereo_link.value();
@@ -210,6 +230,20 @@ impl Pipeline {
         // Capture sc_envelope before the mutable borrow of self.stft
         let sc_envelope = &self.sc_envelope;
         let sidechain_arg: Option<&[f32]> = if sc_active { Some(sc_envelope) } else { None };
+
+        // Delta monitor: capture dry signal before any processing
+        if delta_monitor {
+            let mut dry_idx = 0usize;
+            for sample_block in buffer.iter_samples() {
+                for (ch_idx, sample) in sample_block.into_iter().enumerate() {
+                    let idx = ch_idx * MAX_BLOCK_SIZE + dry_idx;
+                    if idx < self.dry_buf.len() {
+                        self.dry_buf[idx] = *sample;
+                    }
+                }
+                dry_idx += 1;
+            }
+        }
 
         // M/S encode: L/R → Mid/Side (before STFT)
         if is_mid_side {
@@ -278,6 +312,7 @@ impl Pipeline {
                 makeup_db:     bp_makeup,
                 mix:           bp_mix,
                 relative_mode,
+                auto_makeup,
             };
 
             // Select engine: Independent mode uses engine_r for channel 1
@@ -310,6 +345,21 @@ impl Pipeline {
                     *m = l;
                     *s = r;
                 }
+            }
+        }
+
+        // Delta monitor: output dry - wet so the user hears what is being removed
+        if delta_monitor {
+            let mut dry_idx = 0usize;
+            for sample_block in buffer.iter_samples() {
+                for (ch_idx, sample) in sample_block.into_iter().enumerate() {
+                    let dry_val = self.dry_buf
+                        .get(ch_idx * MAX_BLOCK_SIZE + dry_idx)
+                        .copied()
+                        .unwrap_or(0.0);
+                    *sample = dry_val - *sample;
+                }
+                dry_idx += 1;
             }
         }
 

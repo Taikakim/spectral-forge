@@ -22,6 +22,7 @@ fn run_engine(engine: &mut Box<dyn SpectralEngine>, bins: &mut Vec<Complex<f32>>
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
         relative_mode: false,
+        auto_makeup: false,
     };
     // NaN sentinel: if engine forgets to write suppression_out, the assertion
     // in callers will catch it (NaN >= 0.0 is false).
@@ -64,6 +65,7 @@ fn suppression_out_filled() {
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
         relative_mode: false,
+        auto_makeup: false,
     };
     engine.process_bins(&mut bins, None, &params, 44100.0, &mut suppression);
     // All values must be >= 0 (gain reduction magnitude)
@@ -85,6 +87,7 @@ fn sidechain_some_does_not_panic() {
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
         relative_mode: false,
+        auto_makeup: false,
     };
     engine.process_bins(&mut bins, Some(&sidechain_mag), &params, 44100.0, &mut suppression);
     for &s in &suppression {
@@ -112,6 +115,7 @@ fn loud_signal_gets_compressed() {
         attack_ms: &attack, release_ms: &release,
         knee_db: &knee, makeup_db: &makeup, mix: &mix,
         relative_mode: false,
+        auto_makeup: false,
     };
     let mut suppression = vec![0.0f32; n];
 
