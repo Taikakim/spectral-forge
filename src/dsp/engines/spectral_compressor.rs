@@ -8,7 +8,9 @@ pub struct SpectralCompressorEngine {
     /// Raw gain reduction per bin (dB, ≤ 0) — computed in pass 1.
     gr_db:       Vec<f32>,
     /// Smoothed gain reduction per bin — reused buffer, no per-call allocation.
-    smooth_buf:  Vec<f32>,
+    smooth_buf:        Vec<f32>,
+    /// Smoothed per-bin median magnitude for relative threshold mode.
+    spectral_envelope: Vec<f32>,
     num_bins:    usize,
     sample_rate: f32,
     fft_size:    usize,
@@ -57,9 +59,10 @@ impl SpectralEngine for SpectralCompressorEngine {
         self.hop_size    = fft_size / 4; // 75% overlap
         self.num_bins    = fft_size / 2 + 1;
         // Initialise envelopes to silence so attack ramps up from nothing
-        self.env_db    = vec![-96.0f32; self.num_bins];
-        self.gr_db     = vec![0.0f32; self.num_bins];
-        self.smooth_buf = vec![0.0f32; self.num_bins];
+        self.env_db           = vec![-96.0f32; self.num_bins];
+        self.gr_db            = vec![0.0f32; self.num_bins];
+        self.smooth_buf       = vec![0.0f32; self.num_bins];
+        self.spectral_envelope = vec![0.0f32; self.num_bins];
     }
 
     fn process_bins(
@@ -76,6 +79,24 @@ impl SpectralEngine for SpectralCompressorEngine {
         let hop = self.hop_size;
         let n   = bins.len(); // caller guarantees == num_bins (asserted above)
 
+        // Pre-pass — update spectral envelope for relative threshold mode.
+        // Computes a 3-bin median magnitude per bin, smoothed over 50 ms.
+        if params.relative_mode {
+            let env_coeff = Self::ms_to_coeff(50.0, sample_rate, hop);
+            for k in 0..n {
+                let mag = bins[k].norm();
+                let lo  = if k > 0     { bins[k - 1].norm() } else { mag };
+                let hi  = if k + 1 < n { bins[k + 1].norm() } else { mag };
+                let med = {
+                    let mut arr = [lo, mag, hi];
+                    arr.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    arr[1]
+                };
+                self.spectral_envelope[k] =
+                    env_coeff * self.spectral_envelope[k] + (1.0 - env_coeff) * med;
+            }
+        }
+
         // Pass 1 — envelope follower + gain computer → raw gr per bin
         for k in 0..n {
             // 1. Detect level — use sidechain magnitude if provided, else self-keyed
@@ -83,8 +104,15 @@ impl SpectralEngine for SpectralCompressorEngine {
                 Some(sc) => sc.get(k).copied().unwrap_or(0.0),
                 None     => bins[k].norm(),
             };
-            let level_db = if level_linear > 1e-10 {
-                20.0 * level_linear.log10()
+            // In relative mode, normalise by the local spectral envelope so that
+            // only bins that stick out above their neighbours trigger compression.
+            let detection_linear = if params.relative_mode && self.spectral_envelope[k] > 1e-10 {
+                level_linear / self.spectral_envelope[k]
+            } else {
+                level_linear
+            };
+            let level_db = if detection_linear > 1e-10 {
+                20.0 * detection_linear.log10()
             } else {
                 -96.0
             };

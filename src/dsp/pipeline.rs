@@ -159,6 +159,7 @@ impl Pipeline {
         let bp_knee      = &self.bp_knee;
         let bp_makeup    = &self.bp_makeup;
         let bp_mix       = &self.bp_mix;
+        let relative_mode = params.threshold_mode.value() == crate::params::ThresholdMode::Relative;
         let sample_rate  = self.sample_rate;
         // IFFT gives FFT_SIZE gain; Hann^2 OLA at 75% overlap gives 1.5 gain.
         // Combined normalization: 1 / (FFT_SIZE * 1.5) = 2 / (3 * FFT_SIZE)
@@ -181,13 +182,14 @@ impl Pipeline {
             }
 
             let params = BinParams {
-                threshold_db: bp_threshold,
-                ratio:        bp_ratio,
-                attack_ms:    bp_attack,
-                release_ms:   bp_release,
-                knee_db:      bp_knee,
-                makeup_db:    bp_makeup,
-                mix:          bp_mix,
+                threshold_db:  bp_threshold,
+                ratio:         bp_ratio,
+                attack_ms:     bp_attack,
+                release_ms:    bp_release,
+                knee_db:       bp_knee,
+                makeup_db:     bp_makeup,
+                mix:           bp_mix,
+                relative_mode,
             };
 
             engine.process_bins(complex_buf, None, &params, sample_rate, channel_supp_buf);

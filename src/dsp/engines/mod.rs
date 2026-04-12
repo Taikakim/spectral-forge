@@ -2,13 +2,14 @@ use num_complex::Complex;
 
 /// Per-bin parameter values, physical units, pre-computed by pipeline.
 pub struct BinParams<'a> {
-    pub threshold_db: &'a [f32],  // dBFS per bin, e.g. -20.0
-    pub ratio:        &'a [f32],  // ratio per bin, e.g. 4.0 = 4:1
-    pub attack_ms:    &'a [f32],  // ms per bin, freq-scaled by pipeline
-    pub release_ms:   &'a [f32],  // ms per bin, freq-scaled by pipeline
-    pub knee_db:      &'a [f32],  // soft knee width in dB per bin
-    pub makeup_db:    &'a [f32],  // makeup gain dB per bin
-    pub mix:          &'a [f32],  // dry/wet per bin [0.0, 1.0]
+    pub threshold_db:  &'a [f32],  // dBFS per bin, e.g. -20.0
+    pub ratio:         &'a [f32],  // ratio per bin, e.g. 4.0 = 4:1
+    pub attack_ms:     &'a [f32],  // ms per bin, freq-scaled by pipeline
+    pub release_ms:    &'a [f32],  // ms per bin, freq-scaled by pipeline
+    pub knee_db:       &'a [f32],  // soft knee width in dB per bin
+    pub makeup_db:     &'a [f32],  // makeup gain dB per bin
+    pub mix:           &'a [f32],  // dry/wet per bin [0.0, 1.0]
+    pub relative_mode: bool,       // true = detect relative to local spectral envelope
 }
 
 pub trait SpectralEngine: Send {
