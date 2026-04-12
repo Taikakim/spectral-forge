@@ -124,7 +124,8 @@ impl Pipeline {
 
             // FIXME(multichannel): spectrum_buf and suppression_buf are overwritten
             // per channel; with stereo audio only the last channel's data reaches the
-            // GUI. Fix in Task 10 by averaging/maxing across channels before publishing.
+            // GUI. Fix in Task 13 (spectrum/suppression display) by accumulating a
+            // peak-hold across channels before the publish call.
             for (i, c) in complex_buf.iter().enumerate() {
                 spectrum_buf[i] = c.norm();
             }

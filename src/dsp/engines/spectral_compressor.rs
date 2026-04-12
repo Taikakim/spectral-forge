@@ -68,7 +68,7 @@ impl SpectralEngine for SpectralCompressorEngine {
             "bins.len() ({}) != num_bins ({})", bins.len(), self.num_bins);
 
         let hop = self.hop_size;
-        let n   = bins.len().min(self.num_bins);
+        let n   = bins.len(); // caller guarantees == num_bins (asserted above)
 
         for k in 0..n {
             // 1. Detect level — use sidechain magnitude if provided, else self-keyed
