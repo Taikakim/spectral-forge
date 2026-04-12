@@ -5,6 +5,10 @@ use super::{SpectralEngine, BinParams};
 pub struct SpectralCompressorEngine {
     /// Per-bin envelope state in dBFS (smoothed level tracking).
     env_db:      Vec<f32>,
+    /// Raw gain reduction per bin (dB, ≤ 0) — computed in pass 1.
+    gr_db:       Vec<f32>,
+    /// Smoothed gain reduction per bin — reused buffer, no per-call allocation.
+    smooth_buf:  Vec<f32>,
     num_bins:    usize,
     sample_rate: f32,
     fft_size:    usize,
@@ -53,7 +57,9 @@ impl SpectralEngine for SpectralCompressorEngine {
         self.hop_size    = fft_size / 4; // 75% overlap
         self.num_bins    = fft_size / 2 + 1;
         // Initialise envelopes to silence so attack ramps up from nothing
-        self.env_db = vec![-96.0f32; self.num_bins];
+        self.env_db    = vec![-96.0f32; self.num_bins];
+        self.gr_db     = vec![0.0f32; self.num_bins];
+        self.smooth_buf = vec![0.0f32; self.num_bins];
     }
 
     fn process_bins(
@@ -70,6 +76,7 @@ impl SpectralEngine for SpectralCompressorEngine {
         let hop = self.hop_size;
         let n   = bins.len(); // caller guarantees == num_bins (asserted above)
 
+        // Pass 1 — envelope follower + gain computer → raw gr per bin
         for k in 0..n {
             // 1. Detect level — use sidechain magnitude if provided, else self-keyed
             let level_linear = match sidechain {
@@ -92,22 +99,29 @@ impl SpectralEngine for SpectralCompressorEngine {
             };
             self.env_db[k] = coeff * self.env_db[k] + (1.0 - coeff) * level_db;
 
-            // 3. Gain computer → gain reduction in dB (≤ 0)
-            let threshold_db = params.threshold_db[k];
-            let ratio        = params.ratio[k].max(1.0);
-            let knee_db      = params.knee_db[k].max(0.0);
-            let gr_db        = Self::gain_computer(self.env_db[k], threshold_db, ratio, knee_db);
+            // 3. Gain computer → raw gain reduction in dB (≤ 0)
+            let threshold_db  = params.threshold_db[k];
+            let ratio         = params.ratio[k].max(1.0);
+            let knee_db       = params.knee_db[k].max(0.0);
+            self.gr_db[k]     = Self::gain_computer(self.env_db[k], threshold_db, ratio, knee_db);
+        }
 
-            // 4. Total gain = GR + makeup, converted to linear
-            let total_db     = gr_db + params.makeup_db[k];
-            let linear_gain  = 10.0f32.powf(total_db / 20.0);
+        // Pass 2 — 3-tap weighted average to smooth gain reduction across adjacent bins
+        for k in 0..n {
+            let w0   = 0.5_f32;
+            let w1   = 0.25_f32;
+            let prev = if k > 0     { self.gr_db[k - 1] } else { self.gr_db[k] };
+            let next = if k + 1 < n { self.gr_db[k + 1] } else { self.gr_db[k] };
+            self.smooth_buf[k] = w0 * self.gr_db[k] + w1 * prev + w1 * next;
+        }
 
-            // 5. Apply gain with per-bin dry/wet mix
-            let mix = params.mix[k].clamp(0.0, 1.0);
+        // Pass 3 — apply smoothed gain reduction + makeup + mix
+        for k in 0..n {
+            let total_db    = self.smooth_buf[k] + params.makeup_db[k];
+            let linear_gain = 10.0f32.powf(total_db / 20.0);
+            let mix         = params.mix[k].clamp(0.0, 1.0);
             bins[k] = bins[k] * (1.0 - mix + mix * linear_gain);
-
-            // 6. Write |gain_reduction_db| to suppression_out for GUI stalactites
-            suppression_out[k] = (-gr_db).max(0.0);
+            suppression_out[k] = (-self.smooth_buf[k]).max(0.0);
         }
     }
 
