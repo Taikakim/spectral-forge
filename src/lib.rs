@@ -98,6 +98,19 @@ impl Plugin for SpectralForge {
             self.gui_num_bins       = sh.num_bins;
             self.gui_spectrum_rx    = Some(sh.spectrum_rx.clone());
             self.gui_suppression_rx = Some(sh.suppression_rx.clone());
+
+            // Push initial per-bin curves computed from persisted curve_nodes so
+            // restored sessions start with the correct gain values on the first block.
+            let nodes_snapshot = *self.params.curve_nodes.lock();
+            for (i, tx_arc) in sh.curve_tx.iter().enumerate() {
+                let gains = crate::editor::curve::compute_curve_response(
+                    &nodes_snapshot[i], num_bins, sr, dsp::pipeline::FFT_SIZE,
+                );
+                if let Some(mut tx) = tx_arc.try_lock() {
+                    tx.input_buffer_mut().copy_from_slice(&gains);
+                    tx.publish();
+                }
+            }
         }
         true
     }

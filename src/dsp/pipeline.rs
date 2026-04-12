@@ -37,6 +37,9 @@ pub struct Pipeline {
     /// Pre-allocated dry signal buffer for delta monitor: [ch0 samples | ch1 samples]
     /// Layout: channel c starts at c * MAX_BLOCK_SIZE.
     dry_buf: Vec<f32>,
+    /// Pre-allocated curve read caches — populated via copy_from_slice each block
+    /// so the audio thread never allocates. One Vec per curve channel (7 total).
+    curve_cache: [Vec<f32>; 7],
     sample_rate: f32,
 }
 
@@ -83,6 +86,7 @@ impl Pipeline {
             bp_mix:       vec![1.0;   NUM_BINS],
             // 2 channels × MAX_BLOCK_SIZE for delta monitor dry capture
             dry_buf: vec![0.0f32; 2 * MAX_BLOCK_SIZE],
+            curve_cache: std::array::from_fn(|_| vec![1.0f32; NUM_BINS]),
             sample_rate,
         }
     }
@@ -113,16 +117,15 @@ impl Pipeline {
         let output_gain_db  = params.output_gain.smoothed.next();
         let global_mix      = params.mix.smoothed.next();
 
-        // Read all 7 curve channels once.
-        // Each read() requires &mut on its TbOutput; clone immediately so the
-        // borrow ends before the next index is touched.
-        let thresh_curve:  Vec<f32> = shared.curve_rx[0].read().clone();
-        let ratio_curve:   Vec<f32> = shared.curve_rx[1].read().clone();
-        let attack_curve:  Vec<f32> = shared.curve_rx[2].read().clone();
-        let release_curve: Vec<f32> = shared.curve_rx[3].read().clone();
-        let knee_curve:    Vec<f32> = shared.curve_rx[4].read().clone();
-        let makeup_curve:  Vec<f32> = shared.curve_rx[5].read().clone();
-        let mix_curve:     Vec<f32> = shared.curve_rx[6].read().clone();
+        // Read all 7 curve channels into pre-allocated cache buffers (no allocation).
+        // Each read() borrow ends before the next copy_from_slice begins.
+        self.curve_cache[0].copy_from_slice(shared.curve_rx[0].read());
+        self.curve_cache[1].copy_from_slice(shared.curve_rx[1].read());
+        self.curve_cache[2].copy_from_slice(shared.curve_rx[2].read());
+        self.curve_cache[3].copy_from_slice(shared.curve_rx[3].read());
+        self.curve_cache[4].copy_from_slice(shared.curve_rx[4].read());
+        self.curve_cache[5].copy_from_slice(shared.curve_rx[5].read());
+        self.curve_cache[6].copy_from_slice(shared.curve_rx[6].read());
 
         // --- Sidechain processing ---
         let sc_active = !aux.inputs.is_empty();
@@ -173,37 +176,39 @@ impl Pipeline {
         let sample_rate = self.sample_rate;
         let num_bins = self.bp_threshold.len();
 
+        // Map curve cache values to physical units, bin by bin.
+        // Rust 2021 split field borrows: curve_cache (read) and bp_* (write) are disjoint fields.
         for k in 0..num_bins {
             // Threshold: curve gain 1.0 → -20 dBFS base; range mapped to -60…0 dBFS.
             // flat curve (gain=1.0) → threshold = -20 dBFS
             // curve gain 0.0 → -60 dBFS (very low threshold = lots of compression)
             // curve gain 2.0 → 0 dBFS (threshold above max = no compression)
             // Linear interp: threshold_db = -20.0 + (gain - 1.0) * 20.0
-            let t = thresh_curve.get(k).copied().unwrap_or(1.0);
+            let t = self.curve_cache[0].get(k).copied().unwrap_or(1.0);
             self.bp_threshold[k] = (-20.0 + (t - 1.0) * 20.0).clamp(-60.0, 0.0);
 
             // Ratio: curve gain 1.0 → ratio 1:1; gain 8.0 → ratio 8:1 (max)
-            let r = ratio_curve.get(k).copied().unwrap_or(1.0);
+            let r = self.curve_cache[1].get(k).copied().unwrap_or(1.0);
             self.bp_ratio[k] = r.clamp(1.0, 20.0);
 
             // Frequency-dependent timing: lower frequencies get longer times
             let f_bin = (k as f32 * sample_rate / crate::dsp::pipeline::FFT_SIZE as f32).max(20.0);
             let scale = (1000.0_f32 / f_bin).powf(freq_scale * 0.5); // freq_scale ∈ [0,1]
-            let atk_factor = attack_curve.get(k).copied().unwrap_or(1.0).max(0.01);
-            let rel_factor = release_curve.get(k).copied().unwrap_or(1.0).max(0.01);
+            let atk_factor = self.curve_cache[2].get(k).copied().unwrap_or(1.0).max(0.01);
+            let rel_factor = self.curve_cache[3].get(k).copied().unwrap_or(1.0).max(0.01);
             self.bp_attack[k]  = (attack_ms_base  * scale * atk_factor).clamp(0.1, 500.0);
             self.bp_release[k] = (release_ms_base * scale * rel_factor).clamp(1.0, 2000.0);
 
             // Knee: curve gain 1.0 → 6 dB knee; range 0…24 dB
-            let kn = knee_curve.get(k).copied().unwrap_or(1.0);
+            let kn = self.curve_cache[4].get(k).copied().unwrap_or(1.0);
             self.bp_knee[k] = (kn * 6.0).clamp(0.0, 24.0);
 
             // Makeup: curve gain as dB (1.0 → 0 dB, >1 → positive makeup)
-            let mk = makeup_curve.get(k).copied().unwrap_or(1.0);
+            let mk = self.curve_cache[5].get(k).copied().unwrap_or(1.0);
             self.bp_makeup[k] = if mk > 1e-6 { 20.0 * mk.log10() } else { -96.0 };
 
             // Mix: curve gain 1.0 → full wet; scaled so 1.0 is 100%
-            let mx = mix_curve.get(k).copied().unwrap_or(1.0);
+            let mx = self.curve_cache[6].get(k).copied().unwrap_or(1.0);
             self.bp_mix[k] = (mx * global_mix).clamp(0.0, 1.0);
         }
 

@@ -53,9 +53,10 @@ impl SharedState {
         let mut curve_tx = Vec::with_capacity(NUM_CURVES);
         let mut curve_rx = Vec::with_capacity(NUM_CURVES);
 
-        // Default values per curve: threshold=-20dB, ratio=4, attack=10ms,
-        // release=80ms, knee=6dB, makeup=0dB, mix=1.0
-        let defaults: [f32; NUM_CURVES] = [-20.0, 4.0, 10.0, 80.0, 6.0, 0.0, 1.0];
+        // Default: 1.0 (neutral linear gain) for all curves.
+        // Pipeline maps 1.0 → its neutral physical value per curve type
+        // (threshold=-20dBFS, ratio=1:1, attack×1, release×1, knee=6dB, makeup=0dB, mix=100%).
+        let defaults: [f32; NUM_CURVES] = [1.0; NUM_CURVES];
         for i in 0..NUM_CURVES {
             let init = vec![defaults[i]; num_bins];
             let (tx, rx) = TripleBuffer::new(&init).split();
