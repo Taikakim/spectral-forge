@@ -1,6 +1,9 @@
 # Rust build output
 /target/
 
+# Git worktrees
+/.worktrees/
+
 # Python tooling (research/prototyping scripts, not part of plugin)
 __pycache__/
 *.py[oc]
