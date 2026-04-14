@@ -371,7 +371,7 @@ pub fn create_editor(
                                     ui.horizontal(|ui| {
                                         knob!(ui, &params.attack_ms,         "Atk");
                                         knob!(ui, &params.release_ms,        "Rel");
-                                        knob!(ui, &params.freq_scale,        "Freq");
+                                        knob!(ui, &params.freq_scale,        "env f.scaling");
                                         knob!(ui, &params.sensitivity,       "Sens");
                                         knob!(ui, &params.suppression_width, "Width");
                                     });

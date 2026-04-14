@@ -171,7 +171,8 @@ impl Default for SpectralForgeParams {
             freq_scale: FloatParam::new(
                 "Freq Scale", 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
-            ).with_smoother(SmoothingStyle::Linear(50.0)),
+            ).with_smoother(SmoothingStyle::Linear(50.0))
+             .with_step_size(0.01),
 
             sc_gain: FloatParam::new(
                 "SC Gain", 0.0,
@@ -214,7 +215,8 @@ impl Default for SpectralForgeParams {
             sensitivity: FloatParam::new(
                 "Sensitivity", 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
-            ).with_smoother(SmoothingStyle::Linear(50.0)),
+            ).with_smoother(SmoothingStyle::Linear(50.0))
+             .with_step_size(0.01),
 
             suppression_width: FloatParam::new(
                 "Suppression Width", 0.2,
@@ -230,7 +232,8 @@ impl Default for SpectralForgeParams {
             phase_rand_amount: FloatParam::new(
                 "Phase Rand Amount", 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
-            ).with_smoother(SmoothingStyle::Linear(50.0)),
+            ).with_smoother(SmoothingStyle::Linear(50.0))
+             .with_step_size(0.01),
 
             spectral_contrast_db: FloatParam::new(
                 "Spectral Contrast", 6.0,
