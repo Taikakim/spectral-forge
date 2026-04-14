@@ -543,8 +543,10 @@ pub fn curve_widget(
         };
         let sy = physical_to_y(physical, curve_idx, db_min, db_max, rect);
 
-        // Visual position scaled to the current SR's Nyquist range
-        let sx_actual = x_to_screen(nodes[i].x, rect, max_hz);
+        // Visual position scaled to the current SR's Nyquist range.
+        // Low shelf (i=0) is nudged 20 px right so it stays visible near the left edge.
+        let shelf_nudge = if i == 0 { 20.0 } else { 0.0 };
+        let sx_actual = x_to_screen(nodes[i].x, rect, max_hz) + shelf_nudge;
         let sx_draw   = sx_actual - th::NODE_RADIUS * 0.5;
         let node_pos  = Pos2::new(sx_actual, sy);
         let draw_pos  = Pos2::new(sx_draw,  sy);
