@@ -350,6 +350,10 @@ pub fn create_editor(
                                     ui.add(ParamSlider::for_param(&params.sensitivity, setter).with_width(40.0));
                                     ui.label(egui::RichText::new("Sens").color(th::LABEL_DIM).size(9.0));
                                 });
+                                ui.vertical(|ui| {
+                                    ui.add(ParamSlider::for_param(&params.suppression_width, setter).with_width(40.0));
+                                    ui.label(egui::RichText::new("Width").color(th::LABEL_DIM).size(9.0));
+                                });
                             });
                         });
                         // Paint "Dynamics" label over the top-left border

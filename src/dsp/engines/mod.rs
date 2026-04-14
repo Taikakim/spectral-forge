@@ -16,6 +16,9 @@ pub struct BinParams<'a> {
     ///       compressed. Values between blend continuously between the two behaviours.
     pub sensitivity:  f32,
     pub auto_makeup:  bool,       // if true, add long-term average GR compensation per bin
+    /// Log-frequency smoothing width in semitones (half-width each side).
+    /// 0.0 = no spatial blur; engine blurs gr_db across adjacent bins on a log scale.
+    pub smoothing_semitones: f32,
 }
 
 pub trait SpectralEngine: Send {

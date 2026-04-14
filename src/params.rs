@@ -86,6 +86,11 @@ pub struct SpectralForgeParams {
     #[id = "sensitivity"]
     pub sensitivity: FloatParam,
 
+    /// Half-width of the gain-reduction blur kernel in semitones (log-frequency).
+    /// 0 = no spatial smoothing; higher = wider suppression band.
+    #[id = "suppression_width"]
+    pub suppression_width: FloatParam,
+
     #[id = "auto_makeup"]
     pub auto_makeup: BoolParam,
 
@@ -170,6 +175,12 @@ impl Default for SpectralForgeParams {
                 "Sensitivity", 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             ).with_smoother(SmoothingStyle::Linear(50.0)),
+
+            suppression_width: FloatParam::new(
+                "Suppression Width", 4.0,
+                FloatRange::Linear { min: 0.0, max: 24.0 },
+            ).with_smoother(SmoothingStyle::Linear(50.0))
+             .with_unit(" st"),
 
             auto_makeup: BoolParam::new("Auto Makeup", false),
             delta_monitor: BoolParam::new("Delta Monitor", false),

@@ -13,6 +13,8 @@ pub struct SpectralCompressorEngine {
     spectral_envelope: Vec<f32>,
     /// Long-term average gain reduction per bin for auto-makeup (~1000ms smoothing).
     auto_makeup_db: Vec<f32>,
+    /// Prefix-sum scratch buffer for log-frequency GR smoothing (length num_bins + 1).
+    prefix_buf: Vec<f32>,
     num_bins:    usize,
     sample_rate: f32,
     fft_size:    usize,
@@ -66,6 +68,7 @@ impl SpectralEngine for SpectralCompressorEngine {
         self.smooth_buf       = vec![0.0f32; self.num_bins];
         self.spectral_envelope = vec![0.0f32; self.num_bins];
         self.auto_makeup_db   = vec![0.0f32; self.num_bins];
+        self.prefix_buf       = vec![0.0f32; self.num_bins + 1];
     }
 
     fn process_bins(
@@ -150,13 +153,28 @@ impl SpectralEngine for SpectralCompressorEngine {
             self.gr_db[k] = Self::gain_computer(self.env_db[k], effective_threshold, ratio, knee_db);
         }
 
-        // Pass 2 — 3-tap weighted average to smooth gain reduction across adjacent bins
-        for k in 0..n {
-            let w0   = 0.5_f32;
-            let w1   = 0.25_f32;
-            let prev = if k > 0     { self.gr_db[k - 1] } else { self.gr_db[k] };
-            let next = if k + 1 < n { self.gr_db[k + 1] } else { self.gr_db[k] };
-            self.smooth_buf[k] = w0 * self.gr_db[k] + w1 * prev + w1 * next;
+        // Pass 2 — log-frequency gain-reduction smoothing.
+        // `smoothing_semitones` is the half-width (each side) in semitones; the kernel
+        // covers [k / 2^(w/12), k * 2^(w/12)] in bin-index space, which is a constant
+        // musical interval regardless of frequency.  Uses a prefix sum for O(n) cost.
+        if params.smoothing_semitones < 0.01 {
+            // No smoothing — copy gr_db verbatim
+            self.smooth_buf.copy_from_slice(&self.gr_db);
+        } else {
+            // width_ratio: bin range multiplier for the chosen semitone width.
+            // e.g. 12 st → ratio = 2^(12/12) = 2  (one octave each side)
+            let width_ratio = 2.0f32.powf(params.smoothing_semitones / 12.0);
+            // Build prefix sum of gr_db so range queries are O(1)
+            self.prefix_buf[0] = 0.0;
+            for k in 0..n {
+                self.prefix_buf[k + 1] = self.prefix_buf[k] + self.gr_db[k];
+            }
+            for k in 0..n {
+                let k_lo = ((k as f32 / width_ratio).floor() as usize).min(k);
+                let k_hi = ((k as f32 * width_ratio).ceil() as usize).min(n - 1).max(k);
+                let range = (k_hi - k_lo + 1) as f32;
+                self.smooth_buf[k] = (self.prefix_buf[k_hi + 1] - self.prefix_buf[k_lo]) / range;
+            }
         }
 
         // Update auto-makeup long-term average (~1000ms smoothing at hop rate).
