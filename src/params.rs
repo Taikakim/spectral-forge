@@ -36,6 +36,9 @@ pub struct SpectralForgeParams {
     #[persist = "active_curve"]
     pub active_curve: Arc<Mutex<u8>>,
 
+    #[persist = "active_tab"]
+    pub active_tab: Arc<Mutex<u8>>,   // 0 = Dynamics, 1 = Effects, 2 = Harmonic
+
     // GUI display state — not audio parameters, not sent to audio thread
     #[persist = "graph_db_min"]
     pub graph_db_min: Arc<Mutex<f32>>,      // dBFS floor of spectrum display, default -100
@@ -98,6 +101,7 @@ impl Default for SpectralForgeParams {
                 std::array::from_fn(|i| crate::editor::curve::default_nodes_for_curve(i))
             )),
             active_curve: Arc::new(Mutex::new(0)),
+            active_tab: Arc::new(Mutex::new(0)),
             graph_db_min:    Arc::new(Mutex::new(-100.0)),
             graph_db_max:    Arc::new(Mutex::new(0.0)),
             peak_falloff_ms: Arc::new(Mutex::new(300.0)),
