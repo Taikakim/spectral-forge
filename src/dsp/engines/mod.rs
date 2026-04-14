@@ -2,15 +2,20 @@ use num_complex::Complex;
 
 /// Per-bin parameter values, physical units, pre-computed by pipeline.
 pub struct BinParams<'a> {
-    pub threshold_db:  &'a [f32],  // dBFS per bin, e.g. -20.0
-    pub ratio:         &'a [f32],  // ratio per bin, e.g. 4.0 = 4:1
-    pub attack_ms:     &'a [f32],  // ms per bin, freq-scaled by pipeline
-    pub release_ms:    &'a [f32],  // ms per bin, freq-scaled by pipeline
-    pub knee_db:       &'a [f32],  // soft knee width in dB per bin
-    pub makeup_db:     &'a [f32],  // makeup gain dB per bin
-    pub mix:           &'a [f32],  // dry/wet per bin [0.0, 1.0]
-    pub relative_mode: bool,       // true = detect relative to local spectral envelope
-    pub auto_makeup:   bool,       // if true, add long-term average GR compensation per bin
+    pub threshold_db: &'a [f32],  // dBFS per bin, e.g. -20.0
+    pub ratio:        &'a [f32],  // ratio per bin, e.g. 4.0 = 4:1
+    pub attack_ms:    &'a [f32],  // ms per bin, freq-scaled by pipeline
+    pub release_ms:   &'a [f32],  // ms per bin, freq-scaled by pipeline
+    pub knee_db:      &'a [f32],  // soft knee width in dB per bin
+    pub makeup_db:    &'a [f32],  // makeup gain dB per bin
+    pub mix:          &'a [f32],  // dry/wet per bin [0.0, 1.0]
+    /// Spectral selectivity [0.0, 1.0].
+    /// 0.0 = absolute compressor: any bin above threshold_db is compressed.
+    /// 1.0 = fully selective: the effective threshold is raised to the local spectral
+    ///       envelope level, so only bins that stick out above their neighbours are
+    ///       compressed. Values between blend continuously between the two behaviours.
+    pub sensitivity:  f32,
+    pub auto_makeup:  bool,       // if true, add long-term average GR compensation per bin
 }
 
 pub trait SpectralEngine: Send {

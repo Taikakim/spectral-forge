@@ -2,66 +2,87 @@
 
 use nih_plug_egui::egui::Color32;
 
-// Backgrounds
-pub const BG:         Color32 = Color32::from_rgb(0x12, 0x12, 0x14);
-pub const GRID:       Color32 = Color32::from_rgb(0x1a, 0x2a, 0x28);
+// ─── LCH colour conversion ────────────────────────────────────────────────────
 
-// Structural lines
-pub const BORDER:     Color32 = Color32::from_rgb(0x00, 0xcc, 0xbb);
-pub const DIVIDER:    Color32 = Color32::from_rgb(0x00, 0x88, 0x80);
-
-// Curve
-pub const CURVE:      Color32 = Color32::from_rgb(0x00, 0xff, 0xdd);
-pub const NODE_FILL:  Color32 = Color32::from_rgb(0x00, 0xcc, 0xbb);
-pub const NODE_HOVER: Color32 = Color32::from_rgb(0x44, 0xff, 0xee);
-
-// Text
-pub const LABEL:      Color32 = Color32::from_rgb(0x88, 0xdd, 0xcc);
-pub const LABEL_DIM:  Color32 = Color32::from_rgb(0x44, 0x88, 0x80);
-
-// Buttons
-pub const BTN_ACTIVE:   Color32 = Color32::from_rgb(0x00, 0xcc, 0xbb);
-pub const BTN_INACTIVE: Color32 = Color32::from_rgb(0x22, 0x33, 0x30);
-pub const BTN_TEXT_ON:  Color32 = Color32::from_rgb(0x00, 0x10, 0x0e);
-pub const BTN_TEXT_OFF: Color32 = Color32::from_rgb(0x88, 0xdd, 0xcc);
-
-// Stroke widths
-pub const STROKE_THIN:   f32 = 1.0;
-pub const STROKE_BORDER: f32 = 1.5;
-pub const STROKE_CURVE:  f32 = 1.5;
-pub const NODE_RADIUS:   f32 = 5.0;
-
-/// Spectrum / suppression bar colour. Input: normalised magnitude [0.0, 1.0].
-/// Gradient: dark blue → blue → green → yellow → red.
-pub fn magnitude_color(norm: f32) -> Color32 {
-    let n = norm.clamp(0.0, 1.0);
-    if n < 0.25 {
-        let t = n / 0.25;
-        Color32::from_rgb(
-            0,
-            (20.0 * t) as u8,
-            (80.0 + 120.0 * t) as u8,
-        )
-    } else if n < 0.5 {
-        let t = (n - 0.25) / 0.25;
-        Color32::from_rgb(
-            0,
-            (20.0 + 180.0 * t) as u8,
-            (200.0 - 150.0 * t) as u8,
-        )
-    } else if n < 0.75 {
-        let t = (n - 0.5) / 0.25;
-        Color32::from_rgb(
-            (200.0 * t) as u8,
-            200,
-            (50.0 - 50.0 * t) as u8,
-        )
-    } else {
-        let t = (n - 0.75) / 0.25;
-        Color32::from_rgb(
-            (200.0 + 55.0 * t) as u8,
-            (200.0 - 200.0 * t) as u8,
-            0,
-        )
-    }
+/// Convert CIE LCH (D65) to egui Color32, clamping out-of-gamut values.
+/// L: 0–100, C: 0–150, H: 0–360 degrees.
+fn lch_to_srgb(l: f32, c: f32, h_deg: f32) -> Color32 {
+    let h = h_deg.to_radians();
+    let a = c * h.cos();
+    let b_lab = c * h.sin();
+    let fy = (l + 16.0) / 116.0;
+    let fx = a / 500.0 + fy;
+    let fz = fy - b_lab / 200.0;
+    let x = 0.95047 * lab_f_inv(fx);
+    let y = 1.00000 * lab_f_inv(fy);
+    let z = 1.08883 * lab_f_inv(fz);
+    let r_lin =  3.2406 * x - 1.5372 * y - 0.4986 * z;
+    let g_lin = -0.9689 * x + 1.8758 * y + 0.0415 * z;
+    let b_lin =  0.0557 * x - 0.2040 * y + 1.0570 * z;
+    Color32::from_rgb(linear_to_u8(r_lin), linear_to_u8(g_lin), linear_to_u8(b_lin))
 }
+
+#[inline] fn lab_f_inv(t: f32) -> f32 {
+    const D: f32 = 6.0 / 29.0;
+    if t > D { t * t * t } else { 3.0 * D * D * (t - 4.0 / 29.0) }
+}
+
+#[inline] fn linear_to_u8(v: f32) -> u8 {
+    let e = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+    (e.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+// ─── Per-curve colours ────────────────────────────────────────────────────────
+// 7 curves, H equidistant: 0°, 51.4°, 102.9°, 154.3°, 205.7°, 257.1°, 308.6°
+
+fn build_curve_colors() -> ([Color32; 7], [Color32; 7], [Color32; 7]) {
+    let mut lit  = [Color32::WHITE; 7]; // L=75 C=50 — active
+    let mut dim  = [Color32::WHITE; 7]; // L=30 C=50 — inactive
+    let mut text = [Color32::WHITE; 7]; // L=15 C=30 — button text when active
+    for i in 0..7 {
+        let h = (i as f32) * (360.0 / 7.0);
+        lit[i]  = lch_to_srgb(75.0, 50.0, h);
+        dim[i]  = lch_to_srgb(30.0, 50.0, h);
+        text[i] = lch_to_srgb(15.0, 30.0, h);
+    }
+    (lit, dim, text)
+}
+
+static CURVE_COLORS: std::sync::OnceLock<([Color32; 7], [Color32; 7], [Color32; 7])> =
+    std::sync::OnceLock::new();
+
+fn colors() -> &'static ([Color32; 7], [Color32; 7], [Color32; 7]) {
+    CURVE_COLORS.get_or_init(build_curve_colors)
+}
+
+/// Lit (L=75) per-curve colour for curve index i.
+pub fn curve_color_lit(i: usize) -> Color32  { colors().0[i.min(6)] }
+/// Dim (L=30) per-curve colour for curve index i.
+pub fn curve_color_dim(i: usize) -> Color32  { colors().1[i.min(6)] }
+/// Dark text colour (L=15) to use on a lit curve-coloured button background.
+pub fn curve_color_text_on(i: usize) -> Color32 { colors().2[i.min(6)] }
+
+// ─── Fixed semantic colours ───────────────────────────────────────────────────
+
+/// Pre-FX spectrum peak line (#7ad6d8 — turquoise).
+pub const SPECTRUM_LINE: Color32 = Color32::from_rgb(0x7a, 0xd6, 0xd8);
+/// Post-FX output line (#f8b6a4 — coral/salmon).
+pub const POSTFX_LINE:   Color32 = Color32::from_rgb(0xf8, 0xb6, 0xa4);
+/// Sidechain suppression gradient top (#b8ce95 — sage green).
+pub const SC_LINE_A:     Color32 = Color32::from_rgb(0xb8, 0xce, 0x95);
+/// Sidechain suppression gradient bottom (#eeb5e1 — lavender pink).
+pub const SC_LINE_B:     Color32 = Color32::from_rgb(0xee, 0xb5, 0xe1);
+
+pub const BG:            Color32 = Color32::from_rgb(0x12, 0x12, 0x14);
+pub const GRID_LINE:     Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
+pub const GRID_TEXT:     Color32 = Color32::from_rgb(0x45, 0x45, 0x45);
+pub const TRUE_TIME_LINE:Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
+pub const BORDER:        Color32 = Color32::from_rgb(0x00, 0x88, 0x80);
+pub const LABEL_DIM:     Color32 = Color32::from_rgb(0x44, 0x88, 0x80);
+
+// ─── Stroke widths & geometry ─────────────────────────────────────────────────
+
+pub const STROKE_THIN:   f32 = 1.0;
+pub const STROKE_BORDER: f32 = 1.0;
+pub const STROKE_CURVE:  f32 = 1.0;
+pub const NODE_RADIUS:   f32 = 5.0;

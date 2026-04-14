@@ -36,6 +36,14 @@ pub struct SpectralForgeParams {
     #[persist = "active_curve"]
     pub active_curve: Arc<Mutex<u8>>,
 
+    // GUI display state — not audio parameters, not sent to audio thread
+    #[persist = "graph_db_min"]
+    pub graph_db_min: Arc<Mutex<f32>>,      // dBFS floor of spectrum display, default -100
+    #[persist = "graph_db_max"]
+    pub graph_db_max: Arc<Mutex<f32>>,      // dBFS ceiling of spectrum display, default 0
+    #[persist = "peak_falloff_ms"]
+    pub peak_falloff_ms: Arc<Mutex<f32>>,   // spectrum peak hold decay time 0–5000 ms
+
     #[id = "input_gain"]
     pub input_gain: FloatParam,
 
@@ -72,6 +80,9 @@ pub struct SpectralForgeParams {
     #[id = "threshold_mode"]
     pub threshold_mode: EnumParam<ThresholdMode>,
 
+    #[id = "sensitivity"]
+    pub sensitivity: FloatParam,
+
     #[id = "auto_makeup"]
     pub auto_makeup: BoolParam,
 
@@ -84,37 +95,40 @@ impl Default for SpectralForgeParams {
         Self {
             editor_state: EguiState::from_size(900, 600),
             curve_nodes: Arc::new(Mutex::new(
-                [crate::editor::curve::default_nodes(); NUM_CURVE_SETS]
+                std::array::from_fn(|i| crate::editor::curve::default_nodes_for_curve(i))
             )),
             active_curve: Arc::new(Mutex::new(0)),
+            graph_db_min:    Arc::new(Mutex::new(-100.0)),
+            graph_db_max:    Arc::new(Mutex::new(0.0)),
+            peak_falloff_ms: Arc::new(Mutex::new(300.0)),
 
             input_gain: FloatParam::new(
                 "Input Gain", 0.0,
                 FloatRange::Linear { min: -18.0, max: 18.0 },
-            ).with_smoother(SmoothingStyle::Linear(20.0))
+            ).with_smoother(SmoothingStyle::Linear(50.0))
              .with_unit(" dB"),
 
             output_gain: FloatParam::new(
                 "Output Gain", 0.0,
                 FloatRange::Linear { min: -18.0, max: 18.0 },
-            ).with_smoother(SmoothingStyle::Linear(20.0))
+            ).with_smoother(SmoothingStyle::Linear(50.0))
              .with_unit(" dB"),
 
             mix: FloatParam::new(
                 "Mix", 1.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
-            ).with_smoother(SmoothingStyle::Linear(10.0)),
+            ).with_smoother(SmoothingStyle::Linear(50.0)),
 
             attack_ms: FloatParam::new(
                 "Attack", 10.0,
                 FloatRange::Skewed { min: 0.5, max: 200.0, factor: FloatRange::skew_factor(-2.0) },
-            ).with_smoother(SmoothingStyle::Logarithmic(20.0))
+            ).with_smoother(SmoothingStyle::Logarithmic(50.0))
              .with_unit(" ms"),
 
             release_ms: FloatParam::new(
                 "Release", 80.0,
                 FloatRange::Skewed { min: 1.0, max: 500.0, factor: FloatRange::skew_factor(-2.0) },
-            ).with_smoother(SmoothingStyle::Logarithmic(20.0))
+            ).with_smoother(SmoothingStyle::Logarithmic(50.0))
              .with_unit(" ms"),
 
             freq_scale: FloatParam::new(
@@ -125,19 +139,19 @@ impl Default for SpectralForgeParams {
             sc_gain: FloatParam::new(
                 "SC Gain", 0.0,
                 FloatRange::Linear { min: -18.0, max: 18.0 },
-            ).with_smoother(SmoothingStyle::Linear(20.0))
+            ).with_smoother(SmoothingStyle::Linear(50.0))
              .with_unit(" dB"),
 
             sc_attack_ms: FloatParam::new(
                 "SC Attack", 5.0,
                 FloatRange::Skewed { min: 0.5, max: 100.0, factor: FloatRange::skew_factor(-2.0) },
-            ).with_smoother(SmoothingStyle::Logarithmic(20.0))
+            ).with_smoother(SmoothingStyle::Logarithmic(50.0))
              .with_unit(" ms"),
 
             sc_release_ms: FloatParam::new(
                 "SC Release", 50.0,
                 FloatRange::Skewed { min: 1.0, max: 300.0, factor: FloatRange::skew_factor(-2.0) },
-            ).with_smoother(SmoothingStyle::Logarithmic(20.0))
+            ).with_smoother(SmoothingStyle::Logarithmic(50.0))
              .with_unit(" ms"),
 
             lookahead_ms: FloatParam::new(
@@ -147,6 +161,12 @@ impl Default for SpectralForgeParams {
 
             stereo_link: EnumParam::new("Stereo Link", StereoLink::Linked),
             threshold_mode: EnumParam::new("Threshold Mode", ThresholdMode::Absolute),
+
+            sensitivity: FloatParam::new(
+                "Sensitivity", 0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ).with_smoother(SmoothingStyle::Linear(50.0)),
+
             auto_makeup: BoolParam::new("Auto Makeup", false),
             delta_monitor: BoolParam::new("Delta Monitor", false),
         }

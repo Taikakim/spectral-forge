@@ -21,7 +21,7 @@ fn run_engine(engine: &mut Box<dyn SpectralEngine>, bins: &mut Vec<Complex<f32>>
     let params = BinParams {
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
-        relative_mode: false,
+        sensitivity: 0.0,
         auto_makeup: false,
     };
     // NaN sentinel: if engine forgets to write suppression_out, the assertion
@@ -64,7 +64,7 @@ fn suppression_out_filled() {
     let params = BinParams {
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
-        relative_mode: false,
+        sensitivity: 0.0,
         auto_makeup: false,
     };
     engine.process_bins(&mut bins, None, &params, 44100.0, &mut suppression);
@@ -86,7 +86,7 @@ fn sidechain_some_does_not_panic() {
     let params = BinParams {
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
-        relative_mode: false,
+        sensitivity: 0.0,
         auto_makeup: false,
     };
     engine.process_bins(&mut bins, Some(&sidechain_mag), &params, 44100.0, &mut suppression);
@@ -100,7 +100,9 @@ fn loud_signal_gets_compressed() {
     let mut engine = create_engine(EngineSelection::SpectralCompressor);
     engine.reset(44100.0, 2048);
     let n = 1025;
-    let input_mag = 0.5f32;  // -6 dBFS
+    // Raw FFT magnitude: for FFT_SIZE=2048, a 0 dBFS sine → magnitude ≈ FFT_SIZE/4 = 512.
+    // Using 256.0 ≈ −6 dBFS in FFT-normalised space (well above the −20 dBFS threshold).
+    let input_mag = 256.0f32;
 
     let threshold = vec![-20.0f32; n];  // -20 dBFS — signal is above threshold
     let ratio     = vec![4.0f32; n];
@@ -114,7 +116,7 @@ fn loud_signal_gets_compressed() {
         threshold_db: &threshold, ratio: &ratio,
         attack_ms: &attack, release_ms: &release,
         knee_db: &knee, makeup_db: &makeup, mix: &mix,
-        relative_mode: false,
+        sensitivity: 0.0,
         auto_makeup: false,
     };
     let mut suppression = vec![0.0f32; n];

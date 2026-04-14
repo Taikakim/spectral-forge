@@ -109,13 +109,17 @@ impl Pipeline {
         shared: &mut SharedState,
         params: &crate::params::SpectralForgeParams,
     ) {
-        // Read smoothed global parameter values (call next() once per block, not per sample)
-        let attack_ms_base  = params.attack_ms.smoothed.next();
-        let release_ms_base = params.release_ms.smoothed.next();
-        let freq_scale      = params.freq_scale.smoothed.next();
-        let input_gain_db   = params.input_gain.smoothed.next();
-        let output_gain_db  = params.output_gain.smoothed.next();
-        let global_mix      = params.mix.smoothed.next();
+        // Advance each smoother by block_size samples so it converges in wall-clock time
+        // matching its configured ms value, regardless of block size.
+        // Without this, calling next() once per block only steps 1/block_size of the way
+        // through a smoother configured for N samples, making changes N× too slow.
+        let block_size = buffer.samples() as u32;
+        let attack_ms_base  = params.attack_ms.smoothed.next_step(block_size);
+        let release_ms_base = params.release_ms.smoothed.next_step(block_size);
+        let freq_scale      = params.freq_scale.smoothed.next_step(block_size);
+        let input_gain_db   = params.input_gain.smoothed.next_step(block_size);
+        let output_gain_db  = params.output_gain.smoothed.next_step(block_size);
+        let global_mix      = params.mix.smoothed.next_step(block_size);
 
         // Read all 7 curve channels into pre-allocated cache buffers (no allocation).
         // Each read() borrow ends before the next copy_from_slice begins.
@@ -131,10 +135,10 @@ impl Pipeline {
         let sc_active = !aux.inputs.is_empty();
         shared.sidechain_active.store(sc_active, std::sync::atomic::Ordering::Relaxed);
 
-        let sc_gain_db    = params.sc_gain.smoothed.next();
+        let sc_gain_db    = params.sc_gain.smoothed.next_step(block_size);
         let sc_gain_lin   = 10.0f32.powf(sc_gain_db / 20.0);
-        let sc_attack_ms  = params.sc_attack_ms.smoothed.next();
-        let sc_release_ms = params.sc_release_ms.smoothed.next();
+        let sc_attack_ms  = params.sc_attack_ms.smoothed.next_step(block_size);
+        let sc_release_ms = params.sc_release_ms.smoothed.next_step(block_size);
 
         if sc_active {
             for v in self.sc_envelope.iter_mut() { *v = 0.0; }
@@ -179,13 +183,14 @@ impl Pipeline {
         // Map curve cache values to physical units, bin by bin.
         // Rust 2021 split field borrows: curve_cache (read) and bp_* (write) are disjoint fields.
         for k in 0..num_bins {
-            // Threshold: curve gain 1.0 → -20 dBFS base; range mapped to -60…0 dBFS.
-            // flat curve (gain=1.0) → threshold = -20 dBFS
-            // curve gain 0.0 → -60 dBFS (very low threshold = lots of compression)
-            // curve gain 2.0 → 0 dBFS (threshold above max = no compression)
-            // Linear interp: threshold_db = -20.0 + (gain - 1.0) * 20.0
+            // Threshold: curve gain 1.0 (neutral node) → -20 dBFS.
+            // Log-based mapping amplifies the ±18 dB node range to ±60 dBFS:
+            //   y = -1 → gain ≈ 0.126 (−18 dB) → threshold = −80 dBFS
+            //   y =  0 → gain = 1.0  (  0 dB) → threshold = −20 dBFS
+            //   y = +1 → gain ≈ 7.94 (+18 dB) → threshold →  0 dBFS (clamped)
             let t = self.curve_cache[0].get(k).copied().unwrap_or(1.0);
-            self.bp_threshold[k] = (-20.0 + (t - 1.0) * 20.0).clamp(-60.0, 0.0);
+            let t_db = if t > 1e-10 { 20.0 * t.log10() } else { -120.0 };
+            self.bp_threshold[k] = (-20.0 + t_db * (60.0 / 18.0)).clamp(-80.0, 0.0);
 
             // Ratio: curve gain 1.0 → ratio 1:1; gain 8.0 → ratio 8:1 (max)
             let r = self.curve_cache[1].get(k).copied().unwrap_or(1.0);
@@ -201,7 +206,7 @@ impl Pipeline {
 
             // Knee: curve gain 1.0 → 6 dB knee; range 0…24 dB
             let kn = self.curve_cache[4].get(k).copied().unwrap_or(1.0);
-            self.bp_knee[k] = (kn * 6.0).clamp(0.0, 24.0);
+            self.bp_knee[k] = (kn * 6.0).clamp(0.0, 48.0);
 
             // Makeup: curve gain as dB (1.0 → 0 dB, >1 → positive makeup)
             let mk = self.curve_cache[5].get(k).copied().unwrap_or(1.0);
@@ -288,7 +293,13 @@ impl Pipeline {
         let bp_knee      = &self.bp_knee;
         let bp_makeup    = &self.bp_makeup;
         let bp_mix       = &self.bp_mix;
-        let relative_mode = params.threshold_mode.value() == crate::params::ThresholdMode::Relative;
+        // ThresholdMode::Relative legacy flag maps to sensitivity=1.0 if set;
+        // otherwise use the continuous sensitivity parameter.
+        let sensitivity = if params.threshold_mode.value() == crate::params::ThresholdMode::Relative {
+            1.0f32
+        } else {
+            params.sensitivity.smoothed.next_step(block_size)
+        };
         let sample_rate  = self.sample_rate;
         // IFFT gives FFT_SIZE gain; Hann^2 OLA at 75% overlap gives 1.5 gain.
         // Combined normalization: 1 / (FFT_SIZE * 1.5) = 2 / (3 * FFT_SIZE)
@@ -311,14 +322,14 @@ impl Pipeline {
             }
 
             let params = BinParams {
-                threshold_db:  bp_threshold,
-                ratio:         bp_ratio,
-                attack_ms:     bp_attack,
-                release_ms:    bp_release,
-                knee_db:       bp_knee,
-                makeup_db:     bp_makeup,
-                mix:           bp_mix,
-                relative_mode,
+                threshold_db: bp_threshold,
+                ratio:        bp_ratio,
+                attack_ms:    bp_attack,
+                release_ms:   bp_release,
+                knee_db:      bp_knee,
+                makeup_db:    bp_makeup,
+                mix:          bp_mix,
+                sensitivity,
                 auto_makeup,
             };
 

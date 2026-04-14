@@ -19,6 +19,9 @@ pub struct SpectralForge {
     gui_num_bins:       usize,
     gui_spectrum_rx:    Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     gui_suppression_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
+    /// Liveness token: the editor holds a Weak clone of this. When the plugin
+    /// is destroyed (this Arc drops), the editor detects it and closes itself.
+    plugin_alive: Arc<()>,
     // Stored for reset()
     num_channels: usize,
     sample_rate:  f32,
@@ -45,6 +48,7 @@ impl Default for SpectralForge {
             gui_num_bins,
             gui_spectrum_rx,
             gui_suppression_rx,
+            plugin_alive: Arc::new(()),
             num_channels: 2,
             sample_rate:  dummy_sr,
         }
@@ -85,6 +89,7 @@ impl Plugin for SpectralForge {
             self.gui_num_bins,
             self.gui_spectrum_rx.clone(),
             self.gui_suppression_rx.clone(),
+            Arc::downgrade(&self.plugin_alive),
         )
     }
 

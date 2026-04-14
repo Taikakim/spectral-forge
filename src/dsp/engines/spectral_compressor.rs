@@ -82,49 +82,59 @@ impl SpectralEngine for SpectralCompressorEngine {
         let hop = self.hop_size;
         let n   = bins.len(); // caller guarantees == num_bins (asserted above)
 
-        // Pre-pass — update spectral envelope for relative threshold mode.
-        // The envelope is always derived from the main input bins (not the sidechain).
-        // When sidechain detection is active, `level_linear` is the sidechain magnitude
-        // normalised against the main signal's spectral shape — compression responds to
-        // sidechain peaks relative to the main signal's own spectral contour.
-        // TODO: expose the 50 ms smoothing time as a SpectralEnvelopeTime param.
-        if params.relative_mode {
-            let env_coeff = Self::ms_to_coeff(50.0, sample_rate, hop);
-            for k in 0..n {
-                let mag = bins[k].norm();
-                let lo  = if k > 0     { bins[k - 1].norm() } else { mag };
-                let hi  = if k + 1 < n { bins[k + 1].norm() } else { mag };
-                let med = {
-                    let mut arr = [lo, mag, hi];
-                    arr.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                    arr[1]
-                };
-                self.spectral_envelope[k] =
-                    env_coeff * self.spectral_envelope[k] + (1.0 - env_coeff) * med;
-            }
+        // Pre-pass — update spectral envelope from main-signal bins.
+        // Always computed; sensitivity blends how much it shifts the effective threshold.
+        // Uses a 3-tap median of each bin and its immediate neighbours to track the
+        // local spectral "floor" — bins that stick out above this floor look like tones
+        // or resonances; bins at or below it look like broadband content.
+        let env_coeff = Self::ms_to_coeff(50.0, sample_rate, hop);
+        for k in 0..n {
+            let mag = bins[k].norm();
+            let lo  = if k > 0     { bins[k - 1].norm() } else { mag };
+            let hi  = if k + 1 < n { bins[k + 1].norm() } else { mag };
+            let med = {
+                let mut arr = [lo, mag, hi];
+                arr.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                arr[1]
+            };
+            self.spectral_envelope[k] =
+                env_coeff * self.spectral_envelope[k] + (1.0 - env_coeff) * med;
         }
+
+        // FFT magnitude calibration offset: raw FFT norm for a 0 dBFS sine ≈ fft_size/4,
+        // so subtracting this converts raw dB to dBFS.
+        let norm_offset = 20.0 * (self.fft_size as f32 / 4.0).log10();
+        let sensitivity  = params.sensitivity.clamp(0.0, 1.0);
 
         // Pass 1 — envelope follower + gain computer → raw gr per bin
         for k in 0..n {
-            // 1. Detect level — use sidechain magnitude if provided, else self-keyed
+            // 1. Detect level in calibrated dBFS (same scale as threshold_db).
             let level_linear = match sidechain {
                 Some(sc) => sc.get(k).copied().unwrap_or(0.0),
                 None     => bins[k].norm(),
             };
-            // In relative mode, normalise by the local spectral envelope so that
-            // only bins that stick out above their neighbours trigger compression.
-            let detection_linear = if params.relative_mode && self.spectral_envelope[k] > 1e-10 {
-                level_linear / self.spectral_envelope[k]
+            let level_db = if level_linear > 1e-10 {
+                20.0 * level_linear.log10() - norm_offset
             } else {
-                level_linear
-            };
-            let level_db = if detection_linear > 1e-10 {
-                20.0 * detection_linear.log10()
-            } else {
-                -96.0
+                -120.0
             };
 
-            // 2. Envelope follower: one-pole LP at hop rate
+            // 2. Sensitivity — raise the effective threshold toward the local spectral
+            //    envelope level so that bins blending into their neighbours are spared.
+            //    • 0.0: effective_threshold = threshold_db  (pure absolute compressor)
+            //    • 1.0: effective_threshold = max(threshold_db, envelope_db)
+            //           → only bins that stick out above the local spectral floor compress
+            //    Values in between blend continuously.
+            let env_db = if self.spectral_envelope[k] > 1e-10 {
+                20.0 * self.spectral_envelope[k].log10() - norm_offset
+            } else {
+                -120.0
+            };
+            let threshold_db = params.threshold_db[k];
+            let envelope_excess = (env_db - threshold_db).max(0.0); // only raises, never lowers
+            let effective_threshold = threshold_db + sensitivity * envelope_excess;
+
+            // 3. Envelope follower: one-pole LP at hop rate
             let attack_ms  = params.attack_ms[k].max(0.1);
             let release_ms = params.release_ms[k].max(1.0);
             let coeff = if level_db > self.env_db[k] {
@@ -134,11 +144,10 @@ impl SpectralEngine for SpectralCompressorEngine {
             };
             self.env_db[k] = coeff * self.env_db[k] + (1.0 - coeff) * level_db;
 
-            // 3. Gain computer → raw gain reduction in dB (≤ 0)
-            let threshold_db  = params.threshold_db[k];
-            let ratio         = params.ratio[k].max(1.0);
-            let knee_db       = params.knee_db[k].max(0.0);
-            self.gr_db[k]     = Self::gain_computer(self.env_db[k], threshold_db, ratio, knee_db);
+            // 4. Gain computer → raw gain reduction in dB (≤ 0)
+            let ratio   = params.ratio[k].max(1.0);
+            let knee_db = params.knee_db[k].max(0.0);
+            self.gr_db[k] = Self::gain_computer(self.env_db[k], effective_threshold, ratio, knee_db);
         }
 
         // Pass 2 — 3-tap weighted average to smooth gain reduction across adjacent bins
