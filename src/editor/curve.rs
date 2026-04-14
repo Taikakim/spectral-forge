@@ -435,9 +435,12 @@ pub fn paint_response_curve(
     let n = gains.len();
     let max_hz = (sample_rate / 2.0).max(20_001.0);
 
-    // True-time grey line for attack/release (drawn first, under the coloured line)
+    // True-time line for attack/release — dashed, dim shade of the parent curve colour,
+    // so the user can see at a glance that it belongs to the same parameter.
+    // Drawn first so the coloured curve renders on top.
     if curve_idx == 2 || curve_idx == 3 {
-        let global_ms = if curve_idx == 2 { global_attack_ms } else { global_release_ms };
+        let global_ms   = if curve_idx == 2 { global_attack_ms } else { global_release_ms };
+        let dim_color   = th::curve_color_dim(curve_idx);
         let grey_pts: Vec<Pos2> = (0..n).map(|k| {
             let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
             let x    = freq_to_x_max(f_hz, max_hz, rect);
@@ -445,7 +448,7 @@ pub fn paint_response_curve(
             let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
             Pos2::new(x, y)
         }).collect();
-        painter.add(Shape::line(grey_pts, Stroke::new(th::STROKE_CURVE, th::TRUE_TIME_LINE)));
+        paint_dashed_line(painter, &grey_pts, Stroke::new(th::STROKE_CURVE, dim_color), 4.0, 2.0);
     }
 
     // Coloured response line — dashed for attack/release, solid for all other curves
