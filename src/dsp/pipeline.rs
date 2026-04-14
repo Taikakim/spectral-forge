@@ -44,8 +44,8 @@ pub struct Pipeline {
     dry_delay: Vec<f32>,
     /// Current write head into dry_delay (wraps at DRY_DELAY_SIZE).
     dry_delay_write: usize,
-    /// Captured per-bin magnitudes for Spectral Freeze.
-    frozen_mags: Vec<f32>,
+    /// Captured full complex spectrum for Spectral Freeze (Re+Im per bin).
+    frozen_bins: Vec<Complex<f32>>,
     /// True once Freeze has captured its first frame; reset to false when mode changes.
     freeze_captured: bool,
     /// xorshift64 PRNG state for Phase Randomize. Must never be zero.
@@ -101,7 +101,7 @@ impl Pipeline {
             bp_mix:       vec![1.0;   NUM_BINS],
             dry_delay: vec![0.0f32; 2 * DRY_DELAY_SIZE],
             dry_delay_write: 0,
-            frozen_mags:       vec![0.0f32; NUM_BINS],
+            frozen_bins:       vec![Complex::new(0.0f32, 0.0f32); NUM_BINS],
             freeze_captured:   false,
             rng_state:         0xdeadbeef_cafebabe_u64,
             contrast_envelope: vec![0.0f32; NUM_BINS],
@@ -118,7 +118,7 @@ impl Pipeline {
         self.sc_env_state = vec![0.0f32; NUM_BINS];
         self.dry_delay.fill(0.0);
         self.dry_delay_write = 0;
-        self.frozen_mags.fill(0.0);
+        for b in self.frozen_bins.iter_mut() { *b = Complex::new(0.0, 0.0); }
         self.freeze_captured = false;
         // rng_state intentionally not reset — continuity across SR changes is harmless
         self.contrast_envelope.fill(0.0);
@@ -340,7 +340,7 @@ impl Pipeline {
         // Combined normalization: 1 / (FFT_SIZE * 1.5) = 2 / (3 * FFT_SIZE)
         let norm = 2.0_f32 / (3.0 * FFT_SIZE as f32);
 
-        let frozen_mags       = &mut self.frozen_mags;
+        let frozen_bins       = &mut self.frozen_bins;
         let freeze_captured   = &mut self.freeze_captured;
         let rng_state         = &mut self.rng_state;
         let contrast_envelope = &mut self.contrast_envelope;
@@ -391,23 +391,27 @@ impl Pipeline {
 
                 crate::params::EffectMode::Freeze => {
                     if !*freeze_captured {
-                        for k in 0..complex_buf.len() {
-                            frozen_mags[k] = complex_buf[k].norm();
-                        }
+                        // Capture the entire complex frame (magnitude + phase).
+                        // Copying Re+Im ensures DC and Nyquist bins stay real,
+                        // and avoids the amplitude spikes from phase-drift reconstruction.
+                        frozen_bins.copy_from_slice(complex_buf);
                         *freeze_captured = true;
                     }
-                    for k in 0..complex_buf.len() {
-                        let phase = complex_buf[k].arg();
-                        complex_buf[k] = Complex::from_polar(frozen_mags[k], phase);
-                    }
+                    // Replace current frame wholesale with the captured one.
+                    complex_buf.copy_from_slice(frozen_bins);
                 }
 
                 crate::params::EffectMode::PhaseRand => {
                     let scale = phase_rand_amount * std::f32::consts::PI;
+                    let last  = complex_buf.len() - 1;
                     for k in 0..complex_buf.len() {
+                        // Always advance PRNG to keep the sequence independent of skipping.
                         *rng_state ^= *rng_state << 13;
                         *rng_state ^= *rng_state >> 7;
                         *rng_state ^= *rng_state << 17;
+                        // DC (k=0) and Nyquist (k=last) must stay real for IFFT
+                        // correctness — skipping phase rotation preserves Im=0.
+                        if k == 0 || k == last { continue; }
                         let rand_phase = (*rng_state as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
                         let (mag, phase) = (complex_buf[k].norm(), complex_buf[k].arg());
                         complex_buf[k] = Complex::from_polar(mag, phase + rand_phase);
@@ -418,11 +422,24 @@ impl Pipeline {
                     let hop_sz = FFT_SIZE / OVERLAP;
                     let time_hops = 0.2_f32 * sample_rate / hop_sz as f32;
                     let coeff = (-1.0_f32 / time_hops).exp();
-                    let boost = 10.0f32.powf( spectral_contrast_db / 20.0);
-                    let cut   = 10.0f32.powf(-spectral_contrast_db / 20.0);
-                    for k in 0..complex_buf.len() {
+                    let n = complex_buf.len();
+
+                    // Pass 1 — update temporal envelope from raw magnitudes.
+                    // All envelopes are computed from unmodified bins before any gain
+                    // is applied, so no bin's gain computation sees already-modified data.
+                    for k in 0..n {
                         let mag = complex_buf[k].norm();
                         contrast_envelope[k] = coeff * contrast_envelope[k] + (1.0 - coeff) * mag;
+                    }
+
+                    // Pass 2 — apply boost/cut relative to the now-updated envelopes.
+                    // Clamping depth to [-12, +12]: positive depth = expand contrast,
+                    // negative depth = flatten (bring peaks toward neighbours).
+                    let depth = spectral_contrast_db.clamp(-12.0, 12.0);
+                    let boost = 10.0f32.powf( depth / 20.0);
+                    let cut   = 10.0f32.powf(-depth / 20.0);
+                    for k in 0..n {
+                        let mag = complex_buf[k].norm();
                         let env = contrast_envelope[k].max(1e-10);
                         let gain = if mag >= env { boost } else { cut };
                         complex_buf[k] *= gain;

@@ -223,7 +223,7 @@ impl Default for SpectralForgeParams {
 
             spectral_contrast_db: FloatParam::new(
                 "Spectral Contrast", 6.0,
-                FloatRange::Linear { min: 0.0, max: 12.0 },
+                FloatRange::Linear { min: -12.0, max: 12.0 },
             ).with_smoother(SmoothingStyle::Linear(50.0))
              .with_unit(" dB"),
         }
