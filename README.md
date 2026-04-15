@@ -8,6 +8,8 @@ Very early test version. The dynamics section is more or less functional, the mu
 
 ---
 
+<img width="1249" height="1293" alt="Screenshot_20260415_001924" src="https://github.com/user-attachments/assets/e00dd154-fbbf-43ae-aaf2-b458314d3a54" />
+
 ## Building and installing
 
 **Requirements:** Rust stable toolchain, Cargo, `clap-validator` optional for testing.
