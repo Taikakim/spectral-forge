@@ -62,9 +62,14 @@ impl FxSlotKind {
                 };
 
                 match effect_mode {
+                    EffectMode::Bypass => {
+                        // Pass-through: audio unchanged, no suppression.
+                        suppression_out.fill(0.0);
+                    }
                     EffectMode::SpectralContrast => {
                         contrast.process_bins(bins, sidechain, params, sample_rate, suppression_out);
                     }
+                    // Freeze and PhaseRand DSP remains in pipeline.rs for now; fall through to compressor.
                     _ => {
                         eng.process_bins(bins, sidechain, params, sample_rate, suppression_out);
                     }
@@ -117,6 +122,12 @@ impl FxMatrix {
 
     pub fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         let num_bins = fft_size / 2 + 1;
+        debug_assert!(
+            num_bins <= self.slot_out_cur[0].len(),
+            "FxMatrix: reset() called with fft_size={fft_size} (num_bins={num_bins}) \
+             exceeding allocated buffer size {}",
+            self.slot_out_cur[0].len()
+        );
         for slot in self.slots.iter_mut().flatten() {
             slot.reset(sample_rate, fft_size);
         }
@@ -145,6 +156,8 @@ impl FxMatrix {
         suppression_out: &mut [f32],
         num_bins: usize,
     ) {
+        suppression_out[..num_bins].fill(0.0);
+
         let mut last_active: Option<usize> = None;
 
         for i in 0..MAX_SLOTS {
