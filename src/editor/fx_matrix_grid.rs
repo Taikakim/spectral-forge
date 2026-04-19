@@ -19,7 +19,7 @@ pub fn paint_fx_matrix_grid(
     let total_w = LABEL + 8.0 * CELL;
     let total_h = 8.0 * CELL;
 
-    let (outer_resp, _painter) =
+    let (outer_resp, painter) =
         ui.allocate_painter(Vec2::new(total_w, total_h), egui::Sense::hover());
     let origin = outer_resp.rect.min;
 
@@ -31,7 +31,7 @@ pub fn paint_fx_matrix_grid(
             origin + egui::vec2(0.0, row as f32 * CELL),
             Vec2::new(LABEL - 2.0, CELL),
         );
-        ui.painter().text(
+        painter.text(
             label_rect.center(),
             egui::Align2::CENTER_CENTER,
             &module_names[row],
@@ -58,14 +58,14 @@ pub fn paint_fx_matrix_grid(
                 } else {
                     Stroke::new(0.5, th::GRID_LINE)
                 };
-                ui.painter().rect(cell_rect, 2.0, fill, stroke, StrokeKind::Middle);
+                painter.rect(cell_rect, 2.0, fill, stroke, StrokeKind::Middle);
 
                 let (label_str, text_color) = match module_types[row] {
                     FxModuleType::Empty    => ("+", th::LABEL_DIM),
                     FxModuleType::Dynamics => (module_names[row].as_str(),
                         if is_selected { th::BG } else { th::LABEL_DIM }),
                 };
-                ui.painter().text(
+                painter.text(
                     cell_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     label_str,
@@ -85,20 +85,21 @@ pub fn paint_fx_matrix_grid(
                 // Off-diagonal: send amount DragValue
                 let is_feedback = col > row; // upper triangle = feedback
                 let bg = if is_feedback { th::BG_FEEDBACK } else { th::BG_RAISED };
-                ui.painter().rect(cell_rect, 0.0, bg, Stroke::new(0.5, th::GRID_LINE), StrokeKind::Middle);
+                painter.rect(cell_rect, 0.0, bg, Stroke::new(0.5, th::GRID_LINE), StrokeKind::Middle);
 
                 let send_val = &mut send_matrix[col][row];
-                let _drag_resp = ui.put(
-                    cell_rect.shrink(4.0),
-                    egui::DragValue::new(send_val)
-                        .range(0.0..=1.0)
-                        .speed(0.005)
-                        .fixed_decimals(2)
-                        .custom_formatter(|v, _| {
-                            if v < 0.005 { "\u{2014}".to_string() } else { format!("{v:.2}") }
-                        })
-                        .custom_parser(|s| s.parse::<f64>().ok()),
-                );
+                ui.allocate_ui_at_rect(cell_rect.shrink(4.0), |ui| {
+                    ui.add(
+                        egui::DragValue::new(send_val)
+                            .range(0.0..=1.0)
+                            .speed(0.005)
+                            .fixed_decimals(2)
+                            .custom_formatter(|v, _| {
+                                if v < 0.005 { "\u{2014}".to_string() } else { format!("{v:.2}") }
+                            })
+                            .custom_parser(|s| s.parse::<f64>().ok()),
+                    );
+                });
             }
         }
     }
