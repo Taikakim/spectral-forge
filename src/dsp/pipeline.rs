@@ -1,8 +1,6 @@
 use num_complex::Complex;
 use realfft::RealFftPlanner;
 use nih_plug::util::StftHelper;
-use crate::dsp::engines::BinParams;
-use crate::params::FxChannelTarget;
 use crate::bridge::SharedState;
 
 pub const FFT_SIZE: usize = 2048;
@@ -26,45 +24,23 @@ pub struct Pipeline {
     suppression_buf: Vec<f32>,
     channel_supp_buf: Vec<f32>,
     complex_buf:     Vec<Complex<f32>>,
-    sc_stft:      StftHelper,
-    sc_envelope:  Vec<f32>,   // smoothed sidechain magnitude per bin
-    sc_env_state: Vec<f32>,   // one-pole LP state (separate from main envelope)
-    sc_complex_buf: Vec<Complex<f32>>,
     fx_matrix: crate::dsp::fx_matrix::FxMatrix,
-    bp_threshold: Vec<f32>,
-    bp_ratio:     Vec<f32>,
-    bp_attack:    Vec<f32>,
-    bp_release:   Vec<f32>,
-    bp_knee:      Vec<f32>,
-    bp_makeup:    Vec<f32>,
-    bp_mix:       Vec<f32>,
     /// Ring buffer for delta monitor dry-signal delay: 2 channels × DRY_DELAY_SIZE entries.
     /// Channel c occupies [c * DRY_DELAY_SIZE .. (c+1) * DRY_DELAY_SIZE].
     /// Delayed by FFT_SIZE samples to align dry with STFT-latency-compensated wet.
     dry_delay: Vec<f32>,
     /// Current write head into dry_delay (wraps at DRY_DELAY_SIZE).
     dry_delay_write: usize,
-    /// Per-bin frozen complex state (current Freeze output, interpolating towards target).
-    frozen_bins: Vec<Complex<f32>>,
-    /// Per-bin target state that frozen_bins interpolates towards during portamento.
-    freeze_target: Vec<Complex<f32>>,
-    /// Portamento progress per bin [0.0, 1.0]. 1.0 = settled at frozen_bins.
-    freeze_port_t: Vec<f32>,
-    /// Hops spent in current settled state (after portamento completes).
-    freeze_hold_hops: Vec<u32>,
-    /// Accumulated energy above threshold since the last state change.
-    freeze_accum: Vec<f32>,
-    /// True once the per-bin state machine has been initialised for the current Freeze session.
-    freeze_captured: bool,
-    /// xorshift64 PRNG state for Phase Randomize. Must never be zero.
-    rng_state: u64,
-    /// Pre-allocated curve read caches — populated via copy_from_slice each block
-    /// so the audio thread never allocates. One Vec per curve channel (7 total).
-    curve_cache: [Vec<f32>; 7],
-    /// Per-bin phase-amount curve: multiplier applied to phase_rand_amount per bin.
-    phase_curve_cache: Vec<f32>,
-    /// Per-bin Freeze parameter curves: [0]=Length, [1]=Threshold, [2]=Portamento, [3]=Resistance.
-    freeze_curve_cache: [Vec<f32>; 4],
+    /// Pre-allocated per-slot curve cache. [slot][curve][bin]
+    slot_curve_cache: Vec<Vec<Vec<f32>>>,
+    /// Per-aux sidechain envelope followers (up to 4). [sc_idx][bin]
+    sc_envelopes: Vec<Vec<f32>>,
+    /// Per-aux sidechain one-pole LP state. [sc_idx][bin]
+    sc_env_states: Vec<Vec<f32>>,
+    /// Per-aux sidechain complex buffers. [sc_idx][bin]
+    sc_complex_bufs: Vec<Vec<Complex<f32>>>,
+    /// Per-aux sidechain STFT helpers (up to 4).
+    sc_stfts: Vec<StftHelper>,
     sample_rate: f32,
 }
 
@@ -79,17 +55,27 @@ impl Pipeline {
                 / (FFT_SIZE - 1) as f32).cos()))
             .collect();
 
-        let complex_buf    = fft_plan.make_output_vec();
-        let sc_complex_buf = fft_plan.make_output_vec();
+        let complex_buf = fft_plan.make_output_vec();
 
         let fx_matrix = crate::dsp::fx_matrix::FxMatrix::new(sample_rate, FFT_SIZE);
 
+        // 9 slots × 7 curves × NUM_BINS, all-ones (neutral)
+        let slot_curve_cache: Vec<Vec<Vec<f32>>> = (0..9)
+            .map(|_| (0..7).map(|_| vec![1.0f32; NUM_BINS]).collect())
+            .collect();
+
+        // 4 sidechain paths
+        let sc_envelopes: Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; NUM_BINS]).collect();
+        let sc_env_states: Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; NUM_BINS]).collect();
+        let sc_complex_bufs: Vec<Vec<Complex<f32>>> = (0..4)
+            .map(|_| vec![Complex::new(0.0f32, 0.0f32); NUM_BINS])
+            .collect();
+        let sc_stfts: Vec<StftHelper> = (0..4)
+            .map(|_| StftHelper::new(2, FFT_SIZE, 0))
+            .collect();
+
         Self {
             stft: StftHelper::new(num_channels, FFT_SIZE, 0),
-            sc_stft:      StftHelper::new(2, FFT_SIZE, 0),
-            sc_envelope:  vec![0.0f32; NUM_BINS],
-            sc_env_state: vec![0.0f32; NUM_BINS],
-            sc_complex_buf,
             fft_plan,
             ifft_plan,
             window,
@@ -98,44 +84,27 @@ impl Pipeline {
             channel_supp_buf: vec![0.0; NUM_BINS],
             complex_buf,
             fx_matrix,
-            bp_threshold: vec![-20.0; NUM_BINS],
-            bp_ratio:     vec![4.0;   NUM_BINS],
-            bp_attack:    vec![10.0;  NUM_BINS],
-            bp_release:   vec![80.0;  NUM_BINS],
-            bp_knee:      vec![6.0;   NUM_BINS],
-            bp_makeup:    vec![0.0;   NUM_BINS],
-            bp_mix:       vec![1.0;   NUM_BINS],
             dry_delay: vec![0.0f32; 2 * DRY_DELAY_SIZE],
             dry_delay_write: 0,
-            frozen_bins:       vec![Complex::new(0.0f32, 0.0f32); NUM_BINS],
-            freeze_target:     vec![Complex::new(0.0f32, 0.0f32); NUM_BINS],
-            freeze_port_t:     vec![1.0f32; NUM_BINS],
-            freeze_hold_hops:  vec![0u32; NUM_BINS],
-            freeze_accum:      vec![0.0f32; NUM_BINS],
-            freeze_captured:   false,
-            rng_state:         0xdeadbeef_cafebabe_u64,
-            curve_cache: std::array::from_fn(|_| vec![1.0f32; NUM_BINS]),
-            phase_curve_cache: vec![1.0f32; NUM_BINS],
-            freeze_curve_cache: std::array::from_fn(|_| vec![1.0f32; NUM_BINS]),
+            slot_curve_cache,
+            sc_envelopes,
+            sc_env_states,
+            sc_complex_bufs,
+            sc_stfts,
             sample_rate,
         }
     }
 
     pub fn reset(&mut self, sample_rate: f32, num_channels: usize) {
         self.sample_rate = sample_rate;
-        self.stft    = StftHelper::new(num_channels, FFT_SIZE, 0);
-        self.sc_stft = StftHelper::new(2, FFT_SIZE, 0);
-        self.sc_envelope  = vec![0.0f32; NUM_BINS];
-        self.sc_env_state = vec![0.0f32; NUM_BINS];
+        self.stft = StftHelper::new(num_channels, FFT_SIZE, 0);
         self.dry_delay.fill(0.0);
         self.dry_delay_write = 0;
-        for b in self.frozen_bins.iter_mut()    { *b = Complex::new(0.0, 0.0); }
-        for b in self.freeze_target.iter_mut()  { *b = Complex::new(0.0, 0.0); }
-        for t in self.freeze_port_t.iter_mut()  { *t = 1.0; }
-        for h in self.freeze_hold_hops.iter_mut() { *h = 0; }
-        for a in self.freeze_accum.iter_mut()   { *a = 0.0; }
-        self.freeze_captured = false;
-        // rng_state intentionally not reset — continuity across SR changes is harmless
+        for sc in &mut self.sc_envelopes  { sc.fill(0.0); }
+        for sc in &mut self.sc_env_states { sc.fill(0.0); }
+        for i in 0..self.sc_stfts.len() {
+            self.sc_stfts[i] = StftHelper::new(2, FFT_SIZE, 0);
+        }
         self.fx_matrix.reset(sample_rate, FFT_SIZE);
     }
 
@@ -146,196 +115,124 @@ impl Pipeline {
         shared: &mut SharedState,
         params: &crate::params::SpectralForgeParams,
     ) {
-        // Advance each smoother by block_size samples so it converges in wall-clock time
-        // matching its configured ms value, regardless of block size.
-        // Without this, calling next() once per block only steps 1/block_size of the way
-        // through a smoother configured for N samples, making changes N× too slow.
+        use crate::dsp::modules::{apply_curve_transform, ModuleContext};
+
         let block_size = buffer.samples() as u32;
         let attack_ms_base    = params.attack_ms.smoothed.next_step(block_size);
         let release_ms_base   = params.release_ms.smoothed.next_step(block_size);
         let input_gain_db     = params.input_gain.smoothed.next_step(block_size);
         let output_gain_db    = params.output_gain.smoothed.next_step(block_size);
-        let global_mix        = params.mix.smoothed.next_step(block_size);
-        let suppression_width = params.suppression_width.smoothed.next_step(block_size);
 
-        // Per-curve tilt (dB/oct) and offset (dB), read once per block.
-        let tilts = [
-            params.threshold_tilt.smoothed.next_step(block_size),
-            params.ratio_tilt.smoothed.next_step(block_size),
-            params.attack_tilt.smoothed.next_step(block_size),
-            params.release_tilt.smoothed.next_step(block_size),
-            params.knee_tilt.smoothed.next_step(block_size),
-            params.makeup_tilt.smoothed.next_step(block_size),
-            params.mix_tilt.smoothed.next_step(block_size),
-        ];
-        let offsets = [
-            params.threshold_offset.smoothed.next_step(block_size),
-            params.ratio_offset.smoothed.next_step(block_size),
-            params.attack_offset.smoothed.next_step(block_size),
-            params.release_offset.smoothed.next_step(block_size),
-            params.knee_offset.smoothed.next_step(block_size),
-            params.makeup_offset.smoothed.next_step(block_size),
-            params.mix_offset.smoothed.next_step(block_size),
-        ];
-
-        let effect_mode          = params.effect_mode.value();
-        let phase_rand_amount    = params.phase_rand_amount.smoothed.next_step(block_size);
-        let spectral_contrast_db = params.spectral_contrast_db.smoothed.next_step(block_size);
-
-        // Read all 7 curve channels for slot 0 into pre-allocated cache buffers (no allocation).
-        // Each read() borrow ends before the next copy_from_slice begins.
-        // TODO(Task 5): route per-slot curves through fx_matrix instead of always using slot 0.
-        self.curve_cache[0].copy_from_slice(shared.curve_rx[0][0].read());
-        self.curve_cache[1].copy_from_slice(shared.curve_rx[0][1].read());
-        self.curve_cache[2].copy_from_slice(shared.curve_rx[0][2].read());
-        self.curve_cache[3].copy_from_slice(shared.curve_rx[0][3].read());
-        self.curve_cache[4].copy_from_slice(shared.curve_rx[0][4].read());
-        self.curve_cache[5].copy_from_slice(shared.curve_rx[0][5].read());
-        self.curve_cache[6].copy_from_slice(shared.curve_rx[0][6].read());
-        // Phase and freeze curves are no longer in bridge (removed in D1); caches retain last values.
-
-        // Sync GUI routing matrix → DSP send matrix (non-blocking; skip if GUI holds lock).
-        if let Some(matrix_guard) = params.fx_route_matrix.try_lock() {
-            self.fx_matrix.send = *matrix_guard;
-        }
-
-        // Read per-slot channel targets (non-blocking; fall back to All if GUI holds lock).
-        let slot0_target = params.fx_module_targets.try_lock()
-            .map(|g| g[0])
-            .unwrap_or(FxChannelTarget::All);
-
-        // --- Sidechain processing ---
-        let sc_active = !aux.inputs.is_empty();
-
-        let sc_gain_db    = params.sc_gain.smoothed.next_step(block_size);
-        let sc_gain_lin   = 10.0f32.powf(sc_gain_db / 20.0);
-        let sc_attack_ms  = params.sc_attack_ms.smoothed.next_step(block_size);
-        let sc_release_ms = params.sc_release_ms.smoothed.next_step(block_size);
-
-        if sc_active {
-            for v in self.sc_envelope.iter_mut() { *v = 0.0; }
-
-            let sc_stft      = &mut self.sc_stft;
-            let sc_envelope  = &mut self.sc_envelope;
-            let sc_env_state = &mut self.sc_env_state;
-            let sc_complex   = &mut self.sc_complex_buf;
-            let sample_rate  = self.sample_rate;
-            let hop = FFT_SIZE / OVERLAP;
-
-            let fft_plan = self.fft_plan.clone();
-            let window   = &self.window;
-
-            sc_stft.process_overlap_add(&mut aux.inputs[0], OVERLAP, |_ch, block| {
-                for (s, &w) in block.iter_mut().zip(window.iter()) {
-                    *s *= w * sc_gain_lin;
+        // ── Read all 9×7 slot curves from triple-buffer + apply tilt/offset ──
+        {
+            let slot_curve_meta = params.slot_curve_meta.lock();
+            for s in 0..9 {
+                for c in 0..7 {
+                    self.slot_curve_cache[s][c].copy_from_slice(shared.curve_rx[s][c].read());
+                    let (tilt, offset) = slot_curve_meta[s][c];
+                    apply_curve_transform(&mut self.slot_curve_cache[s][c], tilt, offset);
                 }
-                crate::dsp::guard::sanitize(block);
-                fft_plan.process(block, sc_complex).unwrap();
-
-                let hops_per_sec = sample_rate / hop as f32;
-                for k in 0..sc_complex.len() {
-                    let mag = sc_complex[k].norm();
-                    let coeff = if mag > sc_env_state[k] {
-                        let time_hops = sc_attack_ms.max(0.1) * 0.001 * hops_per_sec;
-                        (-1.0_f32 / time_hops).exp()
-                    } else {
-                        let time_hops = sc_release_ms.max(1.0) * 0.001 * hops_per_sec;
-                        (-1.0_f32 / time_hops).exp()
-                    };
-                    sc_env_state[k] = coeff * sc_env_state[k] + (1.0 - coeff) * mag;
-                    if sc_env_state[k] > sc_envelope[k] { sc_envelope[k] = sc_env_state[k]; }
-                }
-            });
-        }
-
-        // Map to physical units, bin by bin
-        let sample_rate = self.sample_rate;
-        let num_bins = self.bp_threshold.len();
-
-        // Map curve cache values to physical units, bin by bin.
-        // Rust 2021 split field borrows: curve_cache (read) and bp_* (write) are disjoint fields.
-        for k in 0..num_bins {
-            let f_k_hz = (k as f32 * sample_rate / FFT_SIZE as f32).max(20.0);
-
-            // Per-curve tilt+offset: multiply each curve's raw gain by frequency-dependent
-            // and uniform factors.  gain *= 10^(tilt * log2(f/1000) / 20) * 10^(offset / 20).
-            let adj = |ci: usize, raw: f32| -> f32 {
-                let tilt_db   = tilts[ci];
-                let offset_db = offsets[ci];
-                if tilt_db.abs() < 1e-6 && offset_db.abs() < 1e-6 { return raw; }
-                let tilt_factor   = 10.0f32.powf(tilt_db * (f_k_hz / 1000.0).log2() / 20.0);
-                let offset_factor = 10.0f32.powf(offset_db / 20.0);
-                raw * tilt_factor * offset_factor
-            };
-
-            // Threshold: curve gain 1.0 (neutral node) → -20 dBFS.
-            // Log-based mapping amplifies the ±18 dB node range to ±60 dBFS:
-            //   y = -1 → gain ≈ 0.126 (−18 dB) → threshold = −80 dBFS
-            //   y =  0 → gain = 1.0  (  0 dB) → threshold = −20 dBFS
-            //   y = +1 → gain ≈ 7.94 (+18 dB) → threshold →  0 dBFS (clamped)
-            let t = adj(0, self.curve_cache[0].get(k).copied().unwrap_or(1.0));
-            let t_db = if t > 1e-10 { 20.0 * t.log10() } else { -120.0 };
-            self.bp_threshold[k] = (-20.0 + t_db * (60.0 / 18.0)).clamp(-80.0, 0.0);
-
-            // Ratio: gain 1.0 → 1:1 (no compression).
-            let r = adj(1, self.curve_cache[1].get(k).copied().unwrap_or(1.0));
-            if effect_mode == crate::params::EffectMode::SpectralContrast {
-                let base = (1.0 + spectral_contrast_db / 6.0).max(0.0);
-                self.bp_ratio[k] = (r * base).clamp(0.0, 20.0);
-            } else {
-                self.bp_ratio[k] = r.clamp(1.0, 20.0);
             }
-
-            // Attack / release: tilt replaces the old freq_scale parameter.
-            let atk_factor = adj(2, self.curve_cache[2].get(k).copied().unwrap_or(1.0)).max(0.01);
-            let rel_factor = adj(3, self.curve_cache[3].get(k).copied().unwrap_or(1.0)).max(0.01);
-            self.bp_attack[k]  = (attack_ms_base  * atk_factor).clamp(0.1, 500.0);
-            self.bp_release[k] = (release_ms_base * rel_factor).clamp(1.0, 2000.0);
-
-            // Knee: curve gain 1.0 → 6 dB knee; range 0…48 dB
-            let kn = adj(4, self.curve_cache[4].get(k).copied().unwrap_or(1.0));
-            self.bp_knee[k] = (kn * 6.0).clamp(0.0, 48.0);
-
-            // Makeup: curve gain as dB (1.0 → 0 dB, >1 → positive makeup)
-            let mk = adj(5, self.curve_cache[5].get(k).copied().unwrap_or(1.0));
-            self.bp_makeup[k] = if mk > 1e-6 { 20.0 * mk.log10() } else { -96.0 };
-
-            // Mix: curve gain 1.0 → full wet; scaled so 1.0 is 100%
-            let mx = adj(6, self.curve_cache[6].get(k).copied().unwrap_or(1.0));
-            self.bp_mix[k] = (mx * global_mix).clamp(0.0, 1.0);
         }
 
-        // Read lookahead parameter.
-        // TODO: implement per-channel delay ring buffer for actual lookahead.
-        // Currently the STFT latency (FFT_SIZE samples) provides effective lookahead;
-        // `lookahead_ms` is reserved for a future delay-line implementation.
-        let _lookahead_ms = params.lookahead_ms.value();
+        // ── Process up to 4 aux sidechain inputs ──
+        let mut sc_active_flags = [false; 4];
+        {
+            let hop = FFT_SIZE / OVERLAP;
+            let fft_plan = self.fft_plan.clone();
+            let window = &self.window;
+            let sample_rate = self.sample_rate;
+            let sc_gain_db    = params.sc_gain.smoothed.next_step(block_size);
+            let sc_gain_lin   = 10.0f32.powf(sc_gain_db / 20.0);
+            let sc_attack_ms  = params.sc_attack_ms.smoothed.next_step(block_size);
+            let sc_release_ms = params.sc_release_ms.smoothed.next_step(block_size);
 
-        // Read boolean feature flags
-        let auto_makeup   = params.auto_makeup.value();
+            for i in 0..4 {
+                let has_aux = aux.inputs.get(i).map(|a| a.samples() > 0).unwrap_or(false);
+                if !has_aux {
+                    for v in &mut self.sc_envelopes[i] { *v = 0.0; }
+                    continue;
+                }
+                for v in &mut self.sc_envelopes[i] { *v = 0.0; }
+
+                let sc_env    = &mut self.sc_envelopes[i];
+                let sc_state  = &mut self.sc_env_states[i];
+                let sc_cplx   = &mut self.sc_complex_bufs[i];
+
+                self.sc_stfts[i].process_overlap_add(&mut aux.inputs[i], OVERLAP, |_ch, block| {
+                    for (s, &w) in block.iter_mut().zip(window.iter()) {
+                        *s *= w * sc_gain_lin;
+                    }
+                    crate::dsp::guard::sanitize(block);
+                    fft_plan.process(block, sc_cplx).unwrap();
+
+                    let hops_per_sec = sample_rate / hop as f32;
+                    for k in 0..sc_cplx.len() {
+                        let mag = sc_cplx[k].norm();
+                        let coeff = if mag > sc_state[k] {
+                            let t = sc_attack_ms.max(0.1) * 0.001 * hops_per_sec;
+                            (-1.0_f32 / t).exp()
+                        } else {
+                            let t = sc_release_ms.max(1.0) * 0.001 * hops_per_sec;
+                            (-1.0_f32 / t).exp()
+                        };
+                        sc_state[k] = coeff * sc_state[k] + (1.0 - coeff) * mag;
+                        if sc_state[k] > sc_env[k] { sc_env[k] = sc_state[k]; }
+                    }
+                });
+
+                sc_active_flags[i] = self.sc_envelopes[i].iter().any(|&v| v > 1e-9);
+            }
+        }
+
+        for i in 0..4 {
+            shared.sidechain_active[i].store(sc_active_flags[i], std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // ── Read feature flags and stereo link ──
         let delta_monitor = params.delta_monitor.value();
-
-        // Read stereo link mode
         use crate::params::StereoLink;
         let stereo_link = params.stereo_link.value();
         let is_mid_side = stereo_link == StereoLink::MidSide;
 
-        // Precompute input/output linear gains for capture into STFT closure
         let input_linear  = 10.0f32.powf(input_gain_db  / 20.0);
         let output_linear = 10.0f32.powf(output_gain_db / 20.0);
 
-        // If the sidechain bus exists but is silent (e.g. nothing connected in DAW),
-        // fall back to self-detection so normal compression still works.
-        let sc_has_signal = sc_active && self.sc_envelope.iter().any(|&v| v > 1e-9);
-        // Report sidechain activity for aux input 0 (the only one wired in legacy layout).
-        shared.sidechain_active[0].store(sc_has_signal, std::sync::atomic::Ordering::Relaxed);
+        // ThresholdMode::Relative legacy flag maps to sensitivity=1.0 if set;
+        // otherwise use the continuous sensitivity parameter.
+        let sensitivity = if params.threshold_mode.value() == crate::params::ThresholdMode::Relative {
+            1.0f32
+        } else {
+            params.sensitivity.smoothed.next_step(block_size)
+        };
 
-        // Capture sc_envelope before the mutable borrow of self.stft
-        let sc_envelope = &self.sc_envelope;
-        let sidechain_arg: Option<&[f32]> = if sc_has_signal { Some(sc_envelope) } else { None };
+        // Build ModuleContext (all Copy fields, no borrows)
+        let ctx = ModuleContext {
+            sample_rate:       self.sample_rate,
+            fft_size:          FFT_SIZE,
+            num_bins:          NUM_BINS,
+            attack_ms:         attack_ms_base,
+            release_ms:        release_ms_base,
+            sensitivity,
+            suppression_width: params.suppression_width.smoothed.next_step(block_size),
+            auto_makeup:       params.auto_makeup.value(),
+            delta_monitor,
+        };
+
+        // Build sc_args: per-slot sidechain reference (no allocation)
+        let slot_sidechain_arr = *params.slot_sidechain.lock();
+        let sc_envelopes_ref: [&[f32]; 4] = std::array::from_fn(|i| self.sc_envelopes[i].as_slice());
+        let sc_args: [Option<&[f32]>; 9] = std::array::from_fn(|s| {
+            let idx = slot_sidechain_arr[s];
+            let i = if idx == 255 { 0 } else { idx as usize };
+            if i < 4 && sc_active_flags[i] { Some(sc_envelopes_ref[i]) } else { None }
+        });
+
+        // Snapshot of slot targets
+        let slot_targets_snap: [crate::params::FxChannelTarget; 9] =
+            *params.slot_targets.lock();
 
         // Delta monitor: write dry samples into the ring buffer at the current write head.
-        // They will be read back (delayed by FFT_SIZE) after STFT to align with wet latency.
         if delta_monitor {
             let mut dry_idx = 0usize;
             for sample_block in buffer.iter_samples() {
@@ -372,41 +269,13 @@ impl Pipeline {
         let spectrum_buf      = &mut self.spectrum_buf;
         let suppression_buf   = &mut self.suppression_buf;
         let channel_supp_buf  = &mut self.channel_supp_buf;
-        // Reset peak-hold accumulators. channel_supp_buf is not zeroed here
-        // because process_bins fully overwrites it before the fold below.
+        let slot_curve_cache_ref = &self.slot_curve_cache;
+        // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
-        let bp_threshold = &self.bp_threshold;
-        let bp_ratio     = &self.bp_ratio;
-        let bp_attack    = &self.bp_attack;
-        let bp_release   = &self.bp_release;
-        let bp_knee      = &self.bp_knee;
-        let bp_makeup    = &self.bp_makeup;
-        let bp_mix       = &self.bp_mix;
-        // ThresholdMode::Relative legacy flag maps to sensitivity=1.0 if set;
-        // otherwise use the continuous sensitivity parameter.
-        let sensitivity = if params.threshold_mode.value() == crate::params::ThresholdMode::Relative {
-            1.0f32
-        } else {
-            params.sensitivity.smoothed.next_step(block_size)
-        };
-        let sample_rate  = self.sample_rate;
         // IFFT gives FFT_SIZE gain; Hann^2 OLA at 75% overlap gives 1.5 gain.
         // Combined normalization: 1 / (FFT_SIZE * 1.5) = 2 / (3 * FFT_SIZE)
         let norm = 2.0_f32 / (3.0 * FFT_SIZE as f32);
-
-        let frozen_bins      = &mut self.frozen_bins;
-        let freeze_target    = &mut self.freeze_target;
-        let freeze_port_t    = &mut self.freeze_port_t;
-        let freeze_hold_hops = &mut self.freeze_hold_hops;
-        let freeze_accum     = &mut self.freeze_accum;
-        let freeze_captured  = &mut self.freeze_captured;
-        let rng_state        = &mut self.rng_state;
-        let phase_curve_cache    = &self.phase_curve_cache;
-        let freeze_curve_cache_0 = &self.freeze_curve_cache[0];
-        let freeze_curve_cache_1 = &self.freeze_curve_cache[1];
-        let freeze_curve_cache_2 = &self.freeze_curve_cache[2];
-        let freeze_curve_cache_3 = &self.freeze_curve_cache[3];
 
         self.stft.process_overlap_add(buffer, OVERLAP, |channel, block| {
             // Analysis window + input gain
@@ -424,126 +293,20 @@ impl Pipeline {
                 if mag > spectrum_buf[i] { spectrum_buf[i] = mag; }
             }
 
-            let params = BinParams {
-                threshold_db:       bp_threshold,
-                ratio:              bp_ratio,
-                attack_ms:          bp_attack,
-                release_ms:         bp_release,
-                knee_db:            bp_knee,
-                makeup_db:          bp_makeup,
-                mix:                bp_mix,
-                sensitivity,
-                auto_makeup,
-                smoothing_semitones: suppression_width,
-            };
-
-            // Run the compressor/contrast engine through fx_matrix.
-            // Freeze and PhaseRand DSP remains in the match block below.
+            // Run all modules through the fx_matrix slot chain.
             fx_matrix.process_hop(
                 channel,
                 stereo_link,
                 complex_buf,
-                sidechain_arg,
-                &params,
-                effect_mode,
-                slot0_target,
-                sample_rate,
+                &sc_args,
+                &slot_targets_snap,
+                slot_curve_cache_ref,
+                &ctx,
                 channel_supp_buf,
-                num_bins,
+                NUM_BINS,
             );
             for k in 0..channel_supp_buf.len() {
                 if channel_supp_buf[k] > suppression_buf[k] { suppression_buf[k] = channel_supp_buf[k]; }
-            }
-
-            // Effects pass — modifies complex_buf in-place after compression.
-            match effect_mode {
-                crate::params::EffectMode::Bypass => {}
-                crate::params::EffectMode::SpectralContrast => {
-                    // Handled inside fx_matrix.process_hop() above (routes to contrast engine).
-                }
-
-                crate::params::EffectMode::Freeze => {
-                    // Duration of one hop in milliseconds.
-                    let hop_ms = FFT_SIZE as f32 / (OVERLAP as f32 * sample_rate) * 1000.0;
-
-                    if !*freeze_captured {
-                        // First call: capture current frame as initial frozen state.
-                        frozen_bins.copy_from_slice(complex_buf);
-                        freeze_target.copy_from_slice(complex_buf);
-                        for t in freeze_port_t.iter_mut()   { *t = 1.0; }
-                        for h in freeze_hold_hops.iter_mut() { *h = 0; }
-                        for a in freeze_accum.iter_mut()    { *a = 0.0; }
-                        *freeze_captured = true;
-                    }
-
-                    let n = complex_buf.len();
-                    for k in 0..n {
-                        // Map per-bin curve gains to physical parameter values.
-                        let length_ms  = (freeze_curve_cache_0[k] * 500.0).clamp(0.0, 2000.0);
-                        let length_hops = (length_ms / hop_ms).ceil() as u32;
-
-                        let thr_gain = freeze_curve_cache_1[k];
-                        let thr_db   = if thr_gain > 1e-10 { 20.0 * thr_gain.log10() } else { -120.0 };
-                        let threshold_db = (-20.0 + thr_db * (60.0 / 18.0)).clamp(-80.0, 0.0);
-                        let threshold_lin = 10.0f32.powf(threshold_db / 20.0);
-
-                        let port_ms  = (freeze_curve_cache_2[k] * 100.0).clamp(0.0, 1000.0);
-                        let port_hops = (port_ms / hop_ms).max(0.5);
-
-                        let resistance = (freeze_curve_cache_3[k] * 1.0).clamp(0.0, 5.0);
-
-                        if freeze_port_t[k] < 1.0 {
-                            // Portamento in progress: advance and interpolate.
-                            freeze_port_t[k] = (freeze_port_t[k] + 1.0 / port_hops).min(1.0);
-                            let t = freeze_port_t[k];
-                            frozen_bins[k] = Complex::new(
-                                frozen_bins[k].re * (1.0 - t) + freeze_target[k].re * t,
-                                frozen_bins[k].im * (1.0 - t) + freeze_target[k].im * t,
-                            );
-                        } else {
-                            // Settled: hold and accumulate energy toward next transition.
-                            freeze_hold_hops[k] += 1;
-                            let mag = complex_buf[k].norm();
-                            if mag > threshold_lin {
-                                freeze_accum[k] += mag - threshold_lin;
-                            }
-                            // Trigger state change when hold duration and resistance both met.
-                            if freeze_hold_hops[k] >= length_hops && freeze_accum[k] >= resistance {
-                                freeze_target[k]    = complex_buf[k];
-                                freeze_port_t[k]    = 0.0;
-                                freeze_hold_hops[k] = 0;
-                                freeze_accum[k]     = 0.0;
-                            }
-                        }
-
-                        complex_buf[k] = frozen_bins[k];
-                    }
-                }
-
-                crate::params::EffectMode::PhaseRand => {
-                    let last = complex_buf.len() - 1;
-                    for k in 0..complex_buf.len() {
-                        // Always advance PRNG to keep the sequence independent of skipping.
-                        *rng_state ^= *rng_state << 13;
-                        *rng_state ^= *rng_state >> 7;
-                        *rng_state ^= *rng_state << 17;
-                        // DC (k=0) and Nyquist (k=last) must stay real for IFFT correctness.
-                        if k == 0 || k == last { continue; }
-                        // Per-bin multiplier from phase_curve_cache scales the global amount.
-                        let per_bin = phase_curve_cache[k].clamp(0.0, 2.0);
-                        let scale   = phase_rand_amount * per_bin * std::f32::consts::PI;
-                        let rand_phase = (*rng_state as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
-                        let (mag, phase) = (complex_buf[k].norm(), complex_buf[k].arg());
-                        complex_buf[k] = Complex::from_polar(mag, phase + rand_phase);
-                    }
-                }
-
-            }
-
-            // When leaving Freeze mode, clear the captured flag so re-engaging always
-            // captures a fresh spectrum.
-            if effect_mode != crate::params::EffectMode::Freeze {
-                *freeze_captured = false;
             }
 
             ifft_plan.process(complex_buf, block).unwrap();
@@ -569,8 +332,6 @@ impl Pipeline {
         }
 
         // Delta monitor: output dry(delayed by FFT_SIZE) − wet = the removed signal.
-        // Reading FFT_SIZE positions behind the write head aligns the captured dry with
-        // the STFT-latency-shifted wet output, giving a clean difference signal.
         if delta_monitor {
             let block_samples = buffer.samples();
             let mut dry_idx = 0usize;
