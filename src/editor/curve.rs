@@ -48,7 +48,7 @@ fn paint_dashed_line(painter: &Painter, pts: &[Pos2], stroke: Stroke, dash: f32,
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CurveNode {
     pub x: f32,  // [0.0, 1.0] normalised log-frequency (20 Hz at 0, 20 kHz at 1)
     pub y: f32,  // [-1.0, +1.0] gain: 0.0 = neutral

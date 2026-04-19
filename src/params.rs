@@ -3,6 +3,7 @@ use nih_plug_egui::EguiState;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use crate::editor::curve::CurveNode;
+use crate::dsp::modules::{GainMode, ModuleType, RouteMatrix};
 
 pub const NUM_CURVE_SETS: usize = 7;
 pub const NUM_NODES: usize = 6;
@@ -89,6 +90,44 @@ pub struct SpectralForgeParams {
     /// Module type for each of the 8 slots.
     #[persist = "fx_module_types"]
     pub fx_module_types: Arc<Mutex<[FxModuleType; 8]>>,
+
+    // ── Per-slot modular architecture (Plan D1) ────────────────────────────
+
+    /// Module type assigned to each slot (0..=8). Slot 8 = Master, immutable.
+    #[persist = "slot_module_types"]
+    pub slot_module_types: Arc<Mutex<[ModuleType; 9]>>,
+
+    /// User-editable UTF-8 name per slot, zero-padded to 32 bytes.
+    #[persist = "slot_names"]
+    pub slot_names: Arc<Mutex<[[u8; 32]; 9]>>,
+
+    /// Channel routing target per slot (All / Mid / Side).
+    #[persist = "slot_targets"]
+    pub slot_targets: Arc<Mutex<[FxChannelTarget; 9]>>,
+
+    /// Sidechain input assignment: 0..=3 = aux input index; 255 = self-detect (main input).
+    #[persist = "slot_sidechain"]
+    pub slot_sidechain: Arc<Mutex<[u8; 9]>>,
+
+    /// GainMode per slot (only meaningful for Gain module slots).
+    #[persist = "slot_gain_mode"]
+    pub slot_gain_mode: Arc<Mutex<[GainMode; 9]>>,
+
+    /// Per-slot per-curve nodes. [slot 0..=8][curve 0..6][node 0..5].
+    #[persist = "slot_curve_nodes"]
+    pub slot_curve_nodes: Arc<Mutex<[[[CurveNode; NUM_NODES]; 7]; 9]>>,
+
+    /// Per-slot per-curve tilt and offset. [slot][curve] = (tilt, offset). Default: (0.0, 0.0).
+    #[persist = "slot_curve_meta"]
+    pub slot_curve_meta: Arc<Mutex<[[(f32, f32); 7]; 9]>>,
+
+    /// Which curve within the editing slot is selected (0..num_curves for that type).
+    #[persist = "editing_curve"]
+    pub editing_curve: Arc<Mutex<u8>>,
+
+    /// Routing matrix. Coexists with legacy fx_route_matrix during D1.
+    #[persist = "route_matrix"]
+    pub route_matrix: Arc<Mutex<RouteMatrix>>,
 
     /// User-editable display name for each slot.
     #[persist = "fx_module_names"]
@@ -237,6 +276,35 @@ impl Default for SpectralForgeParams {
             freeze_active_curve: Arc::new(Mutex::new(0)),
 
             editing_slot: Arc::new(Mutex::new(0u8)),
+
+            slot_module_types: Arc::new(Mutex::new({
+                let mut t = [ModuleType::Empty; 9];
+                t[0] = ModuleType::Dynamics;
+                t[1] = ModuleType::Dynamics;
+                t[2] = ModuleType::Gain;
+                t[8] = ModuleType::Master;
+                t
+            })),
+            slot_names: Arc::new(Mutex::new({
+                let mut names = [[0u8; 32]; 9];
+                let labels: &[&str] = &["Dynamics", "Dynamics 2", "Gain", "Slot 4", "Slot 5",
+                                         "Slot 6", "Slot 7", "Slot 8", "Master"];
+                for (i, label) in labels.iter().enumerate() {
+                    let b = label.as_bytes();
+                    let len = b.len().min(32);
+                    names[i][..len].copy_from_slice(&b[..len]);
+                }
+                names
+            })),
+            slot_targets:   Arc::new(Mutex::new([FxChannelTarget::All; 9])),
+            slot_sidechain: Arc::new(Mutex::new([255u8; 9])),
+            slot_gain_mode: Arc::new(Mutex::new([GainMode::Add; 9])),
+            slot_curve_nodes: Arc::new(Mutex::new(
+                [[[CurveNode::default(); NUM_NODES]; 7]; 9]
+            )),
+            slot_curve_meta: Arc::new(Mutex::new([[(0.0f32, 0.0f32); 7]; 9])),
+            editing_curve:   Arc::new(Mutex::new(0u8)),
+            route_matrix:    Arc::new(Mutex::new(RouteMatrix::default())),
 
             fx_module_types: Arc::new(Mutex::new({
                 let mut arr = [FxModuleType::Empty; 8];
