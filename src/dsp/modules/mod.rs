@@ -113,6 +113,8 @@ pub struct ModuleSpec {
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
+    // 6 curves: THRESHOLD, RATIO, ATTACK, RELEASE, KNEE, MIX
+    // Note: MAKEUP (was curve 5 in the legacy system) is now the standalone Gain module.
     static DYN: ModuleSpec = ModuleSpec {
         display_name: "Dynamics",
         color_lit: Color32::from_rgb(0x50, 0xc0, 0xc4),
@@ -199,6 +201,11 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
 
 // ── apply_curve_transform ──────────────────────────────────────────────────
 
+/// Apply a linear tilt (spectral slope) and DC offset to a slice of curve gains,
+/// then clamp to `[0.0, ∞)`. The `.max(0.0)` floor is intentional: linear gain
+/// multipliers are always non-negative in this DSP context, so negative values
+/// produced by aggressive tilt/offset combinations are silently clamped to zero
+/// rather than causing phase inversions.
 pub fn apply_curve_transform(gains: &mut [f32], tilt: f32, offset: f32) {
     let n = gains.len();
     if n == 0 { return; }
@@ -225,9 +232,15 @@ pub fn create_module(
         ModuleType::TransientSustainedSplit => Box::new(ts_split::TsSplitModule::new()),
         ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
-        ModuleType::Master | ModuleType::Empty => Box::new(master::MasterModule),
+        ModuleType::Master => Box::new(master::MasterModule),
+        ModuleType::Empty  => Box::new(master::EmptyModule),
     };
     m.reset(sample_rate, fft_size);
+    debug_assert_eq!(
+        m.num_curves(),
+        module_spec(ty).num_curves,
+        "module_spec and num_curves() disagree for {:?}", ty
+    );
     m
 }
 
