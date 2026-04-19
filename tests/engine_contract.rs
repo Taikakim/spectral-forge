@@ -154,6 +154,22 @@ fn loud_signal_gets_compressed() {
         "suppression should be positive, got {}", suppression[512]);
 }
 
+#[test]
+fn fx_module_type_dynamics_is_slot_zero() {
+    use spectral_forge::params::{FxModuleType, FxChannelTarget, SpectralForgeParams};
+    let p = SpectralForgeParams::default();
+    let types = p.fx_module_types.lock();
+    assert_eq!(types[0], FxModuleType::Dynamics);
+    for i in 1..8 {
+        assert_eq!(types[i], FxModuleType::Empty, "slot {i} should be Empty by default");
+    }
+    let targets = p.fx_module_targets.lock();
+    assert!(targets.iter().all(|&t| t == FxChannelTarget::All));
+    let names = p.fx_module_names.lock();
+    assert_eq!(&names[0], "Dynamics");
+    assert_eq!(*p.editing_slot.lock(), 0u8);
+}
+
 // ── SpectralContrast engine tests ─────────────────────────────────────────────
 
 #[test]

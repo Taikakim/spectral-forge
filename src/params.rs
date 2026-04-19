@@ -32,6 +32,29 @@ pub enum EffectMode {
     SpectralContrast,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum FxModuleType {
+    #[default]
+    Empty,
+    Dynamics,
+    // MidSide,  // Plan D
+    // Hpss,     // Plan E
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum FxChannelTarget {
+    #[default]
+    All,
+    Mid,
+    Side,
+}
+
+impl FxChannelTarget {
+    pub fn label(self) -> &'static str {
+        match self { Self::All => "All", Self::Mid => "Mid", Self::Side => "Side" }
+    }
+}
+
 #[derive(Params)]
 pub struct SpectralForgeParams {
     #[persist = "editor_state"]
@@ -58,6 +81,27 @@ pub struct SpectralForgeParams {
     /// Which of the 4 freeze curves is selected for editing (0–3).
     #[persist = "freeze_active_curve"]
     pub freeze_active_curve: Arc<Mutex<u8>>,
+
+    /// Which module slot is currently selected for curve editing (0–7).
+    #[persist = "editing_slot"]
+    pub editing_slot: Arc<Mutex<u8>>,
+
+    /// Module type for each of the 8 slots.
+    #[persist = "fx_module_types"]
+    pub fx_module_types: Arc<Mutex<[FxModuleType; 8]>>,
+
+    /// User-editable display name for each slot.
+    #[persist = "fx_module_names"]
+    pub fx_module_names: Arc<Mutex<[String; 8]>>,
+
+    /// Channel routing target for each slot.
+    #[persist = "fx_module_targets"]
+    pub fx_module_targets: Arc<Mutex<[FxChannelTarget; 8]>>,
+
+    /// 8×8 send matrix. send[src][dst] = linear amplitude [0..1].
+    /// src < dst: forward send (current hop). src > dst: feedback (one-hop delayed).
+    #[persist = "fx_route_matrix"]
+    pub fx_route_matrix: Arc<Mutex<[[f32; 8]; 8]>>,
 
     // GUI display state — not audio parameters, not sent to audio thread
     #[persist = "graph_db_min"]
@@ -187,6 +231,30 @@ impl Default for SpectralForgeParams {
                 std::array::from_fn(|_| crate::editor::curve::default_nodes())
             )),
             freeze_active_curve: Arc::new(Mutex::new(0)),
+
+            editing_slot: Arc::new(Mutex::new(0u8)),
+
+            fx_module_types: Arc::new(Mutex::new({
+                let mut arr = [FxModuleType::Empty; 8];
+                arr[0] = FxModuleType::Dynamics;
+                arr
+            })),
+
+            fx_module_names: Arc::new(Mutex::new([
+                "Dynamics".to_string(),
+                "Slot 1".to_string(),
+                "Slot 2".to_string(),
+                "Slot 3".to_string(),
+                "Slot 4".to_string(),
+                "Slot 5".to_string(),
+                "Slot 6".to_string(),
+                "Slot 7".to_string(),
+            ])),
+
+            fx_module_targets: Arc::new(Mutex::new([FxChannelTarget::All; 8])),
+
+            fx_route_matrix: Arc::new(Mutex::new([[0.0f32; 8]; 8])),
+
             graph_db_min:    Arc::new(Mutex::new(-100.0)),
             graph_db_max:    Arc::new(Mutex::new(0.0)),
             peak_falloff_ms: Arc::new(Mutex::new(300.0)),
