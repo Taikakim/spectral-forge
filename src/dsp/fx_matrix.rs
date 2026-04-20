@@ -56,10 +56,11 @@ impl FxMatrix {
                 .unwrap_or(ModuleType::Empty);
             if current == types[s] { continue; }
             if types[s] == ModuleType::Empty {
-                self.slots[s] = None;
+                nih_plug::util::permit_alloc(|| { self.slots[s] = None; });
             } else {
-                let new_mod = nih_plug::util::permit_alloc(|| create_module(types[s], sample_rate, fft_size));
-                self.slots[s] = Some(new_mod);
+                nih_plug::util::permit_alloc(|| {
+                    self.slots[s] = Some(create_module(types[s], sample_rate, fft_size));
+                });
             }
         }
     }
