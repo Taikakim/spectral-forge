@@ -282,9 +282,7 @@ pub fn create_editor(
 
                             let mut nodes = nodes_all[editing_slot][editing_curve];
                             if crv::curve_widget(
-                                ui, curve_rect, &mut nodes, &all_gains[editing_curve],
-                                editing_curve, db_min, db_max, atk_ms, rel_ms, sr, fft_size,
-                                tilt, offset,
+                                ui, curve_rect, &mut nodes, editing_curve, sr,
                             ) {
                                 params.slot_curve_nodes.lock()[editing_slot][editing_curve] = nodes;
                                 // Publish updated gains to triple buffer
@@ -566,7 +564,7 @@ pub fn create_editor(
                             ui.add_space(8.0);
                             let crv_col = spec.color_lit;
                             let mut meta = *params.slot_curve_meta.lock();
-                            let (offset, tilt) = &mut meta[editing_slot][editing_curve];
+                            let (tilt, offset) = &mut meta[editing_slot][editing_curve];
                             let mut changed = false;
                             ui.vertical(|ui| {
                                 if ui.add(

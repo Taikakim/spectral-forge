@@ -245,14 +245,14 @@ fn log_to_y(v: f32, y_min: f32, y_max: f32, rect: Rect) -> f32 {
 
 // ─── Physical value mapping ───────────────────────────────────────────────────
 
-/// Apply per-curve tilt (dB/oct, pivot 1 kHz) and uniform offset (dB) to a raw gain value.
-/// Mirrors the pipeline formula: gain *= 10^(tilt * log2(f/1000) / 20) * 10^(offset / 20).
+/// Apply per-curve tilt (linear spectral slope across bins) and additive offset to a raw gain
+/// value. Matches the DSP pipeline formula: `(gain + offset) * (1 + tilt * (k/n - 0.5))`.
+/// `k` is the bin index, `n` is the total number of bins.
 #[inline]
-pub fn apply_curve_adjustments(gain: f32, f_hz: f32, tilt: f32, offset: f32) -> f32 {
+pub fn apply_curve_adjustments(gain: f32, k: usize, n: usize, tilt: f32, offset: f32) -> f32 {
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return gain; }
-    let tilt_factor   = 10.0f32.powf(tilt * (f_hz / 1000.0_f32).log2() / 20.0);
-    let offset_factor = 10.0f32.powf(offset / 20.0);
-    gain * tilt_factor * offset_factor
+    let t = tilt * (k as f32 / n as f32 - 0.5);
+    ((gain + offset) * (1.0 + t)).max(0.0)
 }
 
 /// Convert a curve's linear gain to its physical display value (no freq scaling).
@@ -498,7 +498,7 @@ pub fn paint_response_curve(
     let pts: Vec<Pos2> = (0..n).map(|k| {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
-        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset);
+        let adj  = apply_curve_adjustments(gains[k], k, n, tilt, offset);
         let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max);
         let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
         Pos2::new(x, y)
@@ -514,23 +514,14 @@ pub fn paint_response_curve(
 // ─── Interactive widget ───────────────────────────────────────────────────────
 
 /// Draw interactive nodes for the active curve. Returns true if any node changed.
-/// Node handles are drawn at the physical y position of the curve (not normalised space),
-/// so they sit on top of the curve line. Node handles are shifted left by half a node
-/// radius so the right edge of the handle visually marks the affected frequency.
+/// Handles are drawn at normalised y positions (node.y ∈ [-1, +1] mapped to [bottom, top])
+/// so they cover the full display height and track the cursor 1:1 when dragged.
 pub fn curve_widget(
     ui: &mut Ui,
     rect: Rect,
     nodes: &mut [CurveNode; 6],
-    gains: &[f32],           // pre-computed gains for this curve (display-resolution)
     curve_idx: usize,
-    db_min: f32,
-    db_max: f32,
-    global_attack_ms: f32,
-    global_release_ms: f32,
     sample_rate: f32,
-    fft_size: usize,
-    tilt: f32,
-    offset: f32,
 ) -> bool {
     use nih_plug_egui::egui::Sense;
 
@@ -547,15 +538,9 @@ pub fn curve_widget(
     };
 
     for i in 0..6 {
-        // Physical y position: look up the gain at the node's frequency bin,
-        // convert to physical units, then to screen y. This places the handle
-        // directly on the curve line rather than in normalised space.
-        let freq_hz = 20.0 * 1000.0_f32.powf(nodes[i].x);
-        let bin_k = ((freq_hz / sample_rate) * fft_size as f32).round() as usize;
-        let bin_k = bin_k.clamp(0, gains.len().saturating_sub(1));
-        let adj      = apply_curve_adjustments(gains[bin_k], freq_hz, tilt, offset);
-        let physical = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max);
-        let sy = physical_to_y(physical, curve_idx, db_min, db_max, rect);
+        // Normalised y position: node.y ∈ [-1, +1] maps linearly to [bottom, top] of rect.
+        // This makes the full display height reachable and gives 1:1 drag tracking.
+        let sy = rect.bottom() - (nodes[i].y + 1.0) / 2.0 * rect.height();
 
         // Visual position scaled to the current SR's Nyquist range.
         // Low shelf (i=0) is nudged 20 px right so it stays visible near the left edge.
