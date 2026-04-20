@@ -6,8 +6,6 @@ use std::sync::{Arc, atomic::Ordering};
 use crate::params::{SpectralForgeParams, NUM_CURVE_SETS};
 use crate::editor::{curve as crv, spectrum_display as sd, theme as th};
 
-const CURVE_LABELS: [&str; NUM_CURVE_SETS] =
-    ["THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE", "MAKEUP", "MIX"];
 
 pub fn create_editor(
     params: Arc<SpectralForgeParams>,
@@ -72,83 +70,48 @@ pub fn create_editor(
                         params.mix_offset.value(),
                     ];
 
-                    // ── Top bar: curve selectors + tab buttons + range controls ──────
+                    // ── Top bar: curve selectors + range controls ──────────────
                     ui.horizontal(|ui| {
                         ui.add_space(4.0);
 
-                        if is_freeze_mode {
-                            // 4 freeze curve buttons replace the 7 dynamics buttons.
-                            for (i, label) in crv::FREEZE_CURVE_LABELS.iter().enumerate() {
-                                let is_active = freeze_active == i;
-                                let (fill, text_color, stroke_color) = if is_active {
-                                    (th::freeze_color_lit(i),
-                                     th::freeze_color_dim(i),
-                                     th::freeze_color_lit(i))
-                                } else {
-                                    (th::freeze_color_dim(i),
-                                     th::freeze_color_lit(i),
-                                     th::freeze_color_dim(i))
-                                };
-                                let btn = egui::Button::new(
-                                    egui::RichText::new(*label).color(text_color).size(11.0),
-                                )
-                                .fill(fill)
-                                .stroke(egui::Stroke::new(th::STROKE_BORDER, stroke_color));
-                                if ui.add(btn).clicked() {
-                                    *params.freeze_active_curve.lock() = i as u8;
-                                }
-                            }
-                        } else {
-                            // 7 dynamics curve buttons.
-                            // Clicking any of them auto-switches to the Dynamics tab.
-                            for (i, label) in CURVE_LABELS.iter().enumerate() {
-                                let is_active = active_idx == i && active_tab == 0;
-                                let (fill, text_color, stroke_color) = if is_active {
-                                    (th::curve_color_lit(i),
-                                     th::curve_color_text_on(i),
-                                     th::curve_color_lit(i))
-                                } else {
-                                    (th::curve_color_dim(i),
-                                     th::curve_color_lit(i),
-                                     th::curve_color_dim(i))
-                                };
-                                let btn = egui::Button::new(
-                                    egui::RichText::new(*label).color(text_color).size(11.0),
-                                )
-                                .fill(fill)
-                                .stroke(egui::Stroke::new(th::STROKE_BORDER, stroke_color));
-                                if ui.add(btn).clicked() {
-                                    *params.active_curve.lock() = i as u8;
-                                    *params.active_tab.lock()   = 0; // auto-switch to Dynamics
-                                }
-                            }
+                        let editing_slot = *params.editing_slot.lock() as usize;
+                        let slot_types   = *params.slot_module_types.lock();
+                        let editing_type = slot_types[editing_slot];
+                        let spec         = crate::dsp::modules::module_spec(editing_type);
+                        let mut editing_curve_raw = *params.editing_curve.lock() as usize;
+                        if spec.num_curves > 0 && editing_curve_raw >= spec.num_curves {
+                            editing_curve_raw = 0;
+                            *params.editing_curve.lock() = 0u8;
                         }
+                        let editing_curve = editing_curve_raw;
 
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(4.0);
-
-                        const TAB_LABELS: [&str; 3] = ["DYNAMICS", "EFFECTS", "HARMONIC"];
-                        for (t, &tab_label) in TAB_LABELS.iter().enumerate() {
-                            let is_active = active_tab == t;
-                            let (fill, text_color) = if is_active {
-                                (th::BORDER, th::BG)
+                        // Adaptive curve selector buttons
+                        for (i, &label) in spec.curve_labels.iter().enumerate() {
+                            let is_active = editing_curve == i;
+                            let (fill, text_color, stroke_color) = if is_active {
+                                (spec.color_lit,
+                                 egui::Color32::BLACK,
+                                 spec.color_lit)
                             } else {
-                                (th::BG, th::LABEL_DIM)
+                                (spec.color_dim,
+                                 spec.color_lit,
+                                 spec.color_dim)
                             };
                             let btn = egui::Button::new(
-                                egui::RichText::new(tab_label).color(text_color).size(10.0),
+                                egui::RichText::new(label).color(text_color).size(11.0),
                             )
                             .fill(fill)
-                            .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                            .stroke(egui::Stroke::new(th::STROKE_BORDER, stroke_color));
                             if ui.add(btn).clicked() {
-                                *params.active_tab.lock() = t as u8;
+                                *params.editing_curve.lock() = i as u8;
                             }
                         }
 
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(12.0);
+                        if spec.num_curves > 0 {
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.add_space(4.0);
+                        }
 
                         ui.label(egui::RichText::new("Floor").color(th::LABEL_DIM).size(9.0));
                         {
@@ -156,9 +119,7 @@ pub fn create_editor(
                             if ui.add(
                                 egui::DragValue::new(&mut v)
                                     .range(-160.0..=-20.0)
-                                    .suffix(" dB")
-                                    .speed(0.5)
-                                    .max_decimals(1),
+                                    .suffix(" dB").speed(0.5).max_decimals(1),
                             ).changed() {
                                 *params.graph_db_min.lock() = v.min(db_max - 6.0);
                             }
@@ -170,9 +131,7 @@ pub fn create_editor(
                             if ui.add(
                                 egui::DragValue::new(&mut v)
                                     .range(-20.0..=0.0)
-                                    .suffix(" dB")
-                                    .speed(0.5)
-                                    .max_decimals(1),
+                                    .suffix(" dB").speed(0.5).max_decimals(1),
                             ).changed() {
                                 *params.graph_db_max.lock() = v.max(db_min + 6.0);
                             }
@@ -184,14 +143,11 @@ pub fn create_editor(
                             if ui.add(
                                 egui::DragValue::new(&mut v)
                                     .range(0.0..=5000.0)
-                                    .suffix(" ms")
-                                    .speed(10.0)
-                                    .max_decimals(0),
+                                    .suffix(" ms").speed(10.0).max_decimals(0),
                             ).changed() {
                                 *params.peak_falloff_ms.lock() = v;
                             }
                         }
-
                     });
 
                     // ── Second bar: FFT size selector ─────────────────────────────
@@ -464,9 +420,10 @@ pub fn create_editor(
                     // Graph header: "Editing: {module_name} — {channel_target}"
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
-                        let names  = params.fx_module_names.lock();
-                        let tgts   = params.fx_module_targets.lock();
-                        let header = format!("Editing: {} \u{2014} {}", names[edit_slot], tgts[edit_slot].label());
+                        let names  = params.slot_names.lock();
+                        let tgts   = params.slot_targets.lock();
+                        let name_str = crate::editor::fx_matrix_grid::slot_name_str(&names[edit_slot]);
+                        let header = format!("Editing: {} \u{2014} {}", name_str, tgts[edit_slot].label());
                         ui.painter().text(
                             curve_rect.min + egui::vec2(4.0, 4.0),
                             egui::Align2::LEFT_TOP,
@@ -534,91 +491,59 @@ pub fn create_editor(
 
                     ui.add_space(2.0);
 
-                    // Row 2 — tab-specific controls
+                    // Row 2 — module-specific controls
                     ui.horizontal(|ui| {
-                        match active_tab {
-                            0 => {
-                                // Dynamics group box
-                                let dyn_frame = egui::Frame::new()
-                                    .stroke(egui::Stroke::new(th::STROKE_BORDER, th::GRID_LINE))
-                                    .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 4 });
-                                let dyn_resp = dyn_frame.show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        knob!(ui, &params.attack_ms,         "Atk");
-                                        knob!(ui, &params.release_ms,        "Rel");
-                                        knob!(ui, &params.sensitivity,       "Sens");
-                                        knob!(ui, &params.suppression_width, "Width");
-                                    });
-                                });
-                                let lbl_pos = dyn_resp.response.rect.left_top() + egui::vec2(4.0, 0.0);
-                                ui.painter().text(
-                                    lbl_pos,
-                                    egui::Align2::LEFT_TOP,
-                                    "Dynamics",
-                                    egui::FontId::proportional(8.0),
-                                    th::LABEL_DIM,
-                                );
+                        let editing_slot  = *params.editing_slot.lock() as usize;
+                        let slot_types    = *params.slot_module_types.lock();
+                        let editing_type  = slot_types[editing_slot];
+                        let editing_curve = (*params.editing_curve.lock() as usize)
+                            .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
 
-                                // Tilt and Offset — active-curve–coloured
-                                ui.add_space(8.0);
-                                let crv_col = th::curve_color_lit(active_idx);
-                                macro_rules! cknob {
-                                    ($param:expr, $label:expr) => {
-                                        ui.vertical(|ui| {
-                                            ui.add(ParamSlider::for_param($param, setter).with_width(36.0));
-                                            ui.label(egui::RichText::new($label).color(crv_col).size(9.0));
-                                        });
-                                    };
-                                }
-                                match active_idx {
-                                    0 => { cknob!(&params.threshold_offset, "Offset"); cknob!(&params.threshold_tilt, "Tilt"); }
-                                    1 => { cknob!(&params.ratio_offset,     "Offset"); cknob!(&params.ratio_tilt,     "Tilt"); }
-                                    2 => { cknob!(&params.attack_offset,    "Offset"); cknob!(&params.attack_tilt,    "Tilt"); }
-                                    3 => { cknob!(&params.release_offset,   "Offset"); cknob!(&params.release_tilt,   "Tilt"); }
-                                    4 => { cknob!(&params.knee_offset,      "Offset"); cknob!(&params.knee_tilt,      "Tilt"); }
-                                    5 => { cknob!(&params.makeup_offset,    "Offset"); cknob!(&params.makeup_tilt,    "Tilt"); }
-                                    _ => { cknob!(&params.mix_offset,       "Offset"); cknob!(&params.mix_tilt,       "Tilt"); }
-                                }
+                        // Dynamics group box: global dynamics knobs
+                        {
+                            let dyn_frame = egui::Frame::new()
+                                .stroke(egui::Stroke::new(th::STROKE_BORDER, th::GRID_LINE))
+                                .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 4 });
+                            let dyn_resp = dyn_frame.show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    knob!(ui, &params.attack_ms,         "Atk");
+                                    knob!(ui, &params.release_ms,        "Rel");
+                                    knob!(ui, &params.sensitivity,       "Sens");
+                                    knob!(ui, &params.suppression_width, "Width");
+                                });
+                            });
+                            let lbl_pos = dyn_resp.response.rect.left_top() + egui::vec2(4.0, 0.0);
+                            ui.painter().text(
+                                lbl_pos, egui::Align2::LEFT_TOP, "Dynamics",
+                                egui::FontId::proportional(8.0), th::LABEL_DIM,
+                            );
+                        }
+
+                        // Per-curve tilt and offset from slot_curve_meta
+                        let spec = crate::dsp::modules::module_spec(editing_type);
+                        if editing_curve < spec.num_curves {
+                            ui.add_space(8.0);
+                            let crv_col = spec.color_lit;
+                            let mut meta = *params.slot_curve_meta.lock();
+                            let (offset, tilt) = &mut meta[editing_slot][editing_curve];
+                            let mut changed = false;
+                            ui.vertical(|ui| {
+                                if ui.add(
+                                    egui::DragValue::new(offset)
+                                        .range(-1.0..=1.0).speed(0.005).fixed_decimals(3)
+                                ).changed() { changed = true; }
+                                ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
+                            });
+                            ui.vertical(|ui| {
+                                if ui.add(
+                                    egui::DragValue::new(tilt)
+                                        .range(-1.0..=1.0).speed(0.005).fixed_decimals(3)
+                                ).changed() { changed = true; }
+                                ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
+                            });
+                            if changed {
+                                *params.slot_curve_meta.lock() = meta;
                             }
-                            1 => {
-                                // Effects: mode buttons + contextual knobs
-                                ui.add_space(4.0);
-                                let modes: &[(&str, crate::params::EffectMode)] = &[
-                                    ("BYPASS",   crate::params::EffectMode::Bypass),
-                                    ("FREEZE",   crate::params::EffectMode::Freeze),
-                                    ("PHASE",    crate::params::EffectMode::PhaseRand),
-                                    ("CONTRAST", crate::params::EffectMode::SpectralContrast),
-                                ];
-                                for &(label, mode) in modes {
-                                    let active = cur_mode == mode;
-                                    let fill   = if active { th::BORDER } else { th::BG };
-                                    let text_c = if active { th::BG } else { th::LABEL_DIM };
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new(label).color(text_c).size(10.0)
-                                        )
-                                        .fill(fill)
-                                        .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER))
-                                        .min_size(egui::vec2(60.0, 18.0))
-                                    ).clicked() {
-                                        setter.begin_set_parameter(&params.effect_mode);
-                                        setter.set_parameter(&params.effect_mode, mode);
-                                        setter.end_set_parameter(&params.effect_mode);
-                                    }
-                                    ui.add_space(2.0);
-                                }
-                                ui.add_space(8.0);
-                                match cur_mode {
-                                    crate::params::EffectMode::PhaseRand => {
-                                        knob!(ui, &params.phase_rand_amount, "Amount");
-                                    }
-                                    crate::params::EffectMode::SpectralContrast => {
-                                        knob!(ui, &params.spectral_contrast_db, "Depth");
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ => {} // Harmonic: row 2 empty for now
                         }
                     });
 
