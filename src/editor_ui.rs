@@ -336,17 +336,65 @@ pub fn create_editor(
                     // Graph header: "Editing: {module_name} — {channel_target}"
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
-                        let names  = params.slot_names.lock();
-                        let tgts   = params.slot_targets.lock();
-                        let name_str = crate::editor::fx_matrix_grid::slot_name_str(&names[edit_slot]);
-                        let header = format!("Editing: {} \u{2014} {}", name_str, tgts[edit_slot].label());
-                        ui.painter().text(
-                            curve_rect.min + egui::vec2(4.0, 4.0),
-                            egui::Align2::LEFT_TOP,
-                            &header,
-                            egui::FontId::proportional(10.0),
-                            th::LABEL_DIM,
-                        );
+                        let tgts      = params.slot_targets.lock();
+                        let target_label = tgts[edit_slot].label();
+                        drop(tgts);
+
+                        let name_edit_key = ui.id().with(("name_edit", edit_slot));
+                        let is_editing: bool = ui.data(|d| d.get_temp(name_edit_key).unwrap_or(false));
+
+                        if is_editing {
+                            let mut name_str = {
+                                let names = params.slot_names.lock();
+                                crate::editor::fx_matrix_grid::slot_name_str(&names[edit_slot])
+                            };
+                            let te = egui::TextEdit::singleline(&mut name_str)
+                                .font(egui::FontId::proportional(10.0))
+                                .desired_width(120.0)
+                                .text_color(th::LABEL_DIM);
+                            let resp = ui.put(
+                                egui::Rect::from_min_size(
+                                    curve_rect.min + egui::vec2(4.0, 4.0),
+                                    egui::vec2(120.0, 14.0),
+                                ),
+                                te,
+                            );
+                            // Enforce 32-byte limit — pop chars to stay on a codepoint boundary
+                            while name_str.len() > 32 {
+                                name_str.pop();
+                            }
+                            // Save name back every frame (interim) + exit edit mode on enter or focus loss
+                            {
+                                let mut names = params.slot_names.lock();
+                                let b = name_str.as_bytes();
+                                let len = b.len().min(32);
+                                names[edit_slot].fill(0);
+                                names[edit_slot][..len].copy_from_slice(&b[..len]);
+                            }
+                            if resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                ui.data_mut(|d| d.insert_temp::<bool>(name_edit_key, false));
+                            }
+                        } else {
+                            let name_str = {
+                                let names = params.slot_names.lock();
+                                crate::editor::fx_matrix_grid::slot_name_str(&names[edit_slot])
+                            };
+                            let header = format!("Editing: {} \u{2014} {}", name_str, target_label);
+                            let header_resp = ui.put(
+                                egui::Rect::from_min_size(
+                                    curve_rect.min + egui::vec2(4.0, 4.0),
+                                    egui::vec2(300.0, 14.0),
+                                ),
+                                egui::Label::new(
+                                    egui::RichText::new(&header)
+                                        .color(th::LABEL_DIM).size(10.0)
+                                ).sense(egui::Sense::click()),
+                            );
+                            if header_resp.clicked() {
+                                ui.data_mut(|d| d.insert_temp(name_edit_key, true));
+                            }
+                            header_resp.on_hover_text("Click to rename this slot");
+                        }
                     }
 
                     // ── Bottom strip ─────────────────────────────────────────────
