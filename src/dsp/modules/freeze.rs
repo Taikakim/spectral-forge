@@ -1,4 +1,5 @@
 use num_complex::Complex;
+use crate::dsp::utils::linear_to_db;
 use crate::params::{FxChannelTarget, StereoLink};
 use super::{ModuleContext, ModuleType, SpectralModule};
 
@@ -74,13 +75,15 @@ impl SpectralModule for FreezeModule {
 
         let n = bins.len();
         for k in 0..n {
+            let dry = bins[k];
+
             // Map per-bin curve gains to physical parameter values.
             let length_ms   = (curves.get(0).and_then(|c| c.get(k)).copied().unwrap_or(1.0)
                                * 500.0).clamp(0.0, 2000.0);
             let length_hops = (length_ms / hop_ms).ceil() as u32;
 
             let thr_gain      = curves.get(1).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
-            let thr_db        = if thr_gain > 1e-10 { 20.0 * thr_gain.log10() } else { -120.0 };
+            let thr_db        = linear_to_db(thr_gain);
             let threshold_db  = (-20.0 + thr_db * (60.0 / 18.0)).clamp(-80.0, 0.0);
             let threshold_lin = 10.0f32.powf(threshold_db / 20.0);
 
@@ -115,12 +118,17 @@ impl SpectralModule for FreezeModule {
                 }
             }
 
-            bins[k] = self.frozen_bins[k];
+            let wet = self.frozen_bins[k];
+            let mix = curves.get(4).and_then(|c| c.get(k)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            bins[k] = Complex::new(
+                dry.re * (1.0 - mix) + wet.re * mix,
+                dry.im * (1.0 - mix) + wet.im * mix,
+            );
         }
         suppression_out.fill(0.0);
     }
 
     fn tail_length(&self) -> u32 { self.fft_size as u32 }
     fn module_type(&self) -> ModuleType { ModuleType::Freeze }
-    fn num_curves(&self) -> usize { 4 }
+    fn num_curves(&self) -> usize { 5 }
 }

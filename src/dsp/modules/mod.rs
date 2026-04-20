@@ -135,15 +135,15 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         display_name: "Freeze",
         color_lit: Color32::from_rgb(0x50, 0x80, 0xc8),
         color_dim: Color32::from_rgb(0x18, 0x28, 0x42),
-        num_curves: 4,
-        curve_labels: &["LENGTH", "THRESHOLD", "PORTAMENTO", "RESISTANCE"],
+        num_curves: 5,
+        curve_labels: &["LENGTH", "THRESHOLD", "PORTAMENTO", "RESISTANCE", "MIX"],
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
         color_lit: Color32::from_rgb(0x90, 0x60, 0xc8),
         color_dim: Color32::from_rgb(0x30, 0x20, 0x42),
-        num_curves: 2,
-        curve_labels: &["AMOUNT", "SC SMOOTH"],
+        num_curves: 3,
+        curve_labels: &["AMOUNT", "SC SMOOTH", "MIX"],
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",

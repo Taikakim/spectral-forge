@@ -608,8 +608,8 @@ pub fn create_editor(
                         let editing_curve = (*params.editing_curve.lock() as usize)
                             .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
 
-                        // Dynamics group box: global dynamics knobs
-                        {
+                        // Dynamics group box: only when the active slot is a Dynamics module
+                        if editing_type == crate::dsp::modules::ModuleType::Dynamics {
                             let dyn_frame = egui::Frame::new()
                                 .stroke(egui::Stroke::new(th::STROKE_BORDER, th::GRID_LINE))
                                 .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 4 });

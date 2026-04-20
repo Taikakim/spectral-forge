@@ -1,5 +1,6 @@
 use num_complex::Complex;
 use crate::params::{FxChannelTarget, StereoLink};
+use crate::dsp::utils::xorshift64;
 use super::{ModuleContext, ModuleType, SpectralModule};
 
 pub struct PhaseSmearModule {
@@ -9,13 +10,7 @@ pub struct PhaseSmearModule {
 impl PhaseSmearModule {
     pub fn new() -> Self { Self { rng_state: 0x123456789abcdef0 } }
 
-    #[inline(always)]
-    fn xorshift(&mut self) -> u64 {
-        self.rng_state ^= self.rng_state << 13;
-        self.rng_state ^= self.rng_state >> 7;
-        self.rng_state ^= self.rng_state << 17;
-        self.rng_state
-    }
+
 }
 
 impl Default for PhaseSmearModule {
@@ -39,8 +34,9 @@ impl SpectralModule for PhaseSmearModule {
         if bins.is_empty() { suppression_out.fill(0.0); return; }
         let last = bins.len() - 1;
         for k in 0..bins.len() {
+            let dry = bins[k];
             // Always advance PRNG to keep the sequence independent of skipping.
-            let rand = self.xorshift();
+            let rand = xorshift64(&mut self.rng_state);
             // DC (k=0) and Nyquist (k=last) must stay real for IFFT correctness.
             if k == 0 || k == last { continue; }
             let per_bin    = curves.get(0).and_then(|c| c.get(k))
@@ -48,11 +44,16 @@ impl SpectralModule for PhaseSmearModule {
             let scale      = per_bin * std::f32::consts::PI;
             let rand_phase = (rand as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
             let (mag, phase) = (bins[k].norm(), bins[k].arg());
-            bins[k] = Complex::from_polar(mag, phase + rand_phase);
+            let wet = Complex::from_polar(mag, phase + rand_phase);
+            let mix = curves.get(2).and_then(|c| c.get(k)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            bins[k] = Complex::new(
+                dry.re * (1.0 - mix) + wet.re * mix,
+                dry.im * (1.0 - mix) + wet.im * mix,
+            );
         }
         suppression_out.fill(0.0);
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::PhaseSmear }
-    fn num_curves(&self) -> usize { 2 }
+    fn num_curves(&self) -> usize { 3 }
 }

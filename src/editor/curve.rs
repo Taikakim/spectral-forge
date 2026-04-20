@@ -550,8 +550,19 @@ pub fn curve_widget(
         let sy = rect.bottom() - (nodes[i].y + 1.0) / 2.0 * rect.height();
 
         // Visual position scaled to the current SR's Nyquist range.
-        // Low shelf (i=0) is nudged 20 px right so it stays visible near the left edge.
-        let shelf_nudge = if i == 0 { 20.0 } else { 0.0 };
+        // Low shelf (i=0): fixed +20px nudge right so it stays visible at the left edge.
+        // High shelf (i=5): nudge right by however much is needed to keep the ◀ tip on-screen.
+        //   The leftmost vertex of the ◀ triangle is at draw_pos.x - NODE_RADIUS, and
+        //   draw_pos.x = sx_actual - NODE_RADIUS*0.5, so tip is at sx_actual - 1.5*NODE_RADIUS.
+        //   Nudge = max(0, rect.left() + 1.5*r - raw_sx) ensures the tip is never clipped.
+        let shelf_nudge = if i == 0 {
+            20.0
+        } else if i == 5 {
+            let raw_sx = x_to_screen(nodes[i].x, rect, max_hz);
+            (rect.left() + th::NODE_RADIUS * 1.5 - raw_sx).max(0.0)
+        } else {
+            0.0
+        };
         let sx_actual = x_to_screen(nodes[i].x, rect, max_hz) + shelf_nudge;
         let sx_draw   = sx_actual - th::NODE_RADIUS * 0.5;
         let node_pos  = Pos2::new(sx_actual, sy);
