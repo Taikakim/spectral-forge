@@ -172,11 +172,13 @@ pub fn create_editor(
                     }
 
                     // ── Spectrum / curve area ─────────────────────────────────────
-                    // strip_height reserves space for: control knobs (105) + routing matrix section
-                    // (9 × 44px cells + 14px header + 30px padding = 440). The window height (1010) was
-                    // set to accommodate all three areas.
-                    const MATRIX_AREA_H: f32 = 9.0 * 44.0 + 4.0 * 22.0 + 14.0 + 30.0; // 528 px worst case
-                    let strip_height = 105.0 + MATRIX_AREA_H;
+                    // strip_height reserves space for all content below the curve area:
+                    //   105 px — separator + knobs + dynamics row
+                    //    28 px — SC assignment strip (always shown)
+                    //    28 px — GainMode selector (reserved even when hidden to prevent jumps)
+                    //   528 px — routing matrix worst case (9×44 + 4 virtual half-rows×22 + header + pad)
+                    const MATRIX_AREA_H: f32 = 9.0 * 44.0 + 4.0 * 22.0 + 14.0 + 30.0;
+                    let strip_height = 105.0 + 28.0 + 28.0 + MATRIX_AREA_H;
                     let avail = ui.available_rect_before_wrap();
                     let curve_rect = egui::Rect::from_min_max(
                         avail.min,
@@ -334,6 +336,8 @@ pub fn create_editor(
                     }
 
                     // Graph header: "Editing: {module_name} — {channel_target}"
+                    // Paint as an overlay on the curve area using painter + interact so we never
+                    // call ui.put(), which resets the layout cursor backward into the curve area.
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
                         let tgts      = params.slot_targets.lock();
@@ -344,51 +348,56 @@ pub fn create_editor(
                         let is_editing: bool = ui.data(|d| d.get_temp(name_edit_key).unwrap_or(false));
 
                         if is_editing {
+                            // Floating Area so the TextEdit widget doesn't touch the parent
+                            // layout cursor.
                             let mut name_str = {
                                 let names = params.slot_names.lock();
                                 crate::editor::fx_matrix_grid::slot_name_str(&names[edit_slot])
                             };
-                            let te = egui::TextEdit::singleline(&mut name_str)
-                                .font(egui::FontId::proportional(10.0))
-                                .desired_width(120.0)
-                                .text_color(th::LABEL_DIM);
-                            let resp = ui.put(
-                                egui::Rect::from_min_size(
-                                    curve_rect.min + egui::vec2(4.0, 4.0),
-                                    egui::vec2(120.0, 14.0),
-                                ),
-                                te,
-                            );
-                            // Enforce 32-byte limit — pop chars to stay on a codepoint boundary
-                            while name_str.len() > 32 {
-                                name_str.pop();
-                            }
-                            // Save name back every frame (interim) + exit edit mode on enter or focus loss
-                            {
-                                let mut names = params.slot_names.lock();
-                                let b = name_str.as_bytes();
-                                let len = b.len().min(32);
-                                names[edit_slot].fill(0);
-                                names[edit_slot][..len].copy_from_slice(&b[..len]);
-                            }
-                            if resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                ui.data_mut(|d| d.insert_temp::<bool>(name_edit_key, false));
-                            }
+                            egui::Area::new(egui::Id::new("slot_name_edit_area"))
+                                .fixed_pos(curve_rect.min + egui::vec2(4.0, 4.0))
+                                .order(egui::Order::Foreground)
+                                .show(ui.ctx(), |ui| {
+                                    let te = egui::TextEdit::singleline(&mut name_str)
+                                        .font(egui::FontId::proportional(10.0))
+                                        .desired_width(120.0)
+                                        .text_color(th::LABEL_DIM);
+                                    let resp = ui.add(te);
+                                    // Enforce 32-byte limit — pop chars to stay on a codepoint boundary
+                                    while name_str.len() > 32 { name_str.pop(); }
+                                    {
+                                        let mut names = params.slot_names.lock();
+                                        let b = name_str.as_bytes();
+                                        let len = b.len().min(32);
+                                        names[edit_slot].fill(0);
+                                        names[edit_slot][..len].copy_from_slice(&b[..len]);
+                                    }
+                                    if resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                        ui.data_mut(|d| d.insert_temp::<bool>(name_edit_key, false));
+                                    }
+                                });
                         } else {
+                            // Painter-only text + interact — no layout cursor effect.
                             let name_str = {
                                 let names = params.slot_names.lock();
                                 crate::editor::fx_matrix_grid::slot_name_str(&names[edit_slot])
                             };
                             let header = format!("Editing: {} \u{2014} {}", name_str, target_label);
-                            let header_resp = ui.put(
-                                egui::Rect::from_min_size(
-                                    curve_rect.min + egui::vec2(4.0, 4.0),
-                                    egui::vec2(300.0, 14.0),
-                                ),
-                                egui::Label::new(
-                                    egui::RichText::new(&header)
-                                        .color(th::LABEL_DIM).size(10.0)
-                                ).sense(egui::Sense::click()),
+                            let header_rect = egui::Rect::from_min_size(
+                                curve_rect.min + egui::vec2(4.0, 4.0),
+                                egui::vec2(300.0, 14.0),
+                            );
+                            ui.painter().text(
+                                header_rect.left_top(),
+                                egui::Align2::LEFT_TOP,
+                                &header,
+                                egui::FontId::proportional(10.0),
+                                th::LABEL_DIM,
+                            );
+                            let header_resp = ui.interact(
+                                header_rect,
+                                ui.id().with("slot_header_interact"),
+                                egui::Sense::click(),
                             );
                             if header_resp.clicked() {
                                 ui.data_mut(|d| d.insert_temp(name_edit_key, true));

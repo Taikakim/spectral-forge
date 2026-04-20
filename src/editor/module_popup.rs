@@ -107,8 +107,9 @@ pub fn show_popup(
             });
         });
 
-    // Close on click outside: pointer clicked AND not over this specific popup area
-    if ui.ctx().input(|i| i.pointer.any_click())
+    // Close on click outside: left-click only (right-click opens the popup, any_click would close
+    // it on the same frame it was opened)
+    if ui.ctx().input(|i| i.pointer.primary_clicked())
         && !area_response.response.contains_pointer()
     {
         new_state.open = false;
