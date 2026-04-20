@@ -1,41 +1,27 @@
 use num_complex::Complex;
 use crate::dsp::modules::{
-    ModuleContext, ModuleType, SpectralModule,
-    create_module,
+    ModuleContext, ModuleType, RouteMatrix, GainMode, SpectralModule,
+    create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS,
 };
 use crate::params::{FxChannelTarget, StereoLink};
 
-pub const MAX_SLOTS: usize = 9;    // 8 effect slots + 1 Master slot
-pub const MAX_SPLIT_VIRTUAL_ROWS: usize = 4;
-
 pub struct FxMatrix {
     pub slots: Vec<Option<Box<dyn SpectralModule>>>,
-    /// Per-slot output buffers (current hop). [slot][bin]
-    slot_out: Vec<Vec<Complex<f32>>>,
-    /// Per-slot suppression output. [slot][bin]
+    slot_out:  Vec<Vec<Complex<f32>>>,
     slot_supp: Vec<Vec<f32>>,
-    /// Virtual row output buffers for T/S Split. [vrow][bin]
     virtual_out: Vec<Vec<Complex<f32>>>,
-    /// Working mix buffer (reused each slot, no allocation).
-    mix_buf: Vec<Complex<f32>>,
+    mix_buf:   Vec<Complex<f32>>,
 }
 
 impl FxMatrix {
-    pub fn new(sample_rate: f32, fft_size: usize) -> Self {
+    pub fn new(sample_rate: f32, fft_size: usize, slot_types: &[ModuleType; 9]) -> Self {
         let num_bins = fft_size / 2 + 1;
-
-        // Default: slots 0,1 = Dynamics; slot 2 = Gain; slot 8 = Master; slots 3–7 = None (empty).
-        // Storing None (not Some(Empty)) makes the None-branch in process_hop actually fire,
-        // and the backward scan for "previous active slot" works correctly.
         let slots: Vec<Option<Box<dyn SpectralModule>>> = (0..MAX_SLOTS).map(|i| {
-            match i {
-                0 | 1 => Some(create_module(ModuleType::Dynamics, sample_rate, fft_size)),
-                2     => Some(create_module(ModuleType::Gain,     sample_rate, fft_size)),
-                8     => Some(create_module(ModuleType::Master,   sample_rate, fft_size)),
-                _     => None,  // slots 3–7 start empty
+            match slot_types[i] {
+                ModuleType::Empty => None,
+                ty => Some(create_module(ty, sample_rate, fft_size)),
             }
         }).collect();
-
         Self {
             slots,
             slot_out:    (0..MAX_SLOTS).map(|_| vec![Complex::new(0.0, 0.0); num_bins]).collect(),
@@ -48,8 +34,6 @@ impl FxMatrix {
 
     pub fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         let num_bins = fft_size / 2 + 1;
-        // All buffers are pre-allocated to num_bins in new(); resize would allocate if they
-        // somehow shrank. Assert the invariant in debug, then fill without any allocation.
         debug_assert_eq!(self.slot_out[0].len(), num_bins,
             "FxMatrix::reset() called with different fft_size than new()");
         for slot in self.slots.iter_mut().flatten() {
@@ -61,86 +45,111 @@ impl FxMatrix {
         self.mix_buf.fill(Complex::new(0.0, 0.0));
     }
 
+    /// Propagate per-slot GainMode from params to GainModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_gain_modes(&mut self, modes: &[GainMode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_gain_mode(modes[s]);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn process_hop(
         &mut self,
-        channel: usize,
-        stereo_link: StereoLink,
-        complex_buf: &mut [Complex<f32>],
-        sc_args: &[Option<&[f32]>; 9],
-        slot_targets: &[FxChannelTarget; 9],
-        slot_curves: &[Vec<Vec<f32>>],  // [slot][curve][bin]
-        ctx: &ModuleContext,
+        channel:         usize,
+        stereo_link:     StereoLink,
+        complex_buf:     &mut [Complex<f32>],
+        sc_args:         &[Option<&[f32]>; 9],
+        slot_targets:    &[FxChannelTarget; 9],
+        slot_curves:     &[Vec<Vec<f32>>],   // [slot][curve][bin]
+        route_matrix:    &RouteMatrix,
+        ctx:             &ModuleContext,
         suppression_out: &mut [f32],
-        num_bins: usize,
+        num_bins:        usize,
     ) {
-        // Process each slot in order (0..MAX_SLOTS).
-        // Use .take() / put-back pattern so module borrows don't conflict with self.slots reads.
         for s in 0..MAX_SLOTS {
+            // Build this slot's input from the route matrix.
+            // Slot 0 always receives the plugin's main audio input.
+            // All slots additionally receive weighted sums of previous-slot outputs.
+            self.mix_buf[..num_bins].fill(Complex::new(0.0, 0.0));
+            if s == 0 {
+                self.mix_buf[..num_bins].copy_from_slice(&complex_buf[..num_bins]);
+            }
+            for src in 0..s {
+                let send = route_matrix.send[src][s];
+                if send < 0.001 { continue; }
+                for k in 0..num_bins {
+                    self.mix_buf[k] += self.slot_out[src][k] * send;
+                }
+            }
+
             let mut module = match self.slots[s].take() {
                 Some(m) => m,
                 None => {
-                    self.slot_out[s][..num_bins].fill(Complex::new(0.0, 0.0));
+                    self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
                     self.slot_supp[s][..num_bins].fill(0.0);
                     continue;
                 }
             };
 
-            // Build input for this slot: simple serial chain.
-            // Slot 0 reads main input; each subsequent slot reads the previous active slot's output.
-            self.mix_buf[..num_bins].fill(Complex::new(0.0, 0.0));
-            if s == 0 {
-                self.mix_buf[..num_bins].copy_from_slice(&complex_buf[..num_bins]);
-            } else {
-                // Find the last non-empty slot before s and use its output.
-                let mut found = false;
-                for prev in (0..s).rev() {
-                    if self.slots[prev].is_some() {
-                        self.mix_buf[..num_bins].copy_from_slice(&self.slot_out[prev][..num_bins]);
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    self.mix_buf[..num_bins].copy_from_slice(&complex_buf[..num_bins]);
-                }
-            }
-
-            // Build curve slice references from slot_curves[s]
             let nc = module.num_curves().min(7);
             let curves_storage: [&[f32]; 7] = std::array::from_fn(|c| {
                 if c < nc && s < slot_curves.len() && c < slot_curves[s].len() {
-                    let curve = &slot_curves[s][c];
-                    &curve[..num_bins.min(curve.len())]
+                    let cv = &slot_curves[s][c];
+                    &cv[..num_bins.min(cv.len())]
                 } else {
                     &[] as &[f32]
                 }
             });
             let curves: &[&[f32]] = &curves_storage[..nc];
 
-            let sidechain = sc_args[s];
-
             module.process(
-                channel,
-                stereo_link,
-                slot_targets[s],
+                channel, stereo_link, slot_targets[s],
                 &mut self.mix_buf[..num_bins],
-                sidechain,
-                curves,
+                sc_args[s], curves,
                 &mut self.slot_supp[s][..num_bins],
                 ctx,
             );
-
             self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
-
-            // Put the module back
             self.slots[s] = Some(module);
         }
 
-        // Master (slot 8) output -> write back to complex_buf
-        complex_buf[..num_bins].copy_from_slice(&self.slot_out[8][..num_bins]);
+        // Master output: accumulate sends to slot 8.
+        self.mix_buf[..num_bins].fill(Complex::new(0.0, 0.0));
+        let any_to_master = (0..8).any(|src| route_matrix.send[src][8] > 0.001);
+        if any_to_master {
+            for src in 0..8 {
+                let send = route_matrix.send[src][8];
+                if send < 0.001 { continue; }
+                for k in 0..num_bins {
+                    self.mix_buf[k] += self.slot_out[src][k] * send;
+                }
+            }
+        } else {
+            // Fallback: last populated slot's output goes to Master.
+            for src in (0..8).rev() {
+                if self.slots[src].is_some() {
+                    self.mix_buf[..num_bins].copy_from_slice(&self.slot_out[src][..num_bins]);
+                    break;
+                }
+            }
+        }
+        // Pass through Master module (slot 8) then write to complex_buf.
+        if let Some(ref mut master_mod) = self.slots[8] {
+            let curves_empty: &[&[f32]] = &[];
+            master_mod.process(
+                channel, stereo_link, slot_targets[8],
+                &mut self.mix_buf[..num_bins],
+                sc_args[8], curves_empty,
+                &mut self.slot_supp[8][..num_bins],
+                ctx,
+            );
+        }
+        complex_buf[..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
 
-        // Max-reduce suppression across all slots for display
+        // Max-reduce suppression across all slots for display.
         suppression_out[..num_bins].fill(0.0);
         for s in 0..MAX_SLOTS {
             for k in 0..num_bins {

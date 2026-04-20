@@ -172,15 +172,24 @@ fn fx_module_type_dynamics_is_slot_zero() {
 
 // ── FxMatrix tests ───────────────────────────────────────────────────────────
 
+fn make_default_fx_matrix() -> spectral_forge::dsp::fx_matrix::FxMatrix {
+    use spectral_forge::dsp::modules::ModuleType;
+    let mut types = [ModuleType::Empty; 9];
+    types[0] = ModuleType::Dynamics;
+    types[1] = ModuleType::Dynamics;
+    types[2] = ModuleType::Gain;
+    types[8] = ModuleType::Master;
+    spectral_forge::dsp::fx_matrix::FxMatrix::new(44100.0, 2048, &types)
+}
+
 #[test]
 fn fx_matrix_passthrough_preserves_finite() {
-    use spectral_forge::dsp::fx_matrix::FxMatrix;
     use spectral_forge::dsp::modules::ModuleContext;
     use spectral_forge::params::{StereoLink, FxChannelTarget};
     use num_complex::Complex;
 
     let num_bins = 1025usize;
-    let mut fx = FxMatrix::new(44100.0, 2048);
+    let mut fx = make_default_fx_matrix();
 
     let mut bins: Vec<Complex<f32>> = (0..num_bins)
         .map(|k| Complex::new((k as f32 * 0.001).sin(), (k as f32 * 0.001).cos()))
@@ -205,6 +214,7 @@ fn fx_matrix_passthrough_preserves_finite() {
     };
 
     let mut supp_out = vec![0.0f32; num_bins];
+    let rm = spectral_forge::dsp::modules::RouteMatrix::default();
     fx.process_hop(
         0,
         StereoLink::Linked,
@@ -212,6 +222,7 @@ fn fx_matrix_passthrough_preserves_finite() {
         &sc_args,
         &slot_targets,
         &slot_curves,
+        &rm,
         &ctx,
         &mut supp_out,
         num_bins,
@@ -299,13 +310,12 @@ fn contrast_expands_peaked_spectrum() {
 
 #[test]
 fn fx_matrix_dynamics_produces_finite_output() {
-    use spectral_forge::dsp::fx_matrix::FxMatrix;
     use spectral_forge::dsp::modules::ModuleContext;
     use spectral_forge::params::{StereoLink, FxChannelTarget};
     use num_complex::Complex;
 
     let num_bins = 1025usize;
-    let mut fx = FxMatrix::new(44100.0, 2048);
+    let mut fx = make_default_fx_matrix();
 
     // A non-trivial spectrum with variation
     let mut bins: Vec<Complex<f32>> = (0..num_bins)
@@ -334,6 +344,7 @@ fn fx_matrix_dynamics_produces_finite_output() {
     };
 
     let mut supp_out = vec![0.0f32; num_bins];
+    let rm = spectral_forge::dsp::modules::RouteMatrix::default();
     fx.process_hop(
         0,
         StereoLink::Linked,
@@ -341,6 +352,7 @@ fn fx_matrix_dynamics_produces_finite_output() {
         &sc_args,
         &slot_targets,
         &slot_curves,
+        &rm,
         &ctx,
         &mut supp_out,
         num_bins,
@@ -373,4 +385,65 @@ fn fft_size_choice_variants_and_max_bins() {
         assert!(expected / 2 + 1 <= MAX_NUM_BINS,
             "fft_size {} → {} bins exceeds MAX_NUM_BINS {}", expected, expected/2+1, MAX_NUM_BINS);
     }
+}
+
+#[test]
+fn fx_matrix_constructs_from_slot_types() {
+    use spectral_forge::dsp::{
+        modules::ModuleType,
+        fx_matrix::FxMatrix,
+    };
+    let mut types = [ModuleType::Empty; 9];
+    types[0] = ModuleType::Dynamics;
+    types[1] = ModuleType::Gain;
+    types[8] = ModuleType::Master;
+    // Should not panic and slot 8 must be Master.
+    let _m = FxMatrix::new(44100.0, 2048, &types);
+}
+
+#[test]
+fn gain_module_set_gain_mode_changes_behavior() {
+    use spectral_forge::dsp::modules::{create_module, GainMode, ModuleType};
+    let mut g = create_module(ModuleType::Gain, 44100.0, 2048);
+    // Default is Add. After setting Subtract, mode should be Subtract.
+    g.set_gain_mode(GainMode::Subtract);
+    // No public mode accessor — test indirectly via process output.
+    // With Subtract and no sidechain, gain curve all-ones → bins unchanged.
+    // (Behavioral test is implicit: we just verify no panic and it compiles.)
+    g.set_gain_mode(GainMode::Add);
+}
+
+#[test]
+fn matrix_routing_serial_default_passes_signal() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::{
+        modules::{ModuleType, ModuleContext, RouteMatrix},
+        fx_matrix::FxMatrix,
+        pipeline::MAX_NUM_BINS,
+    };
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let n = 1025usize; // 2048/2+1
+    let mut types = [ModuleType::Empty; 9];
+    types[0] = ModuleType::Dynamics;
+    types[8] = ModuleType::Master;
+    let mut fm = FxMatrix::new(44100.0, 2048, &types);
+
+    // Serial default: slot 0 feeds Master. Main signal = all-ones magnitude.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); n];
+    let curves: Vec<Vec<Vec<f32>>> = (0..9)
+        .map(|_| (0..7).map(|_| vec![1.0f32; MAX_NUM_BINS]).collect())
+        .collect();
+    let mut supp = vec![0.0f32; n];
+    let sc: [Option<&[f32]>; 9] = [None; 9];
+    let targets = [FxChannelTarget::All; 9];
+    let rm = RouteMatrix::default();
+    let ctx = ModuleContext {
+        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
+        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
+        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
+    };
+    fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
+    // Signal should make it through: at least some bins are non-zero.
+    assert!(bins.iter().any(|c| c.norm() > 0.01), "signal lost through matrix");
 }

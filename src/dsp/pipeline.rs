@@ -47,7 +47,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(sample_rate: f32, num_channels: usize, fft_size: usize) -> Self {
+    pub fn new(sample_rate: f32, num_channels: usize, fft_size: usize, slot_types: &[crate::dsp::modules::ModuleType; 9]) -> Self {
         let num_bins = fft_size / 2 + 1;
         let mut planner = RealFftPlanner::<f32>::new();
         let fft_plan  = planner.plan_fft_forward(fft_size);
@@ -60,7 +60,7 @@ impl Pipeline {
 
         let complex_buf = fft_plan.make_output_vec();
 
-        let fx_matrix = crate::dsp::fx_matrix::FxMatrix::new(sample_rate, fft_size);
+        let fx_matrix = crate::dsp::fx_matrix::FxMatrix::new(sample_rate, fft_size, slot_types);
 
         // 9 slots × 7 curves × MAX_NUM_BINS, all-ones (neutral); only [0..num_bins] are used
         let slot_curve_cache: Vec<Vec<Vec<f32>>> = (0..9)
@@ -293,6 +293,17 @@ impl Pipeline {
             }
         }
 
+        // Propagate gain modes each block (try_lock is non-blocking; skipped if GUI holds lock).
+        if let Some(modes) = params.slot_gain_mode.try_lock() {
+            self.fx_matrix.set_gain_modes(&*modes);
+        }
+
+        // Snapshot route_matrix outside the closure (clone is fine here — not in the audio thread hot path,
+        // and the closure can capture it by value without allocation inside the STFT callback).
+        let route_matrix_snap = params.route_matrix.try_lock()
+            .map(|g| g.clone())
+            .unwrap_or_else(|| crate::dsp::modules::RouteMatrix::default());
+
         // Reborrow fields as locals so the closure can capture them without
         // conflicting with the &mut self.stft borrow inside process_overlap_add.
         let fft_plan  = self.fft_plan.clone();
@@ -335,6 +346,7 @@ impl Pipeline {
                 &sc_args,
                 &slot_targets_snap,
                 slot_curve_cache_ref,
+                &route_matrix_snap,
                 &ctx,
                 channel_supp_buf,
                 num_bins,

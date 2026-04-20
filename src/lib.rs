@@ -111,7 +111,8 @@ impl Plugin for SpectralForge {
         let fft_size = params::fft_size_from_choice(self.params.fft_size.value());
         let max_num_bins = dsp::pipeline::MAX_NUM_BINS;
 
-        self.pipeline = Some(dsp::pipeline::Pipeline::new(sr, num_ch, fft_size));
+        let slot_types = *self.params.slot_module_types.lock();
+        self.pipeline = Some(dsp::pipeline::Pipeline::new(sr, num_ch, fft_size, &slot_types));
         context.set_latency_samples(fft_size as u32);
 
         if let Some(ref sh) = self.shared {

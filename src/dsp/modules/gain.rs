@@ -60,6 +60,8 @@ impl SpectralModule for GainModule {
         suppression_out.fill(0.0);
     }
 
+    fn set_gain_mode(&mut self, mode: GainMode) { self.mode = mode; }
+
     fn module_type(&self) -> ModuleType { ModuleType::Gain }
     fn num_curves(&self) -> usize { 2 }
 }

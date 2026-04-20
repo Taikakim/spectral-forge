@@ -55,8 +55,9 @@ impl Default for RouteMatrix {
             send: [[0.0f32; MAX_SLOTS]; MAX_MATRIX_ROWS],
             virtual_rows: [None; MAX_SPLIT_VIRTUAL_ROWS],
         };
-        m.send[0][8] = 1.0;
-        m.send[1][8] = 1.0;
+        // Serial: slot 0 → slot 1 → slot 2 → Master (slot 8).
+        m.send[0][1] = 1.0;
+        m.send[1][2] = 1.0;
         m.send[2][8] = 1.0;
         m
     }
@@ -100,6 +101,9 @@ pub trait SpectralModule: Send {
     fn num_curves(&self) -> usize;
 
     fn num_outputs(&self) -> Option<usize> { None }
+
+    /// Update the operating mode for Gain modules. Default no-op for all other types.
+    fn set_gain_mode(&mut self, _: GainMode) {}
 }
 
 // ── ModuleSpec ─────────────────────────────────────────────────────────────
