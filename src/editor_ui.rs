@@ -14,6 +14,7 @@ pub fn create_editor(
     fft_size_arc: Arc<std::sync::atomic::AtomicUsize>,
     spectrum_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     suppression_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
+    sidechain_active: Option<[Arc<std::sync::atomic::AtomicBool>; 4]>,
     plugin_alive: std::sync::Weak<()>,
 ) -> Option<Box<dyn Editor>> {
     create_egui_editor(
@@ -40,6 +41,10 @@ pub fn create_editor(
                     let falloff      = *params.peak_falloff_ms.lock();
                     let atk_ms       = params.attack_ms.value();
                     let rel_ms       = params.release_ms.value();
+                    let sc_active: [bool; 4] = match &sidechain_active {
+                        Some(arcs) => std::array::from_fn(|i| arcs[i].load(std::sync::atomic::Ordering::Relaxed)),
+                        None => [false; 4],
+                    };
 
                     // ── Top bar: curve selectors + range controls ──────────────
                     ui.horizontal(|ui| {
@@ -348,6 +353,74 @@ pub fn create_editor(
                     ui.add_space(4.0);
                     ui.separator();
                     ui.add_space(2.0);
+
+                    // ── SC assignment strip ────────────────────────────────────
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        let edit_slot = *params.editing_slot.lock() as usize;
+                        let mut sc_assign = params.slot_sidechain.lock()[edit_slot];
+
+                        ui.label(egui::RichText::new("SC").color(th::LABEL_DIM).size(9.0));
+                        ui.add_space(2.0);
+
+                        let sc_labels: &[(&str, u8)] = &[
+                            ("SC1", 0), ("SC2", 1), ("SC3", 2), ("SC4", 3), ("Self", 255),
+                        ];
+                        for &(label, idx) in sc_labels {
+                            let is_active = sc_assign == idx;
+                            let sc_live = idx < 4 && sc_active[idx as usize];
+                            let fill = if is_active {
+                                if sc_live { egui::Color32::from_rgb(0x30, 0xa0, 0x50) }
+                                else       { th::BORDER }
+                            } else {
+                                th::BG
+                            };
+                            let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                            let btn = egui::Button::new(
+                                egui::RichText::new(label).color(text_col).size(9.0)
+                            )
+                            .fill(fill)
+                            .stroke(egui::Stroke::new(th::STROKE_BORDER,
+                                if sc_live { egui::Color32::from_rgb(0x30, 0xa0, 0x50) }
+                                else       { th::BORDER }
+                            ));
+                            if ui.add(btn).clicked() {
+                                sc_assign = idx;
+                                params.slot_sidechain.lock()[edit_slot] = idx;
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+
+                    // ── GainMode selector (Gain module only) ──────────────────
+                    {
+                        let edit_slot = *params.editing_slot.lock() as usize;
+                        let slot_type = params.slot_module_types.lock()[edit_slot];
+                        if slot_type == crate::dsp::modules::ModuleType::Gain {
+                            ui.horizontal(|ui| {
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new("Mode").color(th::LABEL_DIM).size(9.0));
+                                ui.add_space(2.0);
+
+                                let cur_mode = params.slot_gain_mode.lock()[edit_slot];
+                                use crate::dsp::modules::GainMode;
+                                for (label, mode) in [("Add", GainMode::Add), ("Subtract", GainMode::Subtract), ("Pull", GainMode::Pull)] {
+                                    let is_active = cur_mode == mode;
+                                    let fill     = if is_active { th::BORDER } else { th::BG };
+                                    let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(label).color(text_col).size(9.0)
+                                    )
+                                    .fill(fill)
+                                    .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                                    if ui.add(btn).clicked() {
+                                        params.slot_gain_mode.lock()[edit_slot] = mode;
+                                    }
+                                }
+                            });
+                            ui.add_space(2.0);
+                        }
+                    }
 
                     use nih_plug_egui::widgets::ParamSlider;
 

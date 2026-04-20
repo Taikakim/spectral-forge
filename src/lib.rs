@@ -21,6 +21,7 @@ pub struct SpectralForge {
     gui_fft_size:          Arc<std::sync::atomic::AtomicUsize>,
     gui_spectrum_rx:       Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     gui_suppression_rx:    Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
+    gui_sidechain_active: Option<[Arc<std::sync::atomic::AtomicBool>; 4]>,
     /// Liveness token: the editor holds a Weak clone of this. When the plugin
     /// is destroyed (this Arc drops), the editor detects it and closes itself.
     plugin_alive: Arc<()>,
@@ -40,6 +41,9 @@ impl Default for SpectralForge {
         let gui_fft_size         = shared.fft_size.clone();
         let gui_spectrum_rx      = Some(shared.spectrum_rx.clone());
         let gui_suppression_rx   = Some(shared.suppression_rx.clone());
+        let gui_sidechain_active = Some(std::array::from_fn::<_, 4, _>(|i| {
+            shared.sidechain_active[i].clone()
+        }));
 
         Self {
             params:   Arc::new(SpectralForgeParams::default()),
@@ -50,6 +54,7 @@ impl Default for SpectralForge {
             gui_fft_size,
             gui_spectrum_rx,
             gui_suppression_rx,
+            gui_sidechain_active,
             plugin_alive: Arc::new(()),
             num_channels: 2,
             sample_rate:  dummy_sr,
@@ -91,6 +96,7 @@ impl Plugin for SpectralForge {
             self.gui_fft_size.clone(),
             self.gui_spectrum_rx.clone(),
             self.gui_suppression_rx.clone(),
+            self.gui_sidechain_active.clone(),
             Arc::downgrade(&self.plugin_alive),
         )
     }
