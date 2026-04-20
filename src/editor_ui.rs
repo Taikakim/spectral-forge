@@ -2,7 +2,7 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::Mutex;
 use triple_buffer::Input as TbInput;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 use crate::params::{SpectralForgeParams, NUM_CURVE_SETS};
 use crate::editor::{curve as crv, spectrum_display as sd, theme as th};
 
@@ -13,7 +13,7 @@ pub fn create_editor(
     params: Arc<SpectralForgeParams>,
     curve_tx: Vec<Vec<Arc<Mutex<TbInput<Vec<f32>>>>>>,
     sample_rate: Option<Arc<crate::bridge::AtomicF32>>,
-    num_bins: usize,
+    fft_size_arc: Arc<std::sync::atomic::AtomicUsize>,
     spectrum_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     suppression_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     plugin_alive: std::sync::Weak<()>,
@@ -34,6 +34,8 @@ pub fn create_editor(
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(th::BG))
                 .show(ctx, |ui| {
+                    let fft_size     = fft_size_arc.load(Ordering::Relaxed).max(512);
+                    let num_bins     = fft_size / 2 + 1;
                     let active_idx   = *params.active_curve.lock() as usize;
                     let sr           = sample_rate.as_ref().map(|a| a.load()).unwrap_or(44100.0);
                     let db_min       = *params.graph_db_min.lock();
@@ -189,6 +191,40 @@ pub fn create_editor(
                                 *params.peak_falloff_ms.lock() = v;
                             }
                         }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // FFT size selector
+                        use crate::params::FftSizeChoice;
+                        const FFT_LABELS: &[(&str, FftSizeChoice)] = &[
+                            ("512",  FftSizeChoice::S512),
+                            ("1k",   FftSizeChoice::S1024),
+                            ("2k",   FftSizeChoice::S2048),
+                            ("4k",   FftSizeChoice::S4096),
+                            ("8k",   FftSizeChoice::S8192),
+                            ("16k",  FftSizeChoice::S16384),
+                        ];
+                        let cur_choice = params.fft_size.value();
+                        for &(label, choice) in FFT_LABELS {
+                            let is_active = cur_choice == choice;
+                            let (fill, text_color) = if is_active {
+                                (th::BORDER, th::BG)
+                            } else {
+                                (th::BG, th::LABEL_DIM)
+                            };
+                            let btn = egui::Button::new(
+                                egui::RichText::new(label).color(text_color).size(10.0),
+                            )
+                            .fill(fill)
+                            .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                            if ui.add(btn).clicked() {
+                                setter.begin_set_parameter(&params.fft_size);
+                                setter.set_parameter(&params.fft_size, choice);
+                                setter.end_set_parameter(&params.fft_size);
+                            }
+                        }
                     });
 
                     ui.add_space(2.0);
@@ -218,12 +254,12 @@ pub fn create_editor(
                     let mut suppression_data: Vec<f32> = Vec::new();
                     if let Some(ref rx_arc) = spectrum_rx {
                         if let Some(mut rx) = rx_arc.try_lock() {
-                            raw_magnitudes = Some(rx.read().to_vec());
+                            raw_magnitudes = Some(rx.read()[..num_bins].to_vec());
                         }
                     }
                     if let Some(ref rx_arc) = suppression_rx {
                         if let Some(mut rx) = rx_arc.try_lock() {
-                            suppression_data = rx.read().to_vec();
+                            suppression_data = rx.read()[..num_bins].to_vec();
                         }
                     }
 
@@ -246,7 +282,7 @@ pub fn create_editor(
 
                     // 2. Spectrum + suppression gradient (always shown)
                     if let Some(ref mags) = raw_magnitudes {
-                        let norm = 4.0 / crate::dsp::pipeline::FFT_SIZE as f32;
+                        let norm = 4.0 / fft_size as f32;
                         let norm_mags: Vec<f32> = mags.iter().map(|m| m * norm).collect();
                         sd::decay_peak_hold(&norm_mags, &mut peak_hold, falloff, 1.0 / 60.0);
                         ui.data_mut(|d| d.insert_temp(peak_key, peak_hold.clone()));
@@ -255,7 +291,7 @@ pub fn create_editor(
                             ui.painter(), curve_rect,
                             &held_linear, &suppression_data,
                             db_min, db_max, false, sr,
-                            crate::dsp::pipeline::FFT_SIZE,
+                            fft_size,
                         );
                     }
 
@@ -264,21 +300,21 @@ pub fn create_editor(
                         // Phase mode: single per-bin phase-amount curve.
                         let phase_nodes = *params.phase_curve_nodes.lock();
                         let phase_gains = crv::compute_curve_response(
-                            &phase_nodes, crate::dsp::pipeline::NUM_BINS, sr,
-                            crate::dsp::pipeline::FFT_SIZE,
+                            &phase_nodes, num_bins, sr,
+                            fft_size,
                         );
                         crv::paint_response_curve(
                             ui.painter(), curve_rect, &phase_gains, 7,
                             th::phase_color_lit(), 2.0,
                             db_min, db_max, atk_ms, rel_ms, sr,
-                            crate::dsp::pipeline::FFT_SIZE, 0.0, 0.0,
+                            fft_size, 0.0, 0.0,
                         );
                         // Interactive widget
                         let mut nodes = phase_nodes;
                         if crv::curve_widget(
                             ui, curve_rect, &mut nodes, &phase_gains,
                             7, db_min, db_max, atk_ms, rel_ms, sr,
-                            crate::dsp::pipeline::FFT_SIZE, 0.0, 0.0,
+                            fft_size, 0.0, 0.0,
                         ) {
                             *params.phase_curve_nodes.lock() = nodes;
                             // Phase curve has no dedicated bridge channel in D1; persisted only.
@@ -288,22 +324,22 @@ pub fn create_editor(
                         let freeze_nodes_all = *params.freeze_curve_nodes.lock();
                         let freeze_nodes = freeze_nodes_all[freeze_active];
                         let freeze_gains = crv::compute_curve_response(
-                            &freeze_nodes, crate::dsp::pipeline::NUM_BINS, sr,
-                            crate::dsp::pipeline::FFT_SIZE,
+                            &freeze_nodes, num_bins, sr,
+                            fft_size,
                         );
                         let freeze_curve_idx = 8 + freeze_active;
                         crv::paint_response_curve(
                             ui.painter(), curve_rect, &freeze_gains, freeze_curve_idx,
                             th::freeze_color_lit(freeze_active), 2.0,
                             db_min, db_max, atk_ms, rel_ms, sr,
-                            crate::dsp::pipeline::FFT_SIZE, 0.0, 0.0,
+                            fft_size, 0.0, 0.0,
                         );
                         // Interactive widget
                         let mut nodes_mut = freeze_nodes;
                         if crv::curve_widget(
                             ui, curve_rect, &mut nodes_mut, &freeze_gains,
                             freeze_curve_idx, db_min, db_max, atk_ms, rel_ms, sr,
-                            crate::dsp::pipeline::FFT_SIZE, 0.0, 0.0,
+                            fft_size, 0.0, 0.0,
                         ) {
                             params.freeze_curve_nodes.lock()[freeze_active] = nodes_mut;
                             // Freeze curves have no dedicated bridge channel in D1; persisted only.
@@ -311,7 +347,7 @@ pub fn create_editor(
                     } else {
                         // Dynamics / other tab: show all 7 dynamics response curves.
                         let nodes_snapshot = *params.curve_nodes.lock();
-                        let cache_key = ui.id().with("all_display_gains");
+                        let cache_key = ui.id().with(("all_display_gains", fft_size));
                         let cached: Option<([[crv::CurveNode; 6]; NUM_CURVE_SETS], Vec<Vec<f32>>)> =
                             ui.data(|d| d.get_temp(cache_key));
                         let all_gains: Vec<Vec<f32>> = match cached {
@@ -321,8 +357,8 @@ pub fn create_editor(
                             _ => {
                                 let g: Vec<Vec<f32>> = (0..NUM_CURVE_SETS)
                                     .map(|i| crv::compute_curve_response(
-                                        &nodes_snapshot[i], crate::dsp::pipeline::NUM_BINS, sr,
-                                        crate::dsp::pipeline::FFT_SIZE,
+                                        &nodes_snapshot[i], num_bins, sr,
+                                        fft_size,
                                     ))
                                     .collect();
                                 ui.data_mut(|d| d.insert_temp(cache_key, (nodes_snapshot, g.clone())));
@@ -336,7 +372,7 @@ pub fn create_editor(
                                 ui.painter(), curve_rect, &all_gains[i], i,
                                 th::curve_color_dim(i), 1.0,
                                 db_min, db_max, atk_ms, rel_ms, sr,
-                                crate::dsp::pipeline::FFT_SIZE,
+                                fft_size,
                                 tilts[i], offsets[i],
                             );
                         }
@@ -344,7 +380,7 @@ pub fn create_editor(
                             ui.painter(), curve_rect, &all_gains[active_idx], active_idx,
                             th::curve_color_lit(active_idx), 2.0,
                             db_min, db_max, atk_ms, rel_ms, sr,
-                            crate::dsp::pipeline::FFT_SIZE,
+                            fft_size,
                             tilts[active_idx], offsets[active_idx],
                         );
 
@@ -354,14 +390,14 @@ pub fn create_editor(
                             if crv::curve_widget(
                                 ui, curve_rect, &mut nodes, &all_gains[active_idx],
                                 active_idx, db_min, db_max, atk_ms, rel_ms, sr,
-                                crate::dsp::pipeline::FFT_SIZE,
+                                fft_size,
                                 tilts[active_idx], offsets[active_idx],
                             ) {
                                 params.curve_nodes.lock()[active_idx] = nodes;
-                                if num_bins > 0 {
+                                {
+                                    use crate::dsp::pipeline::MAX_NUM_BINS;
                                     let full_gains = crv::compute_curve_response(
-                                        &nodes, num_bins, sr,
-                                        crate::dsp::pipeline::FFT_SIZE,
+                                        &nodes, MAX_NUM_BINS, sr, fft_size,
                                     );
                                     let editing_slot = *params.editing_slot.lock() as usize;
                                     if let Some(slot_curves) = curve_tx.get(editing_slot) {

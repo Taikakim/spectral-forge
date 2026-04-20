@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
 use triple_buffer::{TripleBuffer, Input as TbInput, Output as TbOutput};
 
 pub const NUM_CURVES: usize = 7;
@@ -14,7 +14,11 @@ pub const CURVE_MIX:       usize = 6;
 pub const NUM_SLOTS: usize = 9;
 
 pub struct SharedState {
+    /// Always MAX_NUM_BINS — kept for backward compat; use fft_size for current active bin count.
     pub num_bins: usize,
+
+    /// Current active FFT size (power of 2). GUI reads this to know how many bins are valid.
+    pub fft_size: Arc<AtomicUsize>,
 
     /// curve_tx[slot][curve] = GUI write handle. 9 slots × 7 curves.
     pub curve_tx: Vec<Vec<Arc<Mutex<TbInput<Vec<f32>>>>>>,
@@ -50,17 +54,20 @@ impl AtomicF32 {
 }
 
 impl SharedState {
-    pub fn new(num_bins: usize, sample_rate: f32) -> Self {
-        let zero_bins = vec![0.0f32; num_bins];
+    /// Create a SharedState pre-allocated at MAX_NUM_BINS.
+    /// `initial_fft_size` is the default FFT size (stored in the AtomicUsize).
+    pub fn new(initial_fft_size: usize, sample_rate: f32) -> Self {
+        use crate::dsp::pipeline::MAX_NUM_BINS;
+        let zero_bins = vec![0.0f32; MAX_NUM_BINS];
 
-        // Build 9×7 triple buffers, initialized to 1.0 (neutral) for all curves.
+        // Build 9×7 triple buffers at MAX_NUM_BINS, initialized to 1.0 (neutral) for all curves.
         let mut curve_tx = Vec::with_capacity(NUM_SLOTS);
         let mut curve_rx = Vec::with_capacity(NUM_SLOTS);
         for _ in 0..NUM_SLOTS {
             let mut slot_tx = Vec::with_capacity(NUM_CURVES);
             let mut slot_rx = Vec::with_capacity(NUM_CURVES);
             for _ in 0..NUM_CURVES {
-                let init = vec![1.0f32; num_bins];
+                let init = vec![1.0f32; MAX_NUM_BINS];
                 let (tx, rx) = TripleBuffer::new(&init).split();
                 slot_tx.push(Arc::new(Mutex::new(tx)));
                 slot_rx.push(rx);
@@ -73,7 +80,8 @@ impl SharedState {
         let (suppression_tx, suppression_rx) = TripleBuffer::new(&zero_bins).split();
 
         Self {
-            num_bins,
+            num_bins: MAX_NUM_BINS,
+            fft_size: Arc::new(AtomicUsize::new(initial_fft_size)),
             curve_tx,
             curve_rx,
             sidechain_active: std::array::from_fn(|_| Arc::new(AtomicBool::new(false))),

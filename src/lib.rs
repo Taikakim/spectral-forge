@@ -18,7 +18,7 @@ pub struct SpectralForge {
     /// gui_curve_tx[slot][curve]: 9 slots × 7 curves.
     gui_curve_tx:          Vec<Vec<Arc<parking_lot::Mutex<triple_buffer::Input<Vec<f32>>>>>>,
     gui_sample_rate:       Option<Arc<bridge::AtomicF32>>,
-    gui_num_bins:          usize,
+    gui_fft_size:          Arc<std::sync::atomic::AtomicUsize>,
     gui_spectrum_rx:       Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     gui_suppression_rx:    Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     /// Liveness token: the editor holds a Weak clone of this. When the plugin
@@ -32,12 +32,12 @@ pub struct SpectralForge {
 impl Default for SpectralForge {
     fn default() -> Self {
         let dummy_sr = 44100.0;
-        let num_bins = dsp::pipeline::FFT_SIZE / 2 + 1;
-        let shared = bridge::SharedState::new(num_bins, dummy_sr);
+        let default_fft_size = dsp::pipeline::FFT_SIZE;
+        let shared = bridge::SharedState::new(default_fft_size, dummy_sr);
 
         let gui_curve_tx         = shared.curve_tx.clone();
         let gui_sample_rate      = Some(shared.sample_rate.clone());
-        let gui_num_bins         = shared.num_bins;
+        let gui_fft_size         = shared.fft_size.clone();
         let gui_spectrum_rx      = Some(shared.spectrum_rx.clone());
         let gui_suppression_rx   = Some(shared.suppression_rx.clone());
 
@@ -47,7 +47,7 @@ impl Default for SpectralForge {
             shared:   Some(shared),
             gui_curve_tx,
             gui_sample_rate,
-            gui_num_bins,
+            gui_fft_size,
             gui_spectrum_rx,
             gui_suppression_rx,
             plugin_alive: Arc::new(()),
@@ -88,7 +88,7 @@ impl Plugin for SpectralForge {
             self.params.clone(),
             self.gui_curve_tx.clone(),
             self.gui_sample_rate.clone(),
-            self.gui_num_bins,
+            self.gui_fft_size.clone(),
             self.gui_spectrum_rx.clone(),
             self.gui_suppression_rx.clone(),
             Arc::downgrade(&self.plugin_alive),
@@ -101,18 +101,23 @@ impl Plugin for SpectralForge {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
+        use std::sync::atomic::Ordering;
         let sr = buffer_config.sample_rate;
         let num_ch = audio_io_layout.main_output_channels
             .map(|c| c.get() as usize).unwrap_or(2);
         self.num_channels = num_ch;
         self.sample_rate  = sr;
-        let num_bins = dsp::pipeline::FFT_SIZE / 2 + 1;
-        self.pipeline = Some(dsp::pipeline::Pipeline::new(sr, num_ch));
-        context.set_latency_samples(dsp::pipeline::FFT_SIZE as u32);
+
+        let fft_size = params::fft_size_from_choice(self.params.fft_size.value());
+        let max_num_bins = dsp::pipeline::MAX_NUM_BINS;
+
+        self.pipeline = Some(dsp::pipeline::Pipeline::new(sr, num_ch, fft_size));
+        context.set_latency_samples(fft_size as u32);
+
         if let Some(ref sh) = self.shared {
             sh.sample_rate.store(sr);
+            sh.fft_size.store(fft_size, Ordering::Relaxed);
 
-            let num_bins_local = num_bins;
             // The editing slot is shown in the GUI using `curve_nodes` (the legacy 7-curve
             // store). Publish from there so the displayed curve response matches the DSP on
             // first load — otherwise the GUI might show a 2:1 ratio while the DSP applies 1:1.
@@ -121,7 +126,7 @@ impl Plugin for SpectralForge {
                 let legacy = self.params.curve_nodes.lock();
                 for c in 0..7 {
                     let gains = crate::editor::curve::compute_curve_response(
-                        &legacy[c], num_bins_local, sr, dsp::pipeline::FFT_SIZE,
+                        &legacy[c], max_num_bins, sr, fft_size,
                     );
                     if let Some(mut tx) = self.gui_curve_tx[editing_slot][c].try_lock() {
                         tx.input_buffer_mut().copy_from_slice(&gains);
@@ -136,7 +141,7 @@ impl Plugin for SpectralForge {
                     if s == editing_slot { continue; }
                     for c in 0..7 {
                         let gains = crate::editor::curve::compute_curve_response(
-                            &nodes[s][c], num_bins_local, sr, dsp::pipeline::FFT_SIZE,
+                            &nodes[s][c], max_num_bins, sr, fft_size,
                         );
                         if let Some(mut tx) = self.gui_curve_tx[s][c].try_lock() {
                             tx.input_buffer_mut().copy_from_slice(&gains);

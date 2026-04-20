@@ -54,13 +54,13 @@ impl SpectralModule for FreezeModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        _ctx: &ModuleContext,
+        ctx: &ModuleContext,
     ) {
         debug_assert_eq!(bins.len(), self.frozen_bins.len(),
             "FreezeModule: bins/buffer size mismatch — call reset() before process()");
 
-        use crate::dsp::pipeline::{FFT_SIZE, OVERLAP};
-        let hop_ms = FFT_SIZE as f32 / (OVERLAP as f32 * self.sample_rate) * 1000.0;
+        use crate::dsp::pipeline::OVERLAP;
+        let hop_ms = ctx.fft_size as f32 / (OVERLAP as f32 * self.sample_rate) * 1000.0;
 
         if !self.freeze_captured {
             // First call: capture current frame as initial frozen state.

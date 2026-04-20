@@ -13,9 +13,8 @@ pub const MAX_NUM_BINS: usize = MAX_FFT_SIZE / 2 + 1;
 /// nih-plug typically processes in blocks of ≤ 8192 samples.
 const MAX_BLOCK_SIZE: usize = 8192;
 
-/// Ring-buffer size per channel for the dry-signal delay in the delta monitor.
-/// Must be ≥ FFT_SIZE + MAX_BLOCK_SIZE so the ring never overwrites samples still needed.
-const DRY_DELAY_SIZE: usize = FFT_SIZE + MAX_BLOCK_SIZE;
+/// Maximum ring-buffer size per channel: accommodates the largest possible FFT latency + block.
+const MAX_DRY_DELAY_SIZE: usize = MAX_FFT_SIZE + MAX_BLOCK_SIZE;
 
 pub struct Pipeline {
     stft: StftHelper,
@@ -27,12 +26,13 @@ pub struct Pipeline {
     channel_supp_buf: Vec<f32>,
     complex_buf:     Vec<Complex<f32>>,
     fx_matrix: crate::dsp::fx_matrix::FxMatrix,
-    /// Ring buffer for delta monitor dry-signal delay: 2 channels × DRY_DELAY_SIZE entries.
-    /// Channel c occupies [c * DRY_DELAY_SIZE .. (c+1) * DRY_DELAY_SIZE].
-    /// Delayed by FFT_SIZE samples to align dry with STFT-latency-compensated wet.
+    /// Ring buffer for delta monitor dry-signal delay: 2 channels × MAX_DRY_DELAY_SIZE entries.
+    /// Channel c occupies [c * MAX_DRY_DELAY_SIZE .. (c+1) * MAX_DRY_DELAY_SIZE].
+    /// Delayed by fft_size samples to align dry with STFT-latency-compensated wet.
     dry_delay: Vec<f32>,
-    /// Current write head into dry_delay (wraps at DRY_DELAY_SIZE).
+    /// Current write head into dry_delay (wraps at fft_size + MAX_BLOCK_SIZE).
     dry_delay_write: usize,
+    fft_size: usize,
     /// Pre-allocated per-slot curve cache. [slot][curve][bin]
     slot_curve_cache: Vec<Vec<Vec<f32>>>,
     /// Per-aux sidechain envelope followers (up to 4). [sc_idx][bin]
@@ -47,46 +47,48 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(sample_rate: f32, num_channels: usize) -> Self {
+    pub fn new(sample_rate: f32, num_channels: usize, fft_size: usize) -> Self {
+        let num_bins = fft_size / 2 + 1;
         let mut planner = RealFftPlanner::<f32>::new();
-        let fft_plan  = planner.plan_fft_forward(FFT_SIZE);
-        let ifft_plan = planner.plan_fft_inverse(FFT_SIZE);
+        let fft_plan  = planner.plan_fft_forward(fft_size);
+        let ifft_plan = planner.plan_fft_inverse(fft_size);
 
-        let window: Vec<f32> = (0..FFT_SIZE)
+        let window: Vec<f32> = (0..fft_size)
             .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32
-                / (FFT_SIZE - 1) as f32).cos()))
+                / (fft_size - 1) as f32).cos()))
             .collect();
 
         let complex_buf = fft_plan.make_output_vec();
 
-        let fx_matrix = crate::dsp::fx_matrix::FxMatrix::new(sample_rate, FFT_SIZE);
+        let fx_matrix = crate::dsp::fx_matrix::FxMatrix::new(sample_rate, fft_size);
 
-        // 9 slots × 7 curves × NUM_BINS, all-ones (neutral)
+        // 9 slots × 7 curves × MAX_NUM_BINS, all-ones (neutral); only [0..num_bins] are used
         let slot_curve_cache: Vec<Vec<Vec<f32>>> = (0..9)
-            .map(|_| (0..7).map(|_| vec![1.0f32; NUM_BINS]).collect())
+            .map(|_| (0..7).map(|_| vec![1.0f32; MAX_NUM_BINS]).collect())
             .collect();
 
-        // 4 sidechain paths
-        let sc_envelopes: Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; NUM_BINS]).collect();
-        let sc_env_states: Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; NUM_BINS]).collect();
+        // 4 sidechain paths pre-allocated at MAX_NUM_BINS; only [0..num_bins] are used
+        let sc_envelopes:   Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let sc_env_states:  Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        // exact-size: determined by FFT plan output
         let sc_complex_bufs: Vec<Vec<Complex<f32>>> = (0..4)
-            .map(|_| vec![Complex::new(0.0f32, 0.0f32); NUM_BINS])
+            .map(|_| vec![Complex::new(0.0f32, 0.0f32); num_bins])
             .collect();
         let sc_stfts: Vec<StftHelper> = (0..4)
-            .map(|_| StftHelper::new(2, FFT_SIZE, 0))
+            .map(|_| StftHelper::new(2, fft_size, 0))
             .collect();
 
         Self {
-            stft: StftHelper::new(num_channels, FFT_SIZE, 0),
+            stft: StftHelper::new(num_channels, fft_size, 0),
             fft_plan,
             ifft_plan,
             window,
-            spectrum_buf:     vec![0.0; NUM_BINS],
-            suppression_buf:  vec![0.0; NUM_BINS],
-            channel_supp_buf: vec![0.0; NUM_BINS],
+            spectrum_buf:     vec![0.0; MAX_NUM_BINS],
+            suppression_buf:  vec![0.0; MAX_NUM_BINS],
+            channel_supp_buf: vec![0.0; MAX_NUM_BINS],
             complex_buf,
             fx_matrix,
-            dry_delay: vec![0.0f32; 2 * DRY_DELAY_SIZE],
+            dry_delay: vec![0.0f32; 2 * MAX_DRY_DELAY_SIZE],
             dry_delay_write: 0,
             slot_curve_cache,
             sc_envelopes,
@@ -94,20 +96,38 @@ impl Pipeline {
             sc_complex_bufs,
             sc_stfts,
             sample_rate,
+            fft_size,
         }
     }
 
     pub fn reset(&mut self, sample_rate: f32, num_channels: usize) {
+        let fft_size = self.fft_size;
+        let num_bins = fft_size / 2 + 1;
         self.sample_rate = sample_rate;
-        self.stft = StftHelper::new(num_channels, FFT_SIZE, 0);
+
+        let mut planner = RealFftPlanner::<f32>::new();
+        self.fft_plan  = planner.plan_fft_forward(fft_size);
+        self.ifft_plan = planner.plan_fft_inverse(fft_size);
+
+        self.window = (0..fft_size)
+            .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32
+                / (fft_size - 1) as f32).cos()))
+            .collect();
+        self.complex_buf = self.fft_plan.make_output_vec();
+        for buf in &mut self.sc_complex_bufs {
+            buf.resize(num_bins, Complex::new(0.0, 0.0));
+            buf.fill(Complex::new(0.0, 0.0));
+        }
+
+        self.stft = StftHelper::new(num_channels, fft_size, 0);
         self.dry_delay.fill(0.0);
         self.dry_delay_write = 0;
         for sc in &mut self.sc_envelopes  { sc.fill(0.0); }
         for sc in &mut self.sc_env_states { sc.fill(0.0); }
         for i in 0..self.sc_stfts.len() {
-            self.sc_stfts[i] = StftHelper::new(2, FFT_SIZE, 0);
+            self.sc_stfts[i] = StftHelper::new(2, fft_size, 0);
         }
-        self.fx_matrix.reset(sample_rate, FFT_SIZE);
+        self.fx_matrix.reset(sample_rate, fft_size);
     }
 
     pub fn process(
@@ -119,6 +139,8 @@ impl Pipeline {
     ) {
         use crate::dsp::modules::{apply_curve_transform, ModuleContext};
 
+        let fft_size = self.fft_size;
+        let num_bins = fft_size / 2 + 1;
         let block_size = buffer.samples() as u32;
         let attack_ms_base    = params.attack_ms.smoothed.next_step(block_size);
         let release_ms_base   = params.release_ms.smoothed.next_step(block_size);
@@ -130,7 +152,7 @@ impl Pipeline {
         let meta_guard = params.slot_curve_meta.try_lock();
         for s in 0..9 {
             for c in 0..7 {
-                self.slot_curve_cache[s][c].copy_from_slice(shared.curve_rx[s][c].read());
+                self.slot_curve_cache[s][c].copy_from_slice(&shared.curve_rx[s][c].read()[..MAX_NUM_BINS]);
                 if let Some(ref meta) = meta_guard {
                     let (tilt, offset) = meta[s][c];
                     apply_curve_transform(&mut self.slot_curve_cache[s][c], tilt, offset);
@@ -141,7 +163,7 @@ impl Pipeline {
         // ── Process up to 4 aux sidechain inputs ──
         let mut sc_active_flags = [false; 4];
         {
-            let hop = FFT_SIZE / OVERLAP;
+            let hop = fft_size / OVERLAP;
             let fft_plan = self.fft_plan.clone();
             let window = &self.window;
             let sample_rate = self.sample_rate;
@@ -212,8 +234,8 @@ impl Pipeline {
         // Build ModuleContext (all Copy fields, no borrows)
         let ctx = ModuleContext {
             sample_rate:       self.sample_rate,
-            fft_size:          FFT_SIZE,
-            num_bins:          NUM_BINS,
+            fft_size,
+            num_bins,
             attack_ms:         attack_ms_base,
             release_ms:        release_ms_base,
             sensitivity,
@@ -243,14 +265,15 @@ impl Pipeline {
             .map(|g| *g)
             .unwrap_or([FxChannelTarget::All; 9]);
 
+        let dry_delay_size = fft_size + MAX_BLOCK_SIZE;
         // Delta monitor: write dry samples into the ring buffer at the current write head.
         if delta_monitor {
             let mut dry_idx = 0usize;
             for sample_block in buffer.iter_samples() {
                 debug_assert!(dry_idx < MAX_BLOCK_SIZE, "block size exceeded MAX_BLOCK_SIZE={MAX_BLOCK_SIZE}");
-                let pos = (self.dry_delay_write + dry_idx) % DRY_DELAY_SIZE;
+                let pos = (self.dry_delay_write + dry_idx) % dry_delay_size;
                 for (ch_idx, sample) in sample_block.into_iter().enumerate() {
-                    self.dry_delay[ch_idx * DRY_DELAY_SIZE + pos] = *sample;
+                    self.dry_delay[ch_idx * MAX_DRY_DELAY_SIZE + pos] = *sample;
                 }
                 dry_idx += 1;
             }
@@ -284,9 +307,9 @@ impl Pipeline {
         // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
-        // IFFT gives FFT_SIZE gain; Hann^2 OLA at 75% overlap gives 1.5 gain.
-        // Combined normalization: 1 / (FFT_SIZE * 1.5) = 2 / (3 * FFT_SIZE)
-        let norm = 2.0_f32 / (3.0 * FFT_SIZE as f32);
+        // IFFT gives fft_size gain; Hann^2 OLA at 75% overlap gives 1.5 gain.
+        // Combined normalization: 1 / (fft_size * 1.5) = 2 / (3 * fft_size)
+        let norm = 2.0_f32 / (3.0 * fft_size as f32);
 
         self.stft.process_overlap_add(buffer, OVERLAP, |channel, block| {
             // Analysis window + input gain
@@ -314,7 +337,7 @@ impl Pipeline {
                 slot_curve_cache_ref,
                 &ctx,
                 channel_supp_buf,
-                NUM_BINS,
+                num_bins,
             );
             for k in 0..channel_supp_buf.len() {
                 if channel_supp_buf[k] > suppression_buf[k] { suppression_buf[k] = channel_supp_buf[k]; }
@@ -342,27 +365,28 @@ impl Pipeline {
             }
         }
 
-        // Delta monitor: output dry(delayed by FFT_SIZE) − wet = the removed signal.
+        // Delta monitor: output dry(delayed by fft_size) − wet = the removed signal.
         if delta_monitor {
             let block_samples = buffer.samples();
             let mut dry_idx = 0usize;
             for sample_block in buffer.iter_samples() {
                 let read_pos =
-                    (self.dry_delay_write + dry_idx + DRY_DELAY_SIZE - FFT_SIZE) % DRY_DELAY_SIZE;
+                    (self.dry_delay_write + dry_idx + dry_delay_size - fft_size) % dry_delay_size;
                 for (ch_idx, sample) in sample_block.into_iter().enumerate() {
-                    let dry_val = self.dry_delay[ch_idx * DRY_DELAY_SIZE + read_pos];
+                    let dry_val = self.dry_delay[ch_idx * MAX_DRY_DELAY_SIZE + read_pos];
                     *sample = dry_val - *sample;
                 }
                 dry_idx += 1;
             }
             // Advance write head now that both write (above) and read are done
-            self.dry_delay_write = (self.dry_delay_write + block_samples) % DRY_DELAY_SIZE;
+            self.dry_delay_write = (self.dry_delay_write + block_samples) % dry_delay_size;
         }
 
-        // Push latest spectra to GUI triple-buffers (allocation-free: mutate in-place then publish)
-        shared.spectrum_tx.input_buffer_mut().copy_from_slice(spectrum_buf);
+        // Push latest spectra to GUI triple-buffers (allocation-free: mutate in-place then publish).
+        // Bridge buffers are MAX_NUM_BINS; bins beyond num_bins are left as zero (silent).
+        shared.spectrum_tx.input_buffer_mut().copy_from_slice(&spectrum_buf[..MAX_NUM_BINS]);
         shared.spectrum_tx.publish();
-        shared.suppression_tx.input_buffer_mut().copy_from_slice(suppression_buf);
+        shared.suppression_tx.input_buffer_mut().copy_from_slice(&suppression_buf[..MAX_NUM_BINS]);
         shared.suppression_tx.publish();
     }
 }
