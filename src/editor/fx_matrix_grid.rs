@@ -119,8 +119,8 @@ pub fn paint_fx_matrix_grid(
                 } else if ty == ModuleType::Empty {
                     "+".to_string()
                 } else {
-                    let n = slot_name_str(&slot_names[row]);
-                    if n.chars().count() > 6 { n.chars().take(5).collect::<String>() + "\u{2026}" } else { n }
+                    let slot_label = slot_name_str(&slot_names[row]);
+                    if slot_label.chars().count() > 6 { slot_label.chars().take(5).collect::<String>() + "\u{2026}" } else { slot_label }
                 };
                 let text_col = if is_master {
                     spec.color_lit
@@ -151,7 +151,11 @@ pub fn paint_fx_matrix_grid(
                     result.right_click = Some((row, interact.interact_pointer_pos()
                         .unwrap_or(cell_rect.center())));
                 }
-                interact.on_hover_text(slot_name_str(&slot_names[row]));
+                if is_master {
+                    interact.on_hover_text("Master output");
+                } else {
+                    interact.on_hover_text(slot_name_str(&slot_names[row]));
+                }
 
             } else {
                 // Off-diagonal send cell.

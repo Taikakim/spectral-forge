@@ -637,7 +637,8 @@ pub fn create_editor(
                     let edit_slot  = *params.editing_slot.lock() as usize;
                     let types_snap = *params.slot_module_types.lock();
                     let names_snap = *params.slot_names.lock();
-                    let route_matrix_ref = &mut *params.route_matrix.lock();
+                    let mut route_guard = params.route_matrix.lock();
+                    let route_matrix_ref = &mut *route_guard;
                     let interaction = crate::editor::fx_matrix_grid::paint_fx_matrix_grid(
                         ui,
                         &types_snap,
