@@ -51,7 +51,7 @@ pub fn show_popup(
     let mut consumed = false;
     let mut new_state = state.clone();
 
-    egui::Area::new(egui::Id::new("module_popup_area"))
+    let area_response = egui::Area::new(egui::Id::new("module_popup_area"))
         .fixed_pos(state.pos)
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
@@ -104,15 +104,15 @@ pub fn show_popup(
                     egui::RichText::new("DSP change takes effect\non host restart.")
                         .color(th::LABEL_DIM).size(8.0)
                 );
-
-                // Close on click outside
-                if ui.ctx().input(|i| i.pointer.any_click())
-                    && !ui.ctx().is_pointer_over_area()
-                {
-                    new_state.open = false;
-                }
             });
         });
+
+    // Close on click outside: pointer clicked AND not over this specific popup area
+    if ui.ctx().input(|i| i.pointer.any_click())
+        && !area_response.response.contains_pointer()
+    {
+        new_state.open = false;
+    }
 
     ui.data_mut(|d| d.insert_temp(key, new_state));
     consumed

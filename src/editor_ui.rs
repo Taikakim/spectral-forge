@@ -654,7 +654,7 @@ pub fn create_editor(
                         crate::editor::module_popup::open_popup(ui, slot, pos);
                     }
                     // Render popup (egui Area — appears above matrix)
-                    crate::editor::module_popup::show_popup(ui, &params);
+                    let _ = crate::editor::module_popup::show_popup(ui, &params);
                 });
         },
     )
