@@ -192,11 +192,14 @@ pub fn create_editor(
                             }
                         }
 
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(4.0);
+                    });
 
-                        // FFT size selector
+                    // ── Second bar: FFT size selector ─────────────────────────────
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("FFT").color(th::LABEL_DIM).size(9.0));
+                        ui.add_space(2.0);
+
                         use crate::params::FftSizeChoice;
                         const FFT_LABELS: &[(&str, FftSizeChoice)] = &[
                             ("512",  FftSizeChoice::S512),

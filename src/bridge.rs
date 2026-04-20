@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize}};
 use triple_buffer::{TripleBuffer, Input as TbInput, Output as TbOutput};
 
 pub const NUM_CURVES: usize = 7;
