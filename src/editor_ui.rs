@@ -175,7 +175,7 @@ pub fn create_editor(
                     // strip_height reserves space for: control knobs (105) + routing matrix section
                     // (9 × 44px cells + 14px header + 30px padding = 440). The window height (1010) was
                     // set to accommodate all three areas.
-                    const MATRIX_AREA_H: f32 = 9.0 * 44.0 + 14.0 + 30.0; // 440 px
+                    const MATRIX_AREA_H: f32 = 9.0 * 44.0 + 4.0 * 22.0 + 14.0 + 30.0; // 528 px worst case
                     let strip_height = 105.0 + MATRIX_AREA_H;
                     let avail = ui.available_rect_before_wrap();
                     let curve_rect = egui::Rect::from_min_max(
