@@ -429,7 +429,7 @@ fn matrix_routing_serial_default_passes_signal() {
     types[8] = ModuleType::Master;
     let mut fm = FxMatrix::new(44100.0, 2048, &types);
 
-    // Serial default: slot 0 feeds Master. Main signal = all-ones magnitude.
+    // Serial default: slot 0 → slot 1 → slot 2 → Master (empty intermediate slots pass signal through).
     let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); n];
     let curves: Vec<Vec<Vec<f32>>> = (0..9)
         .map(|_| (0..7).map(|_| vec![1.0f32; MAX_NUM_BINS]).collect())

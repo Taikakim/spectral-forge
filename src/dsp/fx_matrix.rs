@@ -9,6 +9,7 @@ pub struct FxMatrix {
     pub slots: Vec<Option<Box<dyn SpectralModule>>>,
     slot_out:  Vec<Vec<Complex<f32>>>,
     slot_supp: Vec<Vec<f32>>,
+    /// D3: virtual row output buffers for T/S Split — not yet written by process_hop.
     virtual_out: Vec<Vec<Complex<f32>>>,
     mix_buf:   Vec<Complex<f32>>,
 }
@@ -69,7 +70,7 @@ impl FxMatrix {
         suppression_out: &mut [f32],
         num_bins:        usize,
     ) {
-        for s in 0..MAX_SLOTS {
+        for s in 0..8 {  // 0..8, not 0..MAX_SLOTS; Master (slot 8) is handled separately below
             // Build this slot's input from the route matrix.
             // Slot 0 always receives the plugin's main audio input.
             // All slots additionally receive weighted sums of previous-slot outputs.
@@ -129,6 +130,7 @@ impl FxMatrix {
             }
         } else {
             // Fallback: last populated slot's output goes to Master.
+            // If all slots 0-7 are empty, mix_buf stays zeroed → silence.
             for src in (0..8).rev() {
                 if self.slots[src].is_some() {
                     self.mix_buf[..num_bins].copy_from_slice(&self.slot_out[src][..num_bins]);

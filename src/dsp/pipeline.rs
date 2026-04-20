@@ -298,8 +298,7 @@ impl Pipeline {
             self.fx_matrix.set_gain_modes(&*modes);
         }
 
-        // Snapshot route_matrix outside the closure (clone is fine here — not in the audio thread hot path,
-        // and the closure can capture it by value without allocation inside the STFT callback).
+        // Snapshot route_matrix before the per-hop closure — RouteMatrix is plain arrays (~500 bytes), no heap allocation.
         let route_matrix_snap = params.route_matrix.try_lock()
             .map(|g| g.clone())
             .unwrap_or_else(|| crate::dsp::modules::RouteMatrix::default());
