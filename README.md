@@ -135,7 +135,8 @@ Built on [nih-plug](https://github.com/robbert-vdh/nih-plug) (Robbert van der He
               
     The original source code in this repository is dedicated to the
     public domain under the                                        
-    [Creative Commons Zero v1.0 Universal (CC0-1.0)](https://creativecommons.org/publicdomain/zero/1.0/legalcode).
+    [Creative Commons Zero v1.0 Universal (CC0-1.0)]
+    (https://creativecommons.org/publicdomain/zero/1.0/legalcode).
     To the extent possible under law, the author has waived all copyright                                         
     and related or neighbouring rights to this work.                     
                                                     
