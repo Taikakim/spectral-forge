@@ -25,8 +25,8 @@ pub struct SharedState {
     /// curve_rx[slot][curve] = audio-thread read handle.
     pub curve_rx: Vec<Vec<TbOutput<Vec<f32>>>>,
 
-    /// Whether each of the 4 aux sidechain inputs is carrying signal.
-    pub sidechain_active: [Arc<AtomicBool>; 4],
+    /// Whether any aux sidechain input is carrying signal.
+    pub sidechain_active: Arc<AtomicBool>,
 
     // Audio → GUI
     pub spectrum_tx:      TbInput<Vec<f32>>,
@@ -88,7 +88,7 @@ impl SharedState {
             fft_size: Arc::new(AtomicUsize::new(initial_fft_size)),
             curve_tx,
             curve_rx,
-            sidechain_active: std::array::from_fn(|_| Arc::new(AtomicBool::new(false))),
+            sidechain_active: Arc::new(AtomicBool::new(false)),
             spectrum_tx,
             spectrum_rx: Arc::new(Mutex::new(spectrum_rx)),
             suppression_tx,

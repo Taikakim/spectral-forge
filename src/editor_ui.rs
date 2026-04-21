@@ -14,7 +14,7 @@ pub fn create_editor(
     fft_size_arc: Arc<std::sync::atomic::AtomicUsize>,
     spectrum_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     suppression_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
-    sidechain_active: Option<[Arc<std::sync::atomic::AtomicBool>; 4]>,
+    sidechain_active: Option<Arc<std::sync::atomic::AtomicBool>>,
     plugin_alive: std::sync::Weak<()>,
 ) -> Option<Box<dyn Editor>> {
     create_egui_editor(
@@ -63,10 +63,10 @@ pub fn create_editor(
                     let falloff      = *params.peak_falloff_ms.lock();
                     let atk_ms       = params.attack_ms.value();
                     let rel_ms       = params.release_ms.value();
-                    let sc_active: [bool; 4] = match &sidechain_active {
-                        Some(arcs) => std::array::from_fn(|i| arcs[i].load(std::sync::atomic::Ordering::Relaxed)),
-                        None => [false; 4],
-                    };
+                    let sc_active: bool = sidechain_active
+                        .as_ref()
+                        .map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
+                        .unwrap_or(false);
 
                     // ── Top bar: curve selectors + range controls ──────────────
                     ui.horizontal(|ui| {
@@ -499,30 +499,44 @@ pub fn create_editor(
                         ui.label(egui::RichText::new("SC").color(th::LABEL_DIM).size(9.0));
                         ui.add_space(2.0);
 
-                        let sc_labels: &[(&str, u8)] = &[
-                            ("SC1", 0), ("SC2", 1), ("SC3", 2), ("SC4", 3), ("Self", 255),
-                        ];
-                        for &(label, idx) in sc_labels {
-                            let is_active = sc_assign == idx;
-                            let sc_live = idx < 4 && sc_active[idx as usize];
-                            let fill = if is_active {
-                                if sc_live { egui::Color32::from_rgb(0x30, 0xa0, 0x50) }
-                                else       { th::BORDER }
+                        // Single SC source indicator (Task 13 will rewrite this properly).
+                        // sc_active reflects whether any sidechain input is live.
+                        {
+                            let is_sc_assigned = sc_assign != 255;
+                            let fill = if is_sc_assigned {
+                                if sc_active { egui::Color32::from_rgb(0x30, 0xa0, 0x50) }
+                                else         { th::BORDER }
                             } else {
                                 th::BG
                             };
-                            let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                            let text_col = if is_sc_assigned { egui::Color32::BLACK } else { th::LABEL_DIM };
                             let btn = egui::Button::new(
-                                egui::RichText::new(label).color(text_col).size(9.0)
+                                egui::RichText::new("SC").color(text_col).size(9.0)
                             )
                             .fill(fill)
                             .stroke(egui::Stroke::new(th::STROKE_BORDER,
-                                if sc_live { egui::Color32::from_rgb(0x30, 0xa0, 0x50) }
-                                else       { th::BORDER }
+                                if sc_active { egui::Color32::from_rgb(0x30, 0xa0, 0x50) }
+                                else         { th::BORDER }
                             ));
                             if ui.add(btn).clicked() {
-                                sc_assign = idx;
-                                params.slot_sidechain.lock()[edit_slot] = idx;
+                                // Toggle SC on/off: assign SC (source 0) or clear to self-detect.
+                                sc_assign = if is_sc_assigned { 255 } else { 0 };
+                                params.slot_sidechain.lock()[edit_slot] = sc_assign;
+                            }
+                        }
+                        // Self button: always-available passthrough.
+                        {
+                            let is_self = sc_assign == 255;
+                            let fill     = if is_self { th::BORDER } else { th::BG };
+                            let text_col = if is_self { egui::Color32::BLACK } else { th::LABEL_DIM };
+                            let btn = egui::Button::new(
+                                egui::RichText::new("Self").color(text_col).size(9.0)
+                            )
+                            .fill(fill)
+                            .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                            if ui.add(btn).clicked() {
+                                sc_assign = 255;
+                                params.slot_sidechain.lock()[edit_slot] = sc_assign;
                             }
                         }
                     });

@@ -211,9 +211,9 @@ impl Pipeline {
             }
         }
 
-        for i in 0..4 {
-            shared.sidechain_active[i].store(sc_active_flags[i], std::sync::atomic::Ordering::Relaxed);
-        }
+        // Temporary shim (replaced in Task 8): collapse 4-slot flags to single bool.
+        let any_sc_active = sc_active_flags.iter().any(|&b| b);
+        shared.sidechain_active.store(any_sc_active, std::sync::atomic::Ordering::Relaxed);
 
         // ── Read feature flags and stereo link ──
         let delta_monitor = params.delta_monitor.value();
