@@ -1,9 +1,17 @@
+use nih_plug::params::persist::{PersistentField, deserialize_field, serialize_field};
 use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use parking_lot::Mutex;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use crate::editor::curve::CurveNode;
 use crate::dsp::modules::{GainMode, ModuleType, RouteMatrix};
+
+// Pulls in `pub struct GeneratedParams { ... }` (1341 FloatParam fields),
+// its `Default` impl, and `impl GeneratedParams { fn extend_param_map(...) }`
+// from the build.rs output. Defined at the top level — must sit outside any
+// struct or fn body because Rust disallows macro-expanded struct fields.
+include!(concat!(env!("OUT_DIR"), "/params_gen.rs"));
 
 pub const NUM_CURVE_SETS: usize = 7;
 pub const NUM_NODES: usize = 6;
@@ -70,85 +78,68 @@ impl FxChannelTarget {
     }
 }
 
-#[derive(Params)]
+/// Hand-written `Params` impl below; the `#[persist]` and `#[id]` attrs are gone
+/// because the derive proc-macro is gone. The persist keys and parameter IDs are
+/// wired into `param_map`, `serialize_fields`, and `deserialize_fields` by hand.
 pub struct SpectralForgeParams {
-    #[persist = "editor_state"]
+    // ── Persisted non-param state ─────────────────────────────────────────
     pub editor_state: Arc<EguiState>,
 
-    #[persist = "curve_nodes"]
     pub curve_nodes: Arc<Mutex<[[CurveNode; NUM_NODES]; NUM_CURVE_SETS]>>,
 
     // Slot order is fixed by curve_idx constants — never reorder them.
-    #[persist = "active_curve"]
     pub active_curve: Arc<Mutex<u8>>,
 
-    #[persist = "active_tab"]
     pub active_tab: Arc<Mutex<u8>>,   // 0 = Dynamics, 1 = Effects, 2 = Harmonic
 
     /// Nodes for the per-bin phase-randomisation amount curve (Effects tab, Phase mode).
-    #[persist = "phase_curve_nodes"]
     pub phase_curve_nodes: Arc<Mutex<[crate::editor::curve::CurveNode; NUM_NODES]>>,
 
     /// 4 nodes sets for Freeze per-bin curves: Length, Threshold, Portamento, Resistance.
-    #[persist = "freeze_curve_nodes"]
     pub freeze_curve_nodes: Arc<Mutex<[[crate::editor::curve::CurveNode; NUM_NODES]; 4]>>,
 
     /// Which of the 4 freeze curves is selected for editing (0–3).
-    #[persist = "freeze_active_curve"]
     pub freeze_active_curve: Arc<Mutex<u8>>,
 
     /// Which module slot is currently selected for curve editing (0–7).
-    #[persist = "editing_slot"]
     pub editing_slot: Arc<Mutex<u8>>,
 
     /// Module type for each of the 8 slots.
-    #[persist = "fx_module_types"]
     pub fx_module_types: Arc<Mutex<[FxModuleType; 8]>>,
 
     // ── Per-slot modular architecture (Plan D1) ────────────────────────────
 
     /// Module type assigned to each slot (0..=8). Slot 8 = Master, immutable.
-    #[persist = "slot_module_types"]
     pub slot_module_types: Arc<Mutex<[ModuleType; 9]>>,
 
     /// User-editable UTF-8 name per slot, zero-padded to 32 bytes.
-    #[persist = "slot_names"]
     pub slot_names: Arc<Mutex<[[u8; 32]; 9]>>,
 
     /// Channel routing target per slot (All / Mid / Side).
-    #[persist = "slot_targets"]
     pub slot_targets: Arc<Mutex<[FxChannelTarget; 9]>>,
 
     /// Sidechain input assignment: 0..=3 = aux input index; 255 = self-detect (main input).
-    #[persist = "slot_sidechain"]
     pub slot_sidechain: Arc<Mutex<[u8; 9]>>,
 
     /// GainMode per slot (only meaningful for Gain module slots).
-    #[persist = "slot_gain_mode"]
     pub slot_gain_mode: Arc<Mutex<[GainMode; 9]>>,
 
     /// Per-slot per-curve nodes. [slot 0..=8][curve 0..6][node 0..5].
-    #[persist = "slot_curve_nodes"]
     pub slot_curve_nodes: Arc<Mutex<[[[CurveNode; NUM_NODES]; 7]; 9]>>,
 
     /// Per-slot per-curve tilt and offset. [slot][curve] = (tilt, offset). Default: (0.0, 0.0).
-    #[persist = "slot_curve_meta"]
     pub slot_curve_meta: Arc<Mutex<[[(f32, f32); 7]; 9]>>,
 
     /// Which curve within the editing slot is selected (0..num_curves for that type).
-    #[persist = "editing_curve"]
     pub editing_curve: Arc<Mutex<u8>>,
 
     /// Routing matrix. Coexists with legacy fx_route_matrix during D1.
-    #[persist = "route_matrix"]
     pub route_matrix: Arc<Mutex<RouteMatrix>>,
 
     /// User-editable display name for each slot.
-    #[persist = "fx_module_names"]
     pub fx_module_names: Arc<Mutex<[String; 8]>>,
 
     /// Channel routing target for each slot.
-    #[persist = "fx_module_targets"]
     pub fx_module_targets: Arc<Mutex<[FxChannelTarget; 8]>>,
 
     /// 8×8 send matrix. send[src][dst] = linear amplitude [0..1].
@@ -157,109 +148,78 @@ pub struct SpectralForgeParams {
     /// controls additional sends *between* slots, not the initial signal path. A fully-zeroed
     /// matrix is therefore valid: slot 0 still processes the input, and its output is the
     /// plugin's main output (last active slot wins).
-    #[persist = "fx_route_matrix"]
     pub fx_route_matrix: Arc<Mutex<[[f32; 8]; 8]>>,
 
     // GUI display state — not audio parameters, not sent to audio thread
-    #[persist = "graph_db_min"]
     pub graph_db_min: Arc<Mutex<f32>>,      // dBFS floor of spectrum display, default -100
-    #[persist = "graph_db_max"]
     pub graph_db_max: Arc<Mutex<f32>>,      // dBFS ceiling of spectrum display, default 0
-    #[persist = "peak_falloff_ms"]
     pub peak_falloff_ms: Arc<Mutex<f32>>,   // spectrum peak hold decay time 0–5000 ms
-    #[persist = "ui_scale"]
     pub ui_scale: Arc<Mutex<f32>>,          // GUI scale factor: 1.0 / 1.25 / 1.5 / 1.75 / 2.0
 
-    #[id = "input_gain"]
+    // ── Exposed FloatParams / BoolParams / EnumParams (hand-written globals) ──
     pub input_gain: FloatParam,
 
-    #[id = "output_gain"]
     pub output_gain: FloatParam,
 
-    #[id = "mix"]
     pub mix: FloatParam,
 
-    #[id = "attack_ms"]
     pub attack_ms: FloatParam,
 
-    #[id = "release_ms"]
     pub release_ms: FloatParam,
 
     // Per-curve tilt (dB/oct, pivot 1 kHz) and offset (dB).
     // Applied as gain multipliers: gain *= 10^(tilt * log2(f/1000) / 20) * 10^(offset / 20).
     // Named for host automation readability; displayed in the UI via the active-curve controls.
-    #[id = "threshold_tilt"]
     pub threshold_tilt: FloatParam,
-    #[id = "threshold_offset"]
     pub threshold_offset: FloatParam,
-    #[id = "ratio_tilt"]
     pub ratio_tilt: FloatParam,
-    #[id = "ratio_offset"]
     pub ratio_offset: FloatParam,
-    #[id = "attack_tilt"]
     pub attack_tilt: FloatParam,
-    #[id = "attack_offset"]
     pub attack_offset: FloatParam,
-    #[id = "release_tilt"]
     pub release_tilt: FloatParam,
-    #[id = "release_offset"]
     pub release_offset: FloatParam,
-    #[id = "knee_tilt"]
     pub knee_tilt: FloatParam,
-    #[id = "knee_offset"]
     pub knee_offset: FloatParam,
-    #[id = "makeup_tilt"]
     pub makeup_tilt: FloatParam,
-    #[id = "makeup_offset"]
     pub makeup_offset: FloatParam,
-    #[id = "mix_tilt"]
     pub mix_tilt: FloatParam,
-    #[id = "mix_offset"]
     pub mix_offset: FloatParam,
 
-    #[id = "sc_gain"]
     pub sc_gain: FloatParam,
 
-    #[id = "sc_attack_ms"]
     pub sc_attack_ms: FloatParam,
 
-    #[id = "sc_release_ms"]
     pub sc_release_ms: FloatParam,
 
-    #[id = "lookahead_ms"]
     pub lookahead_ms: FloatParam,
 
-    #[id = "stereo_link"]
     pub stereo_link: EnumParam<StereoLink>,
 
-    #[id = "fft_size"]
     pub fft_size: EnumParam<FftSizeChoice>,
 
-    #[id = "threshold_mode"]
     pub threshold_mode: EnumParam<ThresholdMode>,
 
-    #[id = "sensitivity"]
     pub sensitivity: FloatParam,
 
     /// Half-width of the gain-reduction blur kernel in semitones (log-frequency).
     /// 0 = no spatial smoothing; higher = wider suppression band.
-    #[id = "suppression_width"]
     pub suppression_width: FloatParam,
 
-    #[id = "auto_makeup"]
     pub auto_makeup: BoolParam,
 
-    #[id = "delta_monitor"]
     pub delta_monitor: BoolParam,
 
-    #[id = "effect_mode"]
     pub effect_mode: EnumParam<EffectMode>,
 
-    #[id = "phase_rand_amount"]
     pub phase_rand_amount: FloatParam,
 
-    #[id = "spectral_contrast_db"]
     pub spectral_contrast_db: FloatParam,
+
+    // ── Generated per-slot / per-curve / per-node automation params ──
+    // 1134 graph-node fields (9×7×6×3), 126 tilt/offset fields (9×7×2),
+    // and 81 matrix-send fields (9×9). Total 1341. Nested because Rust does
+    // not allow macro-expanded field declarations inside a struct. See build.rs.
+    pub generated: GeneratedParams,
 }
 
 impl SpectralForgeParams {
@@ -467,6 +427,172 @@ impl Default for SpectralForgeParams {
             ).with_smoother(SmoothingStyle::Linear(50.0))
              .with_step_size(0.01)
              .with_unit(" dB"),
+
+            // Generated per-slot / per-curve / per-node FloatParam initializers.
+            // Produced by build.rs; totals 1341 fields.
+            generated: GeneratedParams::default(),
+        }
+    }
+}
+
+// ── Hand-written Params trait impl ─────────────────────────────────────────
+// The derive is gone; we replicate what it would have generated so we can inject
+// the `spectral_generated_param_map_entries!` macro and keep full control of the
+// serialize/deserialize plumbing for our `#[persist]` fields.
+//
+// SAFETY: same as the derive — the `ParamPtr`s stored in the returned Vec are
+// valid as long as `self` is live. nih-plug holds us in an `Arc`, so that holds.
+unsafe impl Params for SpectralForgeParams {
+    fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
+        // Reserve for the ~35 hand-written globals + 1341 generated entries.
+        let mut params: Vec<(String, ParamPtr, String)> = Vec::with_capacity(1400);
+
+        // Hand-written globals (same IDs and order as the previous #[id = "..."] attrs).
+        params.push(("input_gain".to_string(),   self.input_gain.as_ptr(),   String::new()));
+        params.push(("output_gain".to_string(),  self.output_gain.as_ptr(),  String::new()));
+        params.push(("mix".to_string(),          self.mix.as_ptr(),          String::new()));
+        params.push(("attack_ms".to_string(),    self.attack_ms.as_ptr(),    String::new()));
+        params.push(("release_ms".to_string(),   self.release_ms.as_ptr(),   String::new()));
+
+        params.push(("threshold_tilt".to_string(),   self.threshold_tilt.as_ptr(),   String::new()));
+        params.push(("threshold_offset".to_string(), self.threshold_offset.as_ptr(), String::new()));
+        params.push(("ratio_tilt".to_string(),       self.ratio_tilt.as_ptr(),       String::new()));
+        params.push(("ratio_offset".to_string(),     self.ratio_offset.as_ptr(),     String::new()));
+        params.push(("attack_tilt".to_string(),      self.attack_tilt.as_ptr(),      String::new()));
+        params.push(("attack_offset".to_string(),    self.attack_offset.as_ptr(),    String::new()));
+        params.push(("release_tilt".to_string(),     self.release_tilt.as_ptr(),     String::new()));
+        params.push(("release_offset".to_string(),   self.release_offset.as_ptr(),   String::new()));
+        params.push(("knee_tilt".to_string(),        self.knee_tilt.as_ptr(),        String::new()));
+        params.push(("knee_offset".to_string(),      self.knee_offset.as_ptr(),      String::new()));
+        params.push(("makeup_tilt".to_string(),      self.makeup_tilt.as_ptr(),      String::new()));
+        params.push(("makeup_offset".to_string(),    self.makeup_offset.as_ptr(),    String::new()));
+        params.push(("mix_tilt".to_string(),         self.mix_tilt.as_ptr(),         String::new()));
+        params.push(("mix_offset".to_string(),       self.mix_offset.as_ptr(),       String::new()));
+
+        params.push(("sc_gain".to_string(),       self.sc_gain.as_ptr(),       String::new()));
+        params.push(("sc_attack_ms".to_string(),  self.sc_attack_ms.as_ptr(),  String::new()));
+        params.push(("sc_release_ms".to_string(), self.sc_release_ms.as_ptr(), String::new()));
+        params.push(("lookahead_ms".to_string(),  self.lookahead_ms.as_ptr(),  String::new()));
+
+        params.push(("stereo_link".to_string(),    self.stereo_link.as_ptr(),    String::new()));
+        params.push(("fft_size".to_string(),       self.fft_size.as_ptr(),       String::new()));
+        params.push(("threshold_mode".to_string(), self.threshold_mode.as_ptr(), String::new()));
+
+        params.push(("sensitivity".to_string(),       self.sensitivity.as_ptr(),       String::new()));
+        params.push(("suppression_width".to_string(), self.suppression_width.as_ptr(), String::new()));
+
+        params.push(("auto_makeup".to_string(),   self.auto_makeup.as_ptr(),   String::new()));
+        params.push(("delta_monitor".to_string(), self.delta_monitor.as_ptr(), String::new()));
+
+        params.push(("effect_mode".to_string(),          self.effect_mode.as_ptr(),          String::new()));
+        params.push(("phase_rand_amount".to_string(),    self.phase_rand_amount.as_ptr(),    String::new()));
+        params.push(("spectral_contrast_db".to_string(), self.spectral_contrast_db.as_ptr(), String::new()));
+
+        // 1341 generated entries (graph nodes + tilt/offset + matrix).
+        self.generated.extend_param_map(&mut params);
+
+        params
+    }
+
+    fn serialize_fields(&self) -> BTreeMap<String, String> {
+        let mut serialized = BTreeMap::new();
+
+        // Mirrors the derive-generated pattern: for each `#[persist = "key"]`
+        // field, call PersistentField::map + serialize_field and insert into
+        // the map. Key strings are identical to the previous attributes so
+        // existing saved state continues to deserialize correctly.
+        macro_rules! persist_out {
+            ($key:literal, $field:ident) => {
+                match PersistentField::map(&self.$field, serialize_field) {
+                    Ok(data) => { serialized.insert(String::from($key), data); }
+                    Err(err) => {
+                        nih_plug::nih_debug_assert_failure!(
+                            "Could not serialize '{}': {}", $key, err
+                        );
+                    }
+                }
+            };
+        }
+
+        persist_out!("editor_state",       editor_state);
+        persist_out!("curve_nodes",        curve_nodes);
+        persist_out!("active_curve",       active_curve);
+        persist_out!("active_tab",         active_tab);
+        persist_out!("phase_curve_nodes",  phase_curve_nodes);
+        persist_out!("freeze_curve_nodes", freeze_curve_nodes);
+        persist_out!("freeze_active_curve", freeze_active_curve);
+        persist_out!("editing_slot",       editing_slot);
+        persist_out!("fx_module_types",    fx_module_types);
+        persist_out!("slot_module_types",  slot_module_types);
+        persist_out!("slot_names",         slot_names);
+        persist_out!("slot_targets",       slot_targets);
+        persist_out!("slot_sidechain",     slot_sidechain);
+        persist_out!("slot_gain_mode",     slot_gain_mode);
+        persist_out!("slot_curve_nodes",   slot_curve_nodes);
+        persist_out!("slot_curve_meta",    slot_curve_meta);
+        persist_out!("editing_curve",      editing_curve);
+        persist_out!("route_matrix",       route_matrix);
+        persist_out!("fx_module_names",    fx_module_names);
+        persist_out!("fx_module_targets",  fx_module_targets);
+        persist_out!("fx_route_matrix",    fx_route_matrix);
+        persist_out!("graph_db_min",       graph_db_min);
+        persist_out!("graph_db_max",       graph_db_max);
+        persist_out!("peak_falloff_ms",    peak_falloff_ms);
+        persist_out!("ui_scale",           ui_scale);
+
+        serialized
+    }
+
+    fn deserialize_fields(&self, serialized: &BTreeMap<String, String>) {
+        // Mirrors the derive-generated match on field name. Unknown keys are
+        // traced (same behaviour as the derive) rather than erroring.
+        macro_rules! persist_in {
+            ($key:literal, $field:ident, $data:expr) => {
+                match deserialize_field(&$data) {
+                    Ok(deserialized) => {
+                        PersistentField::set(&self.$field, deserialized);
+                    }
+                    Err(err) => {
+                        nih_plug::nih_debug_assert_failure!(
+                            "Could not deserialize '{}': {}", $key, err
+                        );
+                    }
+                }
+            };
+        }
+
+        for (field_name, data) in serialized {
+            match field_name.as_str() {
+                "editor_state"        => persist_in!("editor_state",       editor_state,       data),
+                "curve_nodes"         => persist_in!("curve_nodes",        curve_nodes,        data),
+                "active_curve"        => persist_in!("active_curve",       active_curve,       data),
+                "active_tab"          => persist_in!("active_tab",         active_tab,         data),
+                "phase_curve_nodes"   => persist_in!("phase_curve_nodes",  phase_curve_nodes,  data),
+                "freeze_curve_nodes"  => persist_in!("freeze_curve_nodes", freeze_curve_nodes, data),
+                "freeze_active_curve" => persist_in!("freeze_active_curve", freeze_active_curve, data),
+                "editing_slot"        => persist_in!("editing_slot",       editing_slot,       data),
+                "fx_module_types"     => persist_in!("fx_module_types",    fx_module_types,    data),
+                "slot_module_types"   => persist_in!("slot_module_types",  slot_module_types,  data),
+                "slot_names"          => persist_in!("slot_names",         slot_names,         data),
+                "slot_targets"        => persist_in!("slot_targets",       slot_targets,       data),
+                "slot_sidechain"      => persist_in!("slot_sidechain",     slot_sidechain,     data),
+                "slot_gain_mode"      => persist_in!("slot_gain_mode",     slot_gain_mode,     data),
+                "slot_curve_nodes"    => persist_in!("slot_curve_nodes",   slot_curve_nodes,   data),
+                "slot_curve_meta"     => persist_in!("slot_curve_meta",    slot_curve_meta,    data),
+                "editing_curve"       => persist_in!("editing_curve",      editing_curve,      data),
+                "route_matrix"        => persist_in!("route_matrix",       route_matrix,       data),
+                "fx_module_names"     => persist_in!("fx_module_names",    fx_module_names,    data),
+                "fx_module_targets"   => persist_in!("fx_module_targets", fx_module_targets, data),
+                "fx_route_matrix"     => persist_in!("fx_route_matrix",    fx_route_matrix,    data),
+                "graph_db_min"        => persist_in!("graph_db_min",       graph_db_min,       data),
+                "graph_db_max"        => persist_in!("graph_db_max",       graph_db_max,       data),
+                "peak_falloff_ms"     => persist_in!("peak_falloff_ms",    peak_falloff_ms,    data),
+                "ui_scale"            => persist_in!("ui_scale",           ui_scale,           data),
+                _ => nih_plug::nih_trace!(
+                    "Unknown serialized field name: {} (this may not be accurate when using nested param structs)",
+                    field_name
+                ),
+            }
         }
     }
 }
