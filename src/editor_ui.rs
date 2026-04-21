@@ -497,6 +497,16 @@ pub fn create_editor(
                     ui.separator();
                     ui.add_space(2.0);
 
+                    // ── Per-module SC strip (SC-aware modules only) ──────────
+                    {
+                        let edit_slot = *params.editing_slot.lock() as usize;
+                        let slot_type = params.slot_module_types.lock()[edit_slot];
+                        if crate::dsp::modules::module_spec(slot_type).supports_sidechain {
+                            sc_strip_ui(ui, &params, edit_slot);
+                            ui.separator();
+                        }
+                    }
+
                     // ── GainMode selector (Gain module only) ──────────────────
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
@@ -702,4 +712,64 @@ pub fn create_editor(
                 });
         },
     )
+}
+
+/// Per-slot sidechain strip: SC gain knob (−90…+18 dB, ≤ −90 shown as "−∞")
+/// and SC channel selector (Follow / L+R / L / R / M / S).
+/// Rendered only for SC-aware modules (see `ModuleSpec::supports_sidechain`).
+fn sc_strip_ui(
+    ui: &mut egui::Ui,
+    params: &SpectralForgeParams,
+    slot_idx: usize,
+) {
+    use crate::params::ScChannel;
+
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("SC").color(th::LABEL_DIM).size(9.0));
+        // SC gain knob
+        {
+            let mut gains = params.slot_sc_gain_db.lock();
+            let mut g = gains[slot_idx];
+            let resp = ui.add(
+                egui::DragValue::new(&mut g)
+                    .clamp_range(-90.0..=18.0)
+                    .speed(0.1)
+                    .suffix(" dB")
+                    .custom_formatter(|v, _| {
+                        if v <= -90.0 { "−∞".to_owned() } else { format!("{:.1}", v) }
+                    })
+            );
+            if resp.changed() { gains[slot_idx] = g; }
+        }
+        ui.separator();
+        // SC channel selector
+        {
+            let mut chans = params.slot_sc_channel.lock();
+            let cur = chans[slot_idx];
+            let label = match cur {
+                ScChannel::Follow => "Follow",
+                ScChannel::LR => "L+R",
+                ScChannel::L  => "L",
+                ScChannel::R  => "R",
+                ScChannel::M  => "M",
+                ScChannel::S  => "S",
+            };
+            egui::ComboBox::new(format!("sc_chan_slot_{}", slot_idx), "Source")
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    for (v, text) in [
+                        (ScChannel::Follow, "Follow"),
+                        (ScChannel::LR,     "L+R"),
+                        (ScChannel::L,      "L"),
+                        (ScChannel::R,      "R"),
+                        (ScChannel::M,      "M"),
+                        (ScChannel::S,      "S"),
+                    ] {
+                        if ui.selectable_label(cur == v, text).clicked() {
+                            chans[slot_idx] = v;
+                        }
+                    }
+                });
+        }
+    });
 }
