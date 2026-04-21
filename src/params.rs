@@ -156,6 +156,11 @@ pub struct SpectralForgeParams {
     pub peak_falloff_ms: Arc<Mutex<f32>>,   // spectrum peak hold decay time 0–5000 ms
     pub ui_scale: Arc<Mutex<f32>>,          // GUI scale factor: 1.0 / 1.25 / 1.5 / 1.75 / 2.0
 
+    /// Migration flag: set to `true` after the one-shot copy from legacy persist fields
+    /// (slot_curve_nodes, slot_curve_meta, route_matrix) into the generated FloatParam fields.
+    /// `pub` so tests can inspect it directly.
+    pub migrated_v1: Arc<std::sync::atomic::AtomicBool>,
+
     // ── Exposed FloatParams / BoolParams / EnumParams (hand-written globals) ──
     pub input_gain: FloatParam,
 
@@ -312,6 +317,7 @@ impl Default for SpectralForgeParams {
             graph_db_max:    Arc::new(Mutex::new(0.0)),
             peak_falloff_ms: Arc::new(Mutex::new(300.0)),
             ui_scale:        Arc::new(Mutex::new(1.0)),
+            migrated_v1:     Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
             input_gain: FloatParam::new(
                 "Input Gain", 0.0,
@@ -482,6 +488,79 @@ impl SpectralForgeParams {
         }
         Some(matrix_dispatch!(self, row, col))
     }
+
+    /// One-shot migration: copies legacy `#[persist]` data (curve nodes, tilt, route matrix)
+    /// into the generated FloatParam smoothers so the DSP and host see the correct values on
+    /// first load of an old project.
+    ///
+    /// This function is idempotent (guarded by `migrated_v1`). Call it from `Plugin::initialize()`.
+    ///
+    /// # Why `smoother.reset()` instead of `set_plain_value`
+    ///
+    /// nih-plug does not expose a public API for setting FloatParam atomic values from outside
+    /// the plugin wrapper. `smoother.reset(v)` sets the smoother target so that `smoothed.next()`
+    /// (which is what the pipeline reads for the matrix) returns the correct value immediately.
+    /// The underlying `param.value()` stays at the FloatParam default; correct `value()` is only
+    /// achievable at state-load time via `Plugin::filter_state()` (see `lib.rs`).
+    pub fn migrate_legacy_if_needed(&self) {
+        use std::sync::atomic::Ordering;
+        if self.migrated_v1.load(Ordering::Relaxed) { return; }
+
+        // ── Graph nodes: slot_curve_nodes → graph_node smoother ──────────────
+        // The DSP reads node data from the triple-buffer (populated from slot_curve_nodes in
+        // initialize()), NOT from these FloatParams, so the smoother reset is mainly for
+        // host-automation consistency.
+        {
+            let legacy_nodes = self.slot_curve_nodes.lock();
+            for s in 0..crate::param_ids::NUM_SLOTS {
+                for c in 0..crate::param_ids::NUM_CURVES {
+                    for n in 0..crate::param_ids::NUM_NODES {
+                        if let Some((x_p, y_p, q_p)) = self.graph_node(s, c, n) {
+                            let node = legacy_nodes[s][c][n];
+                            x_p.smoothed.reset(node.x);
+                            y_p.smoothed.reset(node.y);
+                            q_p.smoothed.reset(node.q);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Tilt: slot_curve_meta stores physical (÷2 = normalized) ─────────
+        // Physical tilt is stored as normalized × 2.0 (TILT_MAX). We reverse to get the
+        // normalized value that the FloatParam accepts.
+        // Offset migration is skipped: off_max varies per curve type and is not available
+        // in params.rs without importing editor code. Offsets default to 0.0 on first load.
+        {
+            let legacy_meta = self.slot_curve_meta.lock();
+            for s in 0..crate::param_ids::NUM_SLOTS {
+                for c in 0..crate::param_ids::NUM_CURVES {
+                    let (tilt_phys, _offset_phys) = legacy_meta[s][c];
+                    if let Some(tilt_p) = self.tilt_param(s, c) {
+                        let tilt_norm = (tilt_phys / 2.0).clamp(-1.0, 1.0);
+                        tilt_p.smoothed.reset(tilt_norm);
+                    }
+                }
+            }
+        }
+
+        // ── Matrix: route_matrix.send[src][dst] → matrix_cell(dst, src) ─────
+        // The pipeline reads `matrix_cell(r, col).smoothed.next()` and writes
+        // `route_matrix_snap.send[col][r]`. So matrix_cell(dst, src) ↔ send[src][dst].
+        {
+            let legacy_matrix = self.route_matrix.lock();
+            for r in 0..crate::param_ids::NUM_MATRIX_ROWS {    // r = dst
+                for col in 0..crate::param_ids::NUM_SLOTS {     // col = src
+                    if let Some(p) = self.matrix_cell(r, col) {
+                        // send[col][r] = send[src][dst]
+                        p.smoothed.reset(legacy_matrix.send[col][r]);
+                    }
+                }
+            }
+        }
+
+        self.migrated_v1.store(true, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -636,6 +715,7 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("graph_db_max",       graph_db_max);
         persist_out!("peak_falloff_ms",    peak_falloff_ms);
         persist_out!("ui_scale",           ui_scale);
+        persist_out!("migrated_v1",        migrated_v1);
 
         serialized
     }
@@ -685,6 +765,7 @@ unsafe impl Params for SpectralForgeParams {
                 "graph_db_max"        => persist_in!("graph_db_max",       graph_db_max,       data),
                 "peak_falloff_ms"     => persist_in!("peak_falloff_ms",    peak_falloff_ms,    data),
                 "ui_scale"            => persist_in!("ui_scale",           ui_scale,           data),
+                "migrated_v1"         => persist_in!("migrated_v1",        migrated_v1,        data),
                 _ => nih_plug::nih_trace!(
                     "Unknown serialized field name: {} (this may not be accurate when using nested param structs)",
                     field_name

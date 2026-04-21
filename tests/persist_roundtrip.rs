@@ -49,7 +49,7 @@ fn persist_roundtrip_all_keys_present() {
         "slot_targets", "slot_sidechain", "slot_gain_mode", "slot_curve_nodes",
         "slot_curve_meta", "editing_curve", "route_matrix", "fx_module_names",
         "fx_module_targets", "fx_route_matrix", "graph_db_min", "graph_db_max",
-        "peak_falloff_ms", "ui_scale",
+        "peak_falloff_ms", "ui_scale", "migrated_v1",
     ];
     for key in &expected_keys {
         assert!(serialized.contains_key(*key), "missing persist key: {}", key);
