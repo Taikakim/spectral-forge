@@ -273,6 +273,7 @@ pub use freeze::FreezeModule;
 pub mod phase_smear;
 pub mod contrast;
 pub mod gain;
+pub use gain::GainModule;
 pub mod ts_split;
 pub mod harmonic;
 pub mod master;

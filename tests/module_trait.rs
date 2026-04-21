@@ -115,3 +115,82 @@ fn freeze_threshold_default_is_minus_50_db() {
         spectral_forge::dsp::modules::freeze::curve_to_threshold_db(1.0),
     );
 }
+
+#[test]
+fn gain_pull_peak_hold_decays_with_curve() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{GainModule, GainMode, ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = GainModule::new();
+    m.set_gain_mode(GainMode::Pull);
+    m.reset(48000.0, 2048);
+
+    let num_bins = 1025usize;
+    let mut bins = vec![Complex::new(1.0, 0.0); num_bins];
+    let gain_curve   = vec![0.5f32; num_bins];
+    let peak_curve   = vec![1.0f32; num_bins];
+    let curves_vec: Vec<Vec<f32>> = vec![gain_curve, peak_curve];
+    let curves_ref: Vec<&[f32]> = curves_vec.iter().map(|v| &v[..]).collect();
+
+    let sc_impulse: Vec<f32> = (0..num_bins)
+        .map(|k| if k == 100 { 5.0 } else { 0.0 })
+        .collect();
+
+    let mut supp = vec![0.0f32; num_bins];
+    let ctx = ModuleContext {
+        sample_rate: 48000.0, fft_size: 2048, num_bins,
+        attack_ms: 10.0, release_ms: 80.0,
+        sensitivity: 0.5, suppression_width: 0.0,
+        auto_makeup: false, delta_monitor: false,
+    };
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, Some(&sc_impulse), &curves_ref, &mut supp, &ctx);
+    let env_after_hop1 = m.peak_env_at(100);
+    assert!(env_after_hop1 > 4.0, "peak-hold envelope should capture impulse magnitude, got {}", env_after_hop1);
+
+    let sc_silent = vec![0.0f32; num_bins];
+    for _ in 0..20 {
+        let mut b = vec![Complex::new(1.0, 0.0); num_bins];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+                  &mut b, Some(&sc_silent), &curves_ref, &mut supp, &ctx);
+    }
+    let env_after_decay = m.peak_env_at(100);
+    assert!(env_after_decay < env_after_hop1,
+            "peak-hold envelope should decay over time, before={} after={}",
+            env_after_hop1, env_after_decay);
+    assert!(env_after_decay >= 0.0);
+}
+
+#[test]
+fn gain_add_mode_does_not_use_peak_hold() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{GainModule, GainMode, ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = GainModule::new();
+    m.set_gain_mode(GainMode::Add);
+    m.reset(48000.0, 2048);
+
+    let num_bins = 1025usize;
+    let mut bins = vec![Complex::new(1.0, 0.0); num_bins];
+    let gain_curve = vec![1.0f32; num_bins];
+    let peak_curve = vec![1.0f32; num_bins];
+    let curves_vec: Vec<Vec<f32>> = vec![gain_curve, peak_curve];
+    let curves_ref: Vec<&[f32]> = curves_vec.iter().map(|v| &v[..]).collect();
+    let sc = vec![0.5f32; num_bins];
+    let mut supp = vec![0.0f32; num_bins];
+    let ctx = ModuleContext {
+        sample_rate: 48000.0, fft_size: 2048, num_bins,
+        attack_ms: 10.0, release_ms: 80.0,
+        sensitivity: 0.5, suppression_width: 0.0,
+        auto_makeup: false, delta_monitor: false,
+    };
+
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, Some(&sc), &curves_ref, &mut supp, &ctx);
+
+    for k in 0..num_bins {
+        assert_eq!(m.peak_env_at(k), 0.0, "Add mode must not touch peak-hold state at k={}", k);
+    }
+}
