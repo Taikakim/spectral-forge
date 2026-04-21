@@ -684,6 +684,7 @@ pub fn create_editor(
                             const TILT_MAX: f32 = 2.0;
                             let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve));
 
+                            let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
                             if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {
                                 let mut off_norm = off_p.value();
                                 ui.vertical(|ui| {
@@ -702,6 +703,8 @@ pub fn create_editor(
                                         }
                                     }
                                     if resp.drag_stopped() { setter.end_set_parameter(off_p); }
+                                    crate::editor::delayed_tooltip(ui, &resp,
+                                        format!("Slot {} · {} · Offset", editing_slot + 1, curve_label));
                                     ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
                                 });
                             }
@@ -724,6 +727,8 @@ pub fn create_editor(
                                         }
                                     }
                                     if resp.drag_stopped() { setter.end_set_parameter(tilt_p); }
+                                    crate::editor::delayed_tooltip(ui, &resp,
+                                        format!("Slot {} · {} · Tilt", editing_slot + 1, curve_label));
                                     ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
                                 });
                             }

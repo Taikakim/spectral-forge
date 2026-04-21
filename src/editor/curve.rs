@@ -695,6 +695,8 @@ pub fn curve_widget(
             changed = true;
         }
 
+        crate::editor::delayed_tooltip(ui, &resp, format!("Node {} \u{2014} drag to adjust", i));
+
         let color = if resp.hovered() { node_color_hover } else { node_color_lit };
         let r = th::NODE_RADIUS;
         match band_type_for(i) {
