@@ -8,7 +8,7 @@ The dynamics section is functional. The modular multi-fx routing system is under
 
 ---
 
-<img width="900" height="600" alt="Screenshot_20260415_204922" src="https://github.com/user-attachments/assets/79a325fa-cece-4aeb-8674-90fbd9dad162" />
+<img width="898" height="454" alt="Screenshot_20260421_115617" src="https://github.com/user-attachments/assets/12213421-60ca-4178-ade3-b7bba5575f09" />
 
 ## Building and installing
 

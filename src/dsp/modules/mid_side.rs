@@ -67,7 +67,11 @@ impl SpectralModule for MidSideModule {
                     let exp = expansion.get(k).copied().unwrap_or(1.0).max(0.0);
 
                     let dec_amt = decorrel.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
-                    let phase_rot = if dec_amt > 0.001 {
+                    // DC (k=0) and Nyquist (k=n-1) are required by realfft's inverse to
+                    // have zero imaginary part — they represent real-valued components
+                    // and have no meaningful phase. Rotating them panics the IFFT.
+                    let is_real_bin = k == 0 || k == n - 1;
+                    let phase_rot = if dec_amt > 0.001 && !is_real_bin {
                         let rnd = xorshift64(&mut self.rng_state) as f32 / u64::MAX as f32;
                         (rnd - 0.5) * 2.0 * std::f32::consts::PI * dec_amt
                     } else {

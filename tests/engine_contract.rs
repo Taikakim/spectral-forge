@@ -742,3 +742,41 @@ fn mid_side_module_processes_in_linked_mode() {
         "M/S module with balance=0.5 should reduce channel 0 in Linked mode, got {:.4}", out_mag
     );
 }
+
+/// realfft's inverse requires the DC bin (k=0) and Nyquist bin (k=n-1) to have zero
+/// imaginary parts. MidSide's side-channel phase rotation must therefore skip those
+/// two bins, otherwise the next IFFT call in the pipeline panics and the plugin host
+/// aborts. This test locks in that contract at the module level so any regression
+/// surfaces in unit tests instead of crashing Bitwig.
+#[test]
+fn mid_side_side_channel_preserves_real_dc_and_nyquist() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{
+        create_module, ModuleType, ModuleContext, SpectralModule,
+    };
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let n = 1025usize;
+    let mut m = create_module(ModuleType::MidSide, 44100.0, 2048);
+
+    // Neutral curves — DECORREL defaults to 1.0 (full decorrelation) in the bridge,
+    // which is what exposes the bug the moment a user assigns M/S to a slot.
+    let ones = vec![1.0f32; n];
+    let curves_storage: [&[f32]; 5] = [&ones, &ones, &ones, &ones, &ones];
+    let curves: &[&[f32]] = &curves_storage;
+
+    // Real-valued input (as produced by realfft's forward transform for real signals):
+    // DC and Nyquist have zero imaginary part.
+    let mut bins: Vec<Complex<f32>> = (0..n).map(|k| Complex::new(1.0 + k as f32 * 0.01, 0.0)).collect();
+    let mut supp = vec![0.0f32; n];
+    let ctx = ModuleContext {
+        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
+        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
+        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
+    };
+
+    m.process(1, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
+
+    assert_eq!(bins[0].im, 0.0, "DC bin imaginary part must be zero after M/S side processing");
+    assert_eq!(bins[n - 1].im, 0.0, "Nyquist bin imaginary part must be zero after M/S side processing");
+}
