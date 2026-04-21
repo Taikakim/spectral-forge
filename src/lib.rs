@@ -4,6 +4,7 @@ pub mod editor_ui;
 pub mod param_ids;
 pub mod params;
 pub mod bridge;
+pub mod preset;
 pub mod presets;
 
 use nih_plug::prelude::*;
