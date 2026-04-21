@@ -146,15 +146,15 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         color_lit: Color32::from_rgb(0x90, 0x60, 0xc8),
         color_dim: Color32::from_rgb(0x30, 0x20, 0x42),
         num_curves: 3,
-        curve_labels: &["AMOUNT", "SC SMOOTH", "MIX"],
+        curve_labels: &["AMOUNT", "PEAK HOLD", "MIX"],
         supports_sidechain: true,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
         color_lit: Color32::from_rgb(0xb0, 0x60, 0xe0),
         color_dim: Color32::from_rgb(0x38, 0x20, 0x48),
-        num_curves: 2,
-        curve_labels: &["AMOUNT", "SC SMOOTH"],
+        num_curves: 1,
+        curve_labels: &["AMOUNT"],
         supports_sidechain: false,
     };
     static GN: ModuleSpec = ModuleSpec {
@@ -162,7 +162,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         color_lit: Color32::from_rgb(0xc8, 0xa0, 0x50),
         color_dim: Color32::from_rgb(0x42, 0x34, 0x18),
         num_curves: 2,
-        curve_labels: &["GAIN", "SC SMOOTH"],
+        curve_labels: &["GAIN", "PEAK HOLD"],
         supports_sidechain: true,
     };
     static MS: ModuleSpec = ModuleSpec {

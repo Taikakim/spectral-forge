@@ -89,5 +89,6 @@ impl SpectralModule for ContrastModule {
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::Contrast }
-    fn num_curves(&self) -> usize { 2 }
+    // SC SMOOTH curve removed in sidechain refactor
+    fn num_curves(&self) -> usize { 1 }
 }

@@ -29,3 +29,12 @@ fn module_trait_types_exist() {
     assert_eq!(m.module_type(), ModuleType::Master);
     assert_eq!(m.num_outputs(), None);
 }
+
+#[test]
+fn curve_labels_post_refactor() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+    assert_eq!(module_spec(ModuleType::Gain).curve_labels, &["GAIN", "PEAK HOLD"]);
+    assert_eq!(module_spec(ModuleType::PhaseSmear).curve_labels, &["AMOUNT", "PEAK HOLD", "MIX"]);
+    assert_eq!(module_spec(ModuleType::Contrast).curve_labels, &["AMOUNT"]);
+    assert_eq!(module_spec(ModuleType::Contrast).num_curves, 1);
+}
