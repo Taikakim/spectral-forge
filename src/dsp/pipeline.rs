@@ -2,6 +2,38 @@ use num_complex::Complex;
 use realfft::RealFftPlanner;
 use nih_plug::util::StftHelper;
 use crate::bridge::SharedState;
+use crate::params::{FxChannelTarget, ScChannel, StereoLink};
+
+/// Which of the five derived SC magnitude streams a slot should key off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ScSource { L = 0, R = 1, LR = 2, M = 3, S = 4 }
+
+/// Map (user choice, stereo mode, slot target, processing channel) → SC source.
+/// See spec §5 for the canonical rule: Follow = "route the SC channel matching whatever this slot processes."
+pub fn resolve_sc_source(
+    choice: ScChannel,
+    link: StereoLink,
+    target: FxChannelTarget,
+    channel: usize,
+) -> ScSource {
+    match choice {
+        ScChannel::Follow => match link {
+            StereoLink::Linked => ScSource::LR,
+            StereoLink::Independent => if channel == 0 { ScSource::L } else { ScSource::R },
+            StereoLink::MidSide => match target {
+                FxChannelTarget::Mid  => ScSource::M,
+                FxChannelTarget::Side => ScSource::S,
+                FxChannelTarget::All  => ScSource::LR,
+            },
+        },
+        ScChannel::LR => ScSource::LR,
+        ScChannel::L  => ScSource::L,
+        ScChannel::R  => ScSource::R,
+        ScChannel::M  => ScSource::M,
+        ScChannel::S  => ScSource::S,
+    }
+}
 
 pub const FFT_SIZE: usize = 2048;
 pub const NUM_BINS: usize = FFT_SIZE / 2 + 1;
@@ -35,14 +67,17 @@ pub struct Pipeline {
     fft_size: usize,
     /// Pre-allocated per-slot curve cache. [slot][curve][bin]
     slot_curve_cache: Vec<Vec<Vec<f32>>>,
-    /// Per-aux sidechain envelope followers (up to 4). [sc_idx][bin]
-    sc_envelopes: Vec<Vec<f32>>,
-    /// Per-aux sidechain one-pole LP state. [sc_idx][bin]
-    sc_env_states: Vec<Vec<f32>>,
-    /// Per-aux sidechain complex buffers. [sc_idx][bin]
+    /// Per-bin SC envelope magnitudes, one slice per derived source (L, R, LR, M, S).
+    /// Shape: [5 sources][MAX_NUM_BINS]. Index matches ScSource ordinal (L=0, R=1, LR=2, M=3, S=4).
+    sc_envelopes:   Vec<Vec<f32>>,
+    /// Per-bin one-pole envelope state, per source. Shape matches sc_envelopes.
+    sc_env_states:  Vec<Vec<f32>>,
+    /// FFT output buffers for the 2-channel SC STFT. Shape: [2 channels][num_bins].
     sc_complex_bufs: Vec<Vec<Complex<f32>>>,
-    /// Per-aux sidechain STFT helpers (up to 4).
-    sc_stfts: Vec<StftHelper>,
+    /// Single 2-channel SC STFT.
+    sc_stft: StftHelper,
+    /// Per-channel, per-slot SC magnitude slice; slot_sc_input[channel][slot][bin]. Pre-allocated.
+    slot_sc_input: Vec<Vec<Vec<f32>>>,
     sample_rate: f32,
 }
 
@@ -67,15 +102,17 @@ impl Pipeline {
             .map(|_| (0..7).map(|_| vec![1.0f32; MAX_NUM_BINS]).collect())
             .collect();
 
-        // 4 sidechain paths pre-allocated at MAX_NUM_BINS; only [0..num_bins] are used
-        let sc_envelopes:   Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
-        let sc_env_states:  Vec<Vec<f32>> = (0..4).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
-        // exact-size: determined by FFT plan output
-        let sc_complex_bufs: Vec<Vec<Complex<f32>>> = (0..4)
+        // 5 SC sources (L, R, LR, M, S) pre-allocated at MAX_NUM_BINS; only [0..num_bins] are used.
+        let sc_envelopes:  Vec<Vec<f32>> = (0..5).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let sc_env_states: Vec<Vec<f32>> = (0..5).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        // Single 2-channel SC STFT; two complex buffers for L and R.
+        let sc_complex_bufs: Vec<Vec<Complex<f32>>> = (0..2)
             .map(|_| vec![Complex::new(0.0f32, 0.0f32); num_bins])
             .collect();
-        let sc_stfts: Vec<StftHelper> = (0..4)
-            .map(|_| StftHelper::new(2, fft_size, 0))
+        let sc_stft = StftHelper::new(2, fft_size, 0);
+        // Per-channel, per-slot SC magnitude slices (gained copies of the source envelope).
+        let slot_sc_input: Vec<Vec<Vec<f32>>> = (0..2)
+            .map(|_| (0..9).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect())
             .collect();
 
         Self {
@@ -94,7 +131,8 @@ impl Pipeline {
             sc_envelopes,
             sc_env_states,
             sc_complex_bufs,
-            sc_stfts,
+            sc_stft,
+            slot_sc_input,
             sample_rate,
             fft_size,
         }
@@ -120,12 +158,15 @@ impl Pipeline {
         }
 
         self.stft = StftHelper::new(num_channels, fft_size, 0);
+        self.sc_stft = StftHelper::new(2, fft_size, 0);
         self.dry_delay.fill(0.0);
         self.dry_delay_write = 0;
         for sc in &mut self.sc_envelopes  { sc.fill(0.0); }
         for sc in &mut self.sc_env_states { sc.fill(0.0); }
-        for i in 0..self.sc_stfts.len() {
-            self.sc_stfts[i] = StftHelper::new(2, fft_size, 0);
+        for ch in &mut self.slot_sc_input {
+            for slot_buf in ch {
+                slot_buf.fill(0.0);
+            }
         }
         self.fx_matrix.reset(sample_rate, fft_size);
     }
@@ -161,63 +202,77 @@ impl Pipeline {
             }
         }
 
-        // ── Process up to 4 aux sidechain inputs ──
-        let mut sc_active_flags = [false; 4];
+        // ── Process single stereo sidechain input ──
+        let mut sc_active = false;
         {
             let hop = fft_size / OVERLAP;
             let fft_plan = self.fft_plan.clone();
             let window = &self.window;
             let sample_rate = self.sample_rate;
-            let sc_gain_db    = params.sc_gain.smoothed.next_step(block_size);
-            let sc_gain_lin   = 10.0f32.powf(sc_gain_db / 20.0);
             let sc_attack_ms  = params.sc_attack_ms.smoothed.next_step(block_size);
             let sc_release_ms = params.sc_release_ms.smoothed.next_step(block_size);
 
-            for i in 0..4 {
-                let has_aux = aux.inputs.get(i).map(|a| a.samples() > 0).unwrap_or(false);
-                if !has_aux {
-                    for v in &mut self.sc_envelopes[i] { *v = 0.0; }
-                    continue;
-                }
-                for v in &mut self.sc_envelopes[i] { *v = 0.0; }
+            let has_aux = aux.inputs.get(0).map(|a| a.samples() > 0).unwrap_or(false);
+            if !has_aux {
+                for src in &mut self.sc_envelopes  { for v in src.iter_mut() { *v = 0.0; } }
+                for src in &mut self.sc_env_states { for v in src.iter_mut() { *v = 0.0; } }
+            } else {
+                // Zero the output envelopes (peak-capture accumulators) — state is preserved.
+                for src in &mut self.sc_envelopes { for v in src.iter_mut() { *v = 0.0; } }
 
-                let sc_env    = &mut self.sc_envelopes[i];
-                let sc_state  = &mut self.sc_env_states[i];
-                let sc_cplx   = &mut self.sc_complex_bufs[i];
+                let sc_complex_bufs = &mut self.sc_complex_bufs;
+                let sc_env_states = &mut self.sc_env_states;
+                let sc_envelopes  = &mut self.sc_envelopes;
 
-                self.sc_stfts[i].process_overlap_add(&mut aux.inputs[i], OVERLAP, |_ch, block| {
+                self.sc_stft.process_overlap_add(&mut aux.inputs[0], OVERLAP, |channel, block| {
                     for (s, &w) in block.iter_mut().zip(window.iter()) {
-                        *s *= w * sc_gain_lin;
+                        *s *= w;
                     }
                     crate::dsp::guard::sanitize(block);
-                    fft_plan.process(block, sc_cplx).unwrap();
+                    fft_plan.process(block, &mut sc_complex_bufs[channel]).unwrap();
 
-                    let hops_per_sec = sample_rate / hop as f32;
-                    for k in 0..sc_cplx.len() {
-                        let mag = sc_cplx[k].norm();
-                        let coeff = if mag > sc_state[k] {
-                            let t = sc_attack_ms.max(0.1) * 0.001 * hops_per_sec;
-                            (-1.0_f32 / t).exp()
-                        } else {
-                            let t = sc_release_ms.max(1.0) * 0.001 * hops_per_sec;
-                            (-1.0_f32 / t).exp()
-                        };
-                        sc_state[k] = coeff * sc_state[k] + (1.0 - coeff) * mag;
-                        if sc_state[k] > sc_env[k] { sc_env[k] = sc_state[k]; }
+                    // Only run envelope update on the second channel, once we have both L and R in sc_complex_bufs.
+                    if channel == 1 {
+                        let hops_per_sec = sample_rate / hop as f32;
+                        let atk_t = sc_attack_ms.max(0.1) * 0.001 * hops_per_sec;
+                        let rel_t = sc_release_ms.max(1.0) * 0.001 * hops_per_sec;
+                        let atk_coeff = (-1.0_f32 / atk_t).exp();
+                        let rel_coeff = (-1.0_f32 / rel_t).exp();
+
+                        let num = sc_complex_bufs[0].len();
+                        const SQRT2_INV: f32 = std::f32::consts::FRAC_1_SQRT_2;
+                        for k in 0..num {
+                            let l_mag = sc_complex_bufs[0][k].norm();
+                            let r_mag = sc_complex_bufs[1][k].norm();
+                            // L+R sum magnitude (conservative: average, not complex sum magnitude).
+                            let lr_mag = 0.5 * (l_mag + r_mag);
+                            // M/S from complex sums/diffs then magnitude.
+                            let m_cpx = (sc_complex_bufs[0][k] + sc_complex_bufs[1][k]) * SQRT2_INV;
+                            let s_cpx = (sc_complex_bufs[0][k] - sc_complex_bufs[1][k]) * SQRT2_INV;
+                            let m_mag = m_cpx.norm();
+                            let s_mag = s_cpx.norm();
+
+                            let mags = [l_mag, r_mag, lr_mag, m_mag, s_mag];
+                            for (src_idx, &mag) in mags.iter().enumerate() {
+                                let state_ref = &mut sc_env_states[src_idx][k];
+                                let coeff = if mag > *state_ref { atk_coeff } else { rel_coeff };
+                                *state_ref = coeff * *state_ref + (1.0 - coeff) * mag;
+                                if *state_ref > sc_envelopes[src_idx][k] {
+                                    sc_envelopes[src_idx][k] = *state_ref;
+                                }
+                            }
+                        }
                     }
                 });
 
-                sc_active_flags[i] = self.sc_envelopes[i].iter().any(|&v| v > 1e-9);
+                sc_active = self.sc_envelopes[ScSource::LR as usize].iter().any(|&v| v > 1e-9);
             }
         }
 
-        // Temporary shim (replaced in Task 8): collapse 4-slot flags to single bool.
-        let any_sc_active = sc_active_flags.iter().any(|&b| b);
-        shared.sidechain_active.store(any_sc_active, std::sync::atomic::Ordering::Relaxed);
+        shared.sidechain_active.store(sc_active, std::sync::atomic::Ordering::Relaxed);
 
         // ── Read feature flags and stereo link ──
         let delta_monitor = params.delta_monitor.value();
-        use crate::params::StereoLink;
         let stereo_link = params.stereo_link.value();
         let is_mid_side = stereo_link == StereoLink::MidSide;
 
@@ -245,26 +300,58 @@ impl Pipeline {
             delta_monitor,
         };
 
-        // Build sc_args: per-slot sidechain reference (no allocation)
-        let slot_sidechain_arr: [u8; 9] = params.slot_sidechain.try_lock()
-            .map(|g| *g)
-            .unwrap_or([255u8; 9]);  // fallback: no sidechain for any slot
-        let sc_envelopes_ref: [&[f32]; 4] = std::array::from_fn(|i| self.sc_envelopes[i].as_slice());
-        let sc_args: [Option<&[f32]>; 9] = std::array::from_fn(|s| {
-            let idx = slot_sidechain_arr[s];
-            if idx == 255 {
-                None  // no sidechain assigned to this slot
-            } else {
-                let i = idx as usize;
-                if i < 4 && sc_active_flags[i] { Some(sc_envelopes_ref[i]) } else { None }
-            }
-        });
-
-        // Snapshot of slot targets
-        use crate::params::FxChannelTarget;
+        // Snapshot of slot targets (needed for SC channel resolution in MidSide mode).
         let slot_targets_snap: [FxChannelTarget; 9] = params.slot_targets.try_lock()
             .map(|g| *g)
             .unwrap_or([FxChannelTarget::All; 9]);
+
+        // ── Build per-slot SC input slices (allocation-free) ──
+        let slot_sc_gain_db_arr: [f32; 9] = params.slot_sc_gain_db.try_lock()
+            .map(|g| *g)
+            .unwrap_or([0.0f32; 9]);
+        let slot_sc_channel_arr: [ScChannel; 9] = params.slot_sc_channel.try_lock()
+            .map(|g| *g)
+            .unwrap_or([ScChannel::Follow; 9]);
+
+        let slot_types_snap: [crate::dsp::modules::ModuleType; 9] = params.slot_module_types.try_lock()
+            .map(|g| *g)
+            .unwrap_or([crate::dsp::modules::ModuleType::Empty; 9]);
+
+        // Precompute ScSource per (channel, slot).
+        let mut slot_sc_source_ch: [[ScSource; 9]; 2] = [[ScSource::LR; 9]; 2];
+        for ch in 0..2usize {
+            for s in 0..9usize {
+                let ty = slot_types_snap[s];
+                let supports = crate::dsp::modules::module_spec(ty).supports_sidechain;
+                if !supports { continue; }
+                slot_sc_source_ch[ch][s] = resolve_sc_source(
+                    slot_sc_channel_arr[s],
+                    stereo_link,
+                    slot_targets_snap[s],
+                    ch,
+                );
+            }
+        }
+
+        // Fill slot_sc_input[ch][s] with gained SC magnitudes, or zero if the slot is inactive.
+        for ch in 0..2usize {
+            for s in 0..9usize {
+                let ty = slot_types_snap[s];
+                let supports = crate::dsp::modules::module_spec(ty).supports_sidechain;
+                let gain_db = slot_sc_gain_db_arr[s];
+                let gain_lin = if gain_db <= -90.0 { 0.0 } else { 10.0f32.powf(gain_db / 20.0) };
+                let active_for_slot = supports && gain_lin > 0.0 && sc_active;
+                if !active_for_slot {
+                    for v in self.slot_sc_input[ch][s].iter_mut().take(num_bins) { *v = 0.0; }
+                    continue;
+                }
+                let src_idx = slot_sc_source_ch[ch][s] as usize;
+                // Split borrow: read from sc_envelopes, write to slot_sc_input. They're different fields.
+                let src = &self.sc_envelopes[src_idx];
+                let dst = &mut self.slot_sc_input[ch][s];
+                for k in 0..num_bins { dst[k] = src[k] * gain_lin; }
+            }
+        }
 
         let dry_delay_size = fft_size + MAX_BLOCK_SIZE;
         // We need the delayed dry signal for either the delta monitor or the global wet/dry
@@ -325,6 +412,7 @@ impl Pipeline {
         let suppression_buf   = &mut self.suppression_buf;
         let channel_supp_buf  = &mut self.channel_supp_buf;
         let slot_curve_cache_ref = &self.slot_curve_cache;
+        let slot_sc_input_ref = &self.slot_sc_input;
         // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
@@ -347,6 +435,20 @@ impl Pipeline {
                 let mag = c.norm();
                 if mag > spectrum_buf[i] { spectrum_buf[i] = mag; }
             }
+
+            // Build this hop's per-slot sc_args from the pre-gained slot_sc_input.
+            // Clamp channel index to 0..=1 for potential mono cases (slot_sc_input only has 2 channels).
+            let sc_ch = channel.min(1);
+            let sc_args: [Option<&[f32]>; 9] = std::array::from_fn(|s| {
+                let ty = slot_types_snap[s];
+                let supports = crate::dsp::modules::module_spec(ty).supports_sidechain;
+                let gain_db = slot_sc_gain_db_arr[s];
+                if !supports || gain_db <= -90.0 || !sc_active {
+                    None
+                } else {
+                    Some(&slot_sc_input_ref[sc_ch][s][..num_bins])
+                }
+            });
 
             // Run all modules through the fx_matrix slot chain.
             fx_matrix.process_hop(
@@ -426,6 +528,18 @@ impl Pipeline {
         shared.spectrum_tx.publish();
         shared.suppression_tx.input_buffer_mut().copy_from_slice(&suppression_buf[..MAX_NUM_BINS]);
         shared.suppression_tx.publish();
+
+        // Publish SC envelope for the currently-edited slot, if it is an SC-aware Gain slot.
+        let editing_slot = params.editing_slot.try_lock().map(|g| *g as usize).unwrap_or(0);
+        let editing_is_gain = editing_slot < 9 &&
+            matches!(slot_types_snap[editing_slot], crate::dsp::modules::ModuleType::Gain);
+        if editing_is_gain {
+            let src = &self.slot_sc_input[0][editing_slot];
+            shared.sc_envelope_tx.input_buffer_mut().copy_from_slice(&src[..MAX_NUM_BINS]);
+        } else {
+            shared.sc_envelope_tx.input_buffer_mut().fill(0.0);
+        }
+        shared.sc_envelope_tx.publish();
     }
 }
 
