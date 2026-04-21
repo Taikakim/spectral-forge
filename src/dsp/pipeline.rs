@@ -309,10 +309,24 @@ impl Pipeline {
             self.fx_matrix.set_gain_modes(&*modes);
         }
 
-        // Snapshot route_matrix before the per-hop closure — RouteMatrix is plain arrays (~500 bytes), no heap allocation.
-        let route_matrix_snap = params.route_matrix.try_lock()
-            .map(|g| g.clone())
-            .unwrap_or_else(|| crate::dsp::modules::RouteMatrix::default());
+        // Build route matrix from automatable params each block.
+        // virtual_rows (T/S Split bindings) are not exposed as automation targets,
+        // so we still read them from the Mutex — but never block waiting for it.
+        let virt = params.route_matrix.try_lock()
+            .map(|g| g.virtual_rows)
+            .unwrap_or_default();
+        let mut route_matrix_snap = crate::dsp::modules::RouteMatrix {
+            send: [[0.0f32; crate::dsp::modules::MAX_SLOTS]; crate::dsp::modules::MAX_MATRIX_ROWS],
+            virtual_rows: virt,
+        };
+        for r in 0..crate::param_ids::NUM_MATRIX_ROWS {
+            for col in 0..crate::param_ids::NUM_SLOTS {
+                if r == col { continue; } // skip diagonal to prevent self-feedback
+                if let Some(p) = params.matrix_cell(r, col) {
+                    route_matrix_snap.send[col][r] = p.smoothed.next();
+                }
+            }
+        }
 
         // Reborrow fields as locals so the closure can capture them without
         // conflicting with the &mut self.stft borrow inside process_overlap_add.
