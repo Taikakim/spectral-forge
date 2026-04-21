@@ -29,10 +29,13 @@ pub struct SharedState {
     pub sidechain_active: [Arc<AtomicBool>; 4],
 
     // Audio → GUI
-    pub spectrum_tx:    TbInput<Vec<f32>>,
-    pub spectrum_rx:    Arc<Mutex<TbOutput<Vec<f32>>>>,
-    pub suppression_tx: TbInput<Vec<f32>>,
-    pub suppression_rx: Arc<Mutex<TbOutput<Vec<f32>>>>,
+    pub spectrum_tx:      TbInput<Vec<f32>>,
+    pub spectrum_rx:      Arc<Mutex<TbOutput<Vec<f32>>>>,
+    pub suppression_tx:   TbInput<Vec<f32>>,
+    pub suppression_rx:   Arc<Mutex<TbOutput<Vec<f32>>>>,
+    /// SC peak-hold envelope for the currently-edited Gain slot (per-bin f32 magnitudes).
+    pub sc_envelope_tx:   TbInput<Vec<f32>>,
+    pub sc_envelope_rx:   Arc<Mutex<TbOutput<Vec<f32>>>>,
 
     pub sample_rate: Arc<AtomicF32>,
 }
@@ -78,6 +81,7 @@ impl SharedState {
 
         let (spectrum_tx, spectrum_rx) = TripleBuffer::new(&zero_bins).split();
         let (suppression_tx, suppression_rx) = TripleBuffer::new(&zero_bins).split();
+        let (sc_envelope_tx, sc_envelope_rx) = TripleBuffer::new(&zero_bins).split();
 
         Self {
             num_bins: MAX_NUM_BINS,
@@ -89,6 +93,8 @@ impl SharedState {
             spectrum_rx: Arc::new(Mutex::new(spectrum_rx)),
             suppression_tx,
             suppression_rx: Arc::new(Mutex::new(suppression_rx)),
+            sc_envelope_tx,
+            sc_envelope_rx: Arc::new(Mutex::new(sc_envelope_rx)),
             sample_rate: Arc::new(AtomicF32::new(sample_rate)),
         }
     }
