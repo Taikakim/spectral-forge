@@ -145,15 +145,11 @@ pub fn create_editor(
                         ui.add_space(8.0);
                         let sc_lit = sidechain_active
                             .as_ref()
-                            .map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
+                            .map(|a| a.load(Ordering::Relaxed))
                             .unwrap_or(false);
-                        let color = if sc_lit {
-                            crate::editor::theme::SC_METER_COLOR_LIT
-                        } else {
-                            crate::editor::theme::SC_METER_COLOR_DIM
-                        };
+                        let color = if sc_lit { th::SC_METER_COLOR_LIT } else { th::SC_METER_COLOR_DIM };
                         let (rect, _resp) = ui.allocate_exact_size(
-                            egui::vec2(crate::editor::theme::SC_METER_WIDTH_PX, crate::editor::theme::SC_METER_HEIGHT_PX),
+                            egui::vec2(th::SC_METER_WIDTH_PX, th::SC_METER_HEIGHT_PX),
                             egui::Sense::hover(),
                         );
                         ui.painter().rect_filled(rect, 0.0, color);
