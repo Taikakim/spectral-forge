@@ -47,3 +47,19 @@ fn sc_channel_enum_variants() {
     assert_eq!(values.len(), 6);
     assert_eq!(ScChannel::default(), ScChannel::Follow);
 }
+
+#[test]
+fn per_slot_sc_defaults() {
+    use spectral_forge::params::{SpectralForgeParams, ScChannel};
+    let p = SpectralForgeParams::default();
+    let gains = *p.slot_sc_gain_db.lock();
+    let chans = *p.slot_sc_channel.lock();
+    assert_eq!(gains.len(), 9);
+    assert_eq!(chans.len(), 9);
+    for g in gains.iter() {
+        assert_eq!(*g, 0.0, "default SC gain should be 0 dB");
+    }
+    for c in chans.iter() {
+        assert_eq!(*c, ScChannel::Follow);
+    }
+}

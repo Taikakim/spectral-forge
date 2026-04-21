@@ -140,6 +140,14 @@ pub struct SpectralForgeParams {
     #[persist = "slot_gain_mode"]
     pub slot_gain_mode: Arc<Mutex<[GainMode; 9]>>,
 
+    /// Per-slot SC input gain in dB. Range [-90.0, 18.0]; values <= -90.0 treated as "-∞" (SC disabled for slot).
+    #[persist = "slot_sc_gain_db"]
+    pub slot_sc_gain_db: Arc<Mutex<[f32; 9]>>,
+
+    /// Per-slot SC channel routing.
+    #[persist = "slot_sc_channel"]
+    pub slot_sc_channel: Arc<Mutex<[ScChannel; 9]>>,
+
     /// Per-slot per-curve nodes. [slot 0..=8][curve 0..6][node 0..5].
     #[persist = "slot_curve_nodes"]
     pub slot_curve_nodes: Arc<Mutex<[[[CurveNode; NUM_NODES]; 7]; 9]>>,
@@ -331,6 +339,8 @@ impl Default for SpectralForgeParams {
             slot_targets:   Arc::new(Mutex::new([FxChannelTarget::All; 9])),
             slot_sidechain: Arc::new(Mutex::new([255u8; 9])),
             slot_gain_mode: Arc::new(Mutex::new([GainMode::Add; 9])),
+            slot_sc_gain_db: Arc::new(Mutex::new([0.0f32; 9])),
+            slot_sc_channel: Arc::new(Mutex::new([ScChannel::Follow; 9])),
             slot_curve_nodes: Arc::new(Mutex::new(
                 std::array::from_fn(|_s| {
                     std::array::from_fn(|c| crate::editor::curve::default_nodes_for_curve(c))
