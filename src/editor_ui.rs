@@ -676,51 +676,56 @@ pub fn create_editor(
                             );
                         }
 
-                        // Per-curve tilt and offset from slot_curve_meta
+                        // Per-curve tilt and offset — backed by FloatParams for host automation.
                         let spec = crate::dsp::modules::module_spec(editing_type);
                         if editing_curve < spec.num_curves {
                             ui.add_space(8.0);
                             let crv_col = spec.color_lit;
-                            let mut meta = *params.slot_curve_meta.lock();
-                            let (tilt, offset) = &mut meta[editing_slot][editing_curve];
-                            let mut changed = false;
-                            // Offset range calibrated per display type so ±max spans the full
-                            // parameter range. UI shows a normalised [-1, +1] proxy with a
-                            // consistent drag speed (600 px for a full sweep) so every curve
-                            // feels the same regardless of its underlying physical scale.
-                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve));
-                            let mut off_norm = if off_max > 0.0 { *offset / off_max } else { 0.0 };
-                            ui.vertical(|ui| {
-                                if ui.add(
-                                    egui::DragValue::new(&mut off_norm)
-                                        .range(-1.0..=1.0)
-                                        .speed(1.0 / 300.0)
-                                        .fixed_decimals(2)
-                                ).changed() {
-                                    *offset = (off_norm.clamp(-1.0, 1.0)) * off_max;
-                                    changed = true;
-                                }
-                                ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
-                            });
-                            // Tilt shares the normalised [-1, +1] proxy for consistent feel.
-                            // Internal storage is the physical value used by apply_curve_adjustments
-                            // (±2 range). UI multiplies/divides by TILT_MAX on read/write.
                             const TILT_MAX: f32 = 2.0;
-                            let mut tilt_norm = (*tilt / TILT_MAX).clamp(-1.0, 1.0);
-                            ui.vertical(|ui| {
-                                if ui.add(
-                                    egui::DragValue::new(&mut tilt_norm)
-                                        .range(-1.0..=1.0)
-                                        .speed(1.0 / 300.0)
-                                        .fixed_decimals(2)
-                                ).changed() {
-                                    *tilt = tilt_norm.clamp(-1.0, 1.0) * TILT_MAX;
-                                    changed = true;
-                                }
-                                ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
-                            });
-                            if changed {
-                                *params.slot_curve_meta.lock() = meta;
+                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve));
+
+                            if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {
+                                let mut off_norm = off_p.value();
+                                ui.vertical(|ui| {
+                                    let resp = ui.add(
+                                        egui::DragValue::new(&mut off_norm)
+                                            .range(-1.0..=1.0)
+                                            .speed(1.0 / 300.0)
+                                            .fixed_decimals(2)
+                                    );
+                                    if resp.drag_started() { setter.begin_set_parameter(off_p); }
+                                    if resp.changed() {
+                                        let clamped = off_norm.clamp(-1.0, 1.0);
+                                        setter.set_parameter(off_p, clamped);
+                                        if let Some(mut meta) = params.slot_curve_meta.try_lock() {
+                                            meta[editing_slot][editing_curve].1 = clamped * off_max;
+                                        }
+                                    }
+                                    if resp.drag_stopped() { setter.end_set_parameter(off_p); }
+                                    ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
+                                });
+                            }
+
+                            if let Some(tilt_p) = params.tilt_param(editing_slot, editing_curve) {
+                                let mut tilt_norm = tilt_p.value();
+                                ui.vertical(|ui| {
+                                    let resp = ui.add(
+                                        egui::DragValue::new(&mut tilt_norm)
+                                            .range(-1.0..=1.0)
+                                            .speed(1.0 / 300.0)
+                                            .fixed_decimals(2)
+                                    );
+                                    if resp.drag_started() { setter.begin_set_parameter(tilt_p); }
+                                    if resp.changed() {
+                                        let clamped = tilt_norm.clamp(-1.0, 1.0);
+                                        setter.set_parameter(tilt_p, clamped);
+                                        if let Some(mut meta) = params.slot_curve_meta.try_lock() {
+                                            meta[editing_slot][editing_curve].0 = clamped * TILT_MAX;
+                                        }
+                                    }
+                                    if resp.drag_stopped() { setter.end_set_parameter(tilt_p); }
+                                    ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
+                                });
                             }
                         }
                     });
