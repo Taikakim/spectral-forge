@@ -188,9 +188,24 @@ No delete-from-UI (user deletes via file manager). No nested folders. No factory
 - **Integration** (`tests/migration.rs` new): state saved with old `#[persist]` path loads into new params with correct values.
 - **Manual**: in Bitwig, automate `s0c0n0y` and confirm the node moves under automation; hover 1000ms and confirm tooltip text.
 
+## Audio-rate modulation robustness
+
+Bitwig (and some other CLAP/VST3 hosts) support audio-rate modulation: any exposed param may receive a sample-rate signal such as white noise. Every newly-exposed param must tolerate this without producing NaN/Inf or degenerate output.
+
+Requirements:
+
+- **All params `.with_smoother(SmoothingStyle::Linear(…))`** at a small ms value (1–5 ms). Smoothing converts audio-rate noise on the param into bandlimited motion per sample, preventing per-sample discontinuities in the derived curves.
+- **Graph-node curve recomputation** happens once per buffer on the GUI thread today. After this change, curves need recomputation driven by params, not only by drag edits. Approach: the GUI thread polls `param.smoothed.next()` snapshots — but the **audio thread already receives smoothed curves via `curve_tx`**, so the user-facing rule is: if you want fast modulation to actually change the sound, route it to the tilt/offset or matrix-send params which are re-read every block, not to individual graph-node params. Graph nodes are latency-bounded by one block. Document this.
+- **Divide-by-zero and range guards**: `q` at 0 maps to 4-oct bandwidth and must not evaluate as `1.0 / q`. `x` at log-freq endpoints must clamp to `[20 Hz, sample_rate / 2]` before use. `offset * curve_offset_max` is safe since both factors are bounded, but verify no module does `gain.powf(offset)` without a `max(1e-6)` on the base.
+- **Matrix send at 1.0 exactly** must not create a self-feedback loop — `RouteMatrix` diagonal cells are send-to-self and must remain 0 regardless of automation. Guard by ignoring `mr{i}c{i}` writes in the param→matrix rebuild.
+- **Finite-value guard on curve outputs**: the existing `dsp::guard::sanitize()` runs before FFT; keep that as the backstop for any modulation-induced NaN that slips through.
+
+Testing: a `tests/audio_rate_modulation.rs` test feeds random noise into every automatable param for 1 second at 48 kHz, asserts the output is finite and within ±24 dBFS. Run as part of CI.
+
 ## Risks
 
-- **Param count perf**: 1361 `FloatParam`s. Measure, disable smoothing on graph-node params if hot.
+- **Param count perf**: 1361 `FloatParam`s, each with a `Smoother`. Measure — if per-block smoother tick cost is significant, switch graph-node params to a simpler `Linear(1ms)` smoother or a custom cheap one.
 - **State migration**: must not lose user work. The persist→params migration is the biggest risk surface — needs test coverage with real saved project state.
 - **Automation lane cache** in hosts: ParamIDs must never change. Once this spec ships, the ID scheme is frozen.
-- **Param-scan noise**: exposing 1361 params may make Bitwig's parameter-browse UX slow. If it is, we may need to think about grouping/hiding in a future revision — not blocking for this plan.
+- **Param-scan noise**: exposing 1361 params may make Bitwig's parameter-browse UX slow. User accepts this on the assumption that real workflows use Bitwig's Remote Controls pages / visual assignment, not flat param-list browsing. If that assumption is wrong we may need to revisit grouping — not blocking for this plan.
+- **Audio-rate modulation edge cases**: covered in the section above.
