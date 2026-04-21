@@ -119,6 +119,13 @@ fn phase_color_inner() -> &'static (Color32, Color32) {
 pub fn phase_color_lit() -> Color32 { phase_color_inner().0 }
 pub fn phase_color_dim() -> Color32 { phase_color_inner().1 }
 
+// ─── SC level meter ───────────────────────────────────────────────────────────
+
+pub const SC_METER_HEIGHT_PX: f32 = 4.0;
+pub const SC_METER_WIDTH_PX:  f32 = 80.0;
+pub const SC_METER_COLOR_LIT: Color32 = Color32::from_rgb(0xe0, 0xc0, 0x30);
+pub const SC_METER_COLOR_DIM: Color32 = Color32::from_rgb(0x55, 0x48, 0x10);
+
 // ─── Stroke widths & geometry ─────────────────────────────────────────────────
 
 pub const STROKE_THIN:   f32 = 1.0;
