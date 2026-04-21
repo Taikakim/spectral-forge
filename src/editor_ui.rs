@@ -728,8 +728,8 @@ fn sc_strip_ui(
         ui.label(egui::RichText::new("SC").color(th::LABEL_DIM).size(9.0));
         // SC gain knob
         {
-            let mut gains = params.slot_sc_gain_db.lock();
-            let mut g = gains[slot_idx];
+            let cur = params.slot_sc_gain_db.lock()[slot_idx];
+            let mut g = cur;
             let resp = ui.add(
                 egui::DragValue::new(&mut g)
                     .clamp_range(-90.0..=18.0)
@@ -739,13 +739,14 @@ fn sc_strip_ui(
                         if v <= -90.0 { "−∞".to_owned() } else { format!("{:.1}", v) }
                     })
             );
-            if resp.changed() { gains[slot_idx] = g; }
+            if resp.changed() {
+                params.slot_sc_gain_db.lock()[slot_idx] = g;
+            }
         }
         ui.separator();
         // SC channel selector
         {
-            let mut chans = params.slot_sc_channel.lock();
-            let cur = chans[slot_idx];
+            let cur = params.slot_sc_channel.lock()[slot_idx];
             let label = match cur {
                 ScChannel::Follow => "Follow",
                 ScChannel::LR => "L+R",
@@ -754,7 +755,7 @@ fn sc_strip_ui(
                 ScChannel::M  => "M",
                 ScChannel::S  => "S",
             };
-            egui::ComboBox::new(format!("sc_chan_slot_{}", slot_idx), "Source")
+            egui::ComboBox::new(("sc_chan_slot", slot_idx), "Source")
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     for (v, text) in [
@@ -766,7 +767,7 @@ fn sc_strip_ui(
                         (ScChannel::S,      "S"),
                     ] {
                         if ui.selectable_label(cur == v, text).clicked() {
-                            chans[slot_idx] = v;
+                            params.slot_sc_channel.lock()[slot_idx] = v;
                         }
                     }
                 });
