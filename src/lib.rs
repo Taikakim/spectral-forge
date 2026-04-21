@@ -1,7 +1,7 @@
 pub mod dsp;
 pub mod editor;
 pub mod editor_ui;
-pub(crate) mod param_ids;
+pub mod param_ids;
 pub mod params;
 pub mod bridge;
 pub mod presets;

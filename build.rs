@@ -140,7 +140,8 @@ fn emit_graph_node_inits(f: &mut File) {
                         f,
                         "            {rust_name}: FloatParam::new(\"{id}\", {default}f32, \
                          FloatRange::Linear {{ min: {min}f32, max: {max}f32 }})\
-                         .with_smoother(SmoothingStyle::Linear(1.0)),"
+                         .with_smoother(SmoothingStyle::Linear(1.0))\
+                         .hide_in_generic_ui(),"
                     )
                     .unwrap();
                 }
@@ -181,7 +182,8 @@ fn emit_tilt_offset_inits(f: &mut File) {
                     f,
                     "            {rust_name}: FloatParam::new(\"{id}\", 0.0f32, \
                      FloatRange::Linear {{ min: -1.0f32, max: 1.0f32 }})\
-                     .with_smoother(SmoothingStyle::Linear(2.0)),"
+                     .with_smoother(SmoothingStyle::Linear(2.0))\
+                     .hide_in_generic_ui(),"
                 )
                 .unwrap();
             }
@@ -190,18 +192,21 @@ fn emit_tilt_offset_inits(f: &mut File) {
 }
 
 fn emit_matrix_inits(f: &mut File) {
+    // Param ID convention: mr{row}c{col}  where  row = DESTINATION slot,  col = SOURCE slot.
+    // This is the TRANSPOSE of RouteMatrix.send[src][dst] (first index = source).
+    // When building RouteMatrix from params: send[col][r] = mr{r}c{col}.value()
+    // Default: serial chain. mr1c0=1 (slot 0 → row 1 = slot 1), mr2c1=1, etc.
     for r in 0..NUM_MATRIX_ROWS {
         for col in 0..NUM_SLOTS {
             let id = format!("mr{}c{}", r, col);
             let rust_name = format!("mr{}c{}", r, col);
-            // Default: serial chain. mr1c0=1 (slot 0 → row 1), mr2c1=1, etc.
-            // Matches RouteMatrix::default() serial wiring 0→1→2→…
             let default: f32 = if col + 1 == r { 1.0 } else { 0.0 };
             writeln!(
                 f,
                 "            {rust_name}: FloatParam::new(\"{id}\", {default}f32, \
                  FloatRange::Linear {{ min: 0.0f32, max: 1.0f32 }})\
-                 .with_smoother(SmoothingStyle::Linear(2.0)),"
+                 .with_smoother(SmoothingStyle::Linear(2.0))\
+                 .hide_in_generic_ui(),"
             )
             .unwrap();
         }

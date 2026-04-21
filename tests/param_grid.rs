@@ -53,6 +53,35 @@ fn is_matrix_id(id: &str) -> bool {
     id.starts_with("mr")
 }
 
+// ── Constants cross-check (I2) ────────────────────────────────────────────────
+//
+// build.rs has its own local copies of NUM_SLOTS / NUM_CURVES / NUM_NODES /
+// NUM_MATRIX_ROWS. They must match param_ids::NUM_* or the param_map counts
+// above will silently diverge. This test pins the expected values so a change
+// in param_ids.rs without a matching change in build.rs fails loudly.
+
+#[test]
+fn param_ids_constants_match_expected_dimensions() {
+    // If these change, build.rs constants must be updated to match.
+    assert_eq!(spectral_forge::param_ids::NUM_SLOTS,       9);
+    assert_eq!(spectral_forge::param_ids::NUM_CURVES,      7);
+    assert_eq!(spectral_forge::param_ids::NUM_NODES,       6);
+    assert_eq!(spectral_forge::param_ids::NUM_MATRIX_ROWS, 9);
+    // Derived counts must produce the numbers the param_map test checks.
+    let expected_graph  = spectral_forge::param_ids::NUM_SLOTS
+        * spectral_forge::param_ids::NUM_CURVES
+        * spectral_forge::param_ids::NUM_NODES
+        * 3;  // x, y, q
+    assert_eq!(expected_graph, 1134);
+    let expected_to = spectral_forge::param_ids::NUM_SLOTS
+        * spectral_forge::param_ids::NUM_CURVES
+        * 2;  // tilt, offset
+    assert_eq!(expected_to, 126);
+    let expected_matrix = spectral_forge::param_ids::NUM_MATRIX_ROWS
+        * spectral_forge::param_ids::NUM_SLOTS;
+    assert_eq!(expected_matrix, 81);
+}
+
 #[test]
 fn param_map_contains_expected_count() {
     let params = SpectralForgeParams::default();
