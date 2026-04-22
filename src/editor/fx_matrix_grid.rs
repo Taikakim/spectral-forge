@@ -198,7 +198,7 @@ pub fn paint_fx_matrix_grid(
 
                         if !both_empty {
                             let send_val = &mut route_matrix.send[row][col];
-                            ui.allocate_new_ui(
+                            let inner = ui.allocate_new_ui(
                                 UiBuilder::new().max_rect(cell_rect.shrink(3.0)),
                                 |ui| {
                                     ui.add(
@@ -211,9 +211,11 @@ pub fn paint_fx_matrix_grid(
                                                 else { format!("{v:.2}") }
                                             })
                                             .custom_parser(|s| s.parse::<f64>().ok()),
-                                    );
+                                    )
                                 },
                             );
+                            crate::editor::delayed_tooltip(ui, &inner.inner,
+                                format!("Slot {} \u{2192} Slot {} send", row + 1, col + 1));
                         } else {
                             painter.text(
                                 cell_rect.center(),
@@ -270,7 +272,11 @@ pub fn paint_fx_matrix_grid(
                         );
                     } else {
                         let send_val = &mut route_matrix.send[*vrow_src][col];
-                        ui.allocate_new_ui(
+                        let vrow_label = match kind {
+                            VirtualRowKind::Transient => format!("Slot {}T", parent_slot + 1),
+                            VirtualRowKind::Sustained => format!("Slot {}S", parent_slot + 1),
+                        };
+                        let vinner = ui.allocate_new_ui(
                             UiBuilder::new().max_rect(cell_rect.shrink(2.0)),
                             |ui| {
                                 ui.add(
@@ -281,9 +287,11 @@ pub fn paint_fx_matrix_grid(
                                             else { format!("{v:.2}") }
                                         })
                                         .custom_parser(|s| s.parse::<f64>().ok()),
-                                );
+                                )
                             },
                         );
+                        crate::editor::delayed_tooltip(ui, &vinner.inner,
+                            format!("{} \u{2192} Slot {} send", vrow_label, col + 1));
                     }
                 }
 

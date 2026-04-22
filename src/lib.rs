@@ -1,8 +1,10 @@
 pub mod dsp;
 pub mod editor;
 pub mod editor_ui;
+pub mod param_ids;
 pub mod params;
 pub mod bridge;
+pub mod preset;
 pub mod presets;
 
 use nih_plug::prelude::*;
@@ -110,6 +112,11 @@ impl Plugin for SpectralForge {
         context: &mut impl InitContext<Self>,
     ) -> bool {
         use std::sync::atomic::Ordering;
+
+        // One-shot migration: copy legacy persist data into generated FloatParam smoothers.
+        // Must run before the curve publish loop below so any smoother-based state is current.
+        self.params.migrate_legacy_if_needed();
+
         let sr = buffer_config.sample_rate;
         let num_ch = audio_io_layout.main_output_channels
             .map(|c| c.get() as usize).unwrap_or(2);
@@ -161,6 +168,67 @@ impl Plugin for SpectralForge {
             }
         }
         true
+    }
+
+    fn filter_state(state: &mut nih_plug::prelude::PluginState) {
+        // If `migrated_v1` is already in the persist fields, this is new state — no migration.
+        if state.fields.contains_key("migrated_v1") {
+            return;
+        }
+
+        // Old state: decode legacy persist fields and inject graph-node / tilt / matrix values
+        // into state.params so nih-plug's normal deserialization path sets param.value() correctly.
+        use crate::param_ids::{NUM_SLOTS, NUM_CURVES, NUM_NODES, NUM_MATRIX_ROWS, graph_node_id, tilt_id, matrix_id};
+        use nih_plug::wrapper::state::ParamValue;
+
+        // ── Graph nodes ───────────────────────────────────────────────────────
+        if let Some(nodes_json) = state.fields.get("slot_curve_nodes") {
+            if let Ok(nodes) = serde_json::from_str::<[[[crate::editor::curve::CurveNode; NUM_NODES]; NUM_CURVES]; NUM_SLOTS]>(nodes_json) {
+                for s in 0..NUM_SLOTS {
+                    for c in 0..NUM_CURVES {
+                        for n in 0..NUM_NODES {
+                            let node = nodes[s][c][n];
+                            state.params.entry(graph_node_id(s, c, n, 'x'))
+                                .or_insert_with(|| ParamValue::F32(node.x));
+                            state.params.entry(graph_node_id(s, c, n, 'y'))
+                                .or_insert_with(|| ParamValue::F32(node.y));
+                            state.params.entry(graph_node_id(s, c, n, 'q'))
+                                .or_insert_with(|| ParamValue::F32(node.q));
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Tilt (offset migration skipped — off_max varies per curve type) ──
+        if let Some(meta_json) = state.fields.get("slot_curve_meta") {
+            if let Ok(meta) = serde_json::from_str::<[[(f32, f32); NUM_CURVES]; NUM_SLOTS]>(meta_json) {
+                for s in 0..NUM_SLOTS {
+                    for c in 0..NUM_CURVES {
+                        let (tilt_phys, _offset_phys) = meta[s][c];
+                        let tilt_norm = (tilt_phys / 2.0).clamp(-1.0, 1.0);
+                        state.params.entry(tilt_id(s, c))
+                            .or_insert_with(|| ParamValue::F32(tilt_norm));
+                    }
+                }
+            }
+        }
+
+        // ── Matrix: send[src][dst] → matrix_cell(dst=r, src=col) ────────────
+        if let Some(matrix_json) = state.fields.get("route_matrix") {
+            if let Ok(route_matrix) = serde_json::from_str::<crate::dsp::modules::RouteMatrix>(matrix_json) {
+                for r in 0..NUM_MATRIX_ROWS {    // r = dst
+                    for col in 0..NUM_SLOTS {    // col = src
+                        let val = route_matrix.send[col][r];
+                        state.params.entry(matrix_id(r, col))
+                            .or_insert_with(|| ParamValue::F32(val));
+                    }
+                }
+            }
+        }
+
+        // Mark as migrated in the fields map so next save round-trips the flag.
+        state.fields.insert("migrated_v1".to_string(), "true".to_string());
     }
 
     fn reset(&mut self) {

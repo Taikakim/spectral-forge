@@ -53,6 +53,11 @@ pub fn create_editor(
                 }
             }
 
+            // Load preset menu state from egui temp storage (persists across frames).
+            let preset_key = egui::Id::new("preset_menu_state");
+            let mut preset_state: crate::editor::PresetMenuState =
+                ctx.data(|d| d.get_temp(preset_key)).unwrap_or_default();
+
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(th::BG))
                 .show(ctx, |ui| {
@@ -64,8 +69,11 @@ pub fn create_editor(
                     let falloff      = *params.peak_falloff_ms.lock();
                     let atk_ms       = params.attack_ms.value();
                     let rel_ms       = params.release_ms.value();
-                    // ── Top bar: curve selectors + range controls ──────────────
+                    // ── Top bar: preset pulldown + curve selectors + range controls ──
                     ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        crate::editor::preset_menu_ui(ui, &mut preset_state, &params, setter);
+                        ui.separator();
                         ui.add_space(4.0);
 
                         let editing_slot = *params.editing_slot.lock() as usize;
@@ -331,31 +339,43 @@ pub fn create_editor(
                             raw_curve
                         };
 
-                        let nodes_all = *params.slot_curve_nodes.lock();
+                        // Read this slot's curve nodes lock-free from automatable params.
+                        let slot_nodes: [[crv::CurveNode; 6]; 7] = std::array::from_fn(|c| {
+                            std::array::from_fn(|n| {
+                                params.graph_node(editing_slot, c, n)
+                                    .map(|(x, y, q)| crv::CurveNode { x: x.value(), y: y.value(), q: q.value() })
+                                    .unwrap_or_default()
+                            })
+                        });
 
                         // Cache key: invalidate when slot type, editing slot, or fft_size changes
                         let cache_key = ui.id().with(("slot_gains", editing_slot, editing_type as u8, fft_size));
-                        let cached: Option<([[[crv::CurveNode; 6]; 7]; 9], Vec<Vec<f32>>)> =
+                        let cached: Option<([[crv::CurveNode; 6]; 7], Vec<Vec<f32>>)> =
                             ui.data(|d| d.get_temp(cache_key));
                         let all_gains: Vec<Vec<f32>> = match cached {
-                            Some((cn, cg)) if cn == nodes_all => cg,
+                            Some((cn, cg)) if cn == slot_nodes => cg,
                             _ => {
                                 let g: Vec<Vec<f32>> = (0..num_c.min(7))
                                     .map(|c| crv::compute_curve_response(
-                                        &nodes_all[editing_slot][c], num_bins, sr, fft_size,
+                                        &slot_nodes[c], num_bins, sr, fft_size,
                                     ))
                                     .collect();
-                                ui.data_mut(|d| d.insert_temp(cache_key, (nodes_all, g.clone())));
+                                ui.data_mut(|d| d.insert_temp(cache_key, (slot_nodes, g.clone())));
                                 g
                             }
                         };
 
-                        let meta = *params.slot_curve_meta.lock();
+                        // Read tilt/offset lock-free from automatable params.
+                        let slot_meta: [(f32, f32); 7] = std::array::from_fn(|c| {
+                            let t = params.tilt_param(editing_slot, c).map(|p| p.value()).unwrap_or(0.0);
+                            let o = params.offset_param(editing_slot, c).map(|p| p.value()).unwrap_or(0.0);
+                            (t, o)
+                        });
 
                         // Draw inactive curves (dim) — display_curve_idx maps to correct y-axis scale
                         for i in 0..num_c.min(7) {
                             if i == editing_curve { continue; }
-                            let (tilt, offset) = meta[editing_slot][i];
+                            let (tilt, offset) = slot_meta[i];
                             let disp_i = crv::display_curve_idx(editing_type, i);
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[i], disp_i,
@@ -366,7 +386,7 @@ pub fn create_editor(
 
                         // Draw active curve (lit) + interactive widget
                         if editing_curve < num_c && !all_gains.is_empty() {
-                            let (tilt, offset) = meta[editing_slot][editing_curve];
+                            let (tilt, offset) = slot_meta[editing_curve];
                             let disp_curve = crv::display_curve_idx(editing_type, editing_curve);
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[editing_curve], disp_curve,
@@ -390,12 +410,28 @@ pub fn create_editor(
                                 }
                             }
 
-                            let mut nodes = nodes_all[editing_slot][editing_curve];
-                            if crv::curve_widget(
+                            let mut nodes = slot_nodes[editing_curve];
+                            let cwr = crv::curve_widget(
                                 ui, curve_rect, &mut nodes, editing_curve, sr,
-                            ) {
-                                params.slot_curve_nodes.lock()[editing_slot][editing_curve] = nodes;
-                                // Publish updated gains to triple buffer
+                            );
+                            if cwr.drag_started {
+                                for n in 0..crate::param_ids::NUM_NODES {
+                                    if let Some((x_p, y_p, q_p)) = params.graph_node(editing_slot, editing_curve, n) {
+                                        setter.begin_set_parameter(x_p);
+                                        setter.begin_set_parameter(y_p);
+                                        setter.begin_set_parameter(q_p);
+                                    }
+                                }
+                            }
+                            if cwr.changed {
+                                for n in 0..crate::param_ids::NUM_NODES {
+                                    if let Some((x_p, y_p, q_p)) = params.graph_node(editing_slot, editing_curve, n) {
+                                        setter.set_parameter(x_p, nodes[n].x);
+                                        setter.set_parameter(y_p, nodes[n].y.clamp(-1.0, 1.0));
+                                        setter.set_parameter(q_p, nodes[n].q);
+                                    }
+                                }
+                                // Keep triple-buffer publish so DSP gets the updated curve.
                                 {
                                     use crate::dsp::pipeline::MAX_NUM_BINS;
                                     let full_gains = crv::compute_curve_response(
@@ -408,6 +444,15 @@ pub fn create_editor(
                                                 tx.publish();
                                             }
                                         }
+                                    }
+                                }
+                            }
+                            if cwr.drag_stopped {
+                                for n in 0..crate::param_ids::NUM_NODES {
+                                    if let Some((x_p, y_p, q_p)) = params.graph_node(editing_slot, editing_curve, n) {
+                                        setter.end_set_parameter(x_p);
+                                        setter.end_set_parameter(y_p);
+                                        setter.end_set_parameter(q_p);
                                     }
                                 }
                             }
@@ -649,51 +694,61 @@ pub fn create_editor(
                             );
                         }
 
-                        // Per-curve tilt and offset from slot_curve_meta
+                        // Per-curve tilt and offset — backed by FloatParams for host automation.
                         let spec = crate::dsp::modules::module_spec(editing_type);
                         if editing_curve < spec.num_curves {
                             ui.add_space(8.0);
                             let crv_col = spec.color_lit;
-                            let mut meta = *params.slot_curve_meta.lock();
-                            let (tilt, offset) = &mut meta[editing_slot][editing_curve];
-                            let mut changed = false;
-                            // Offset range calibrated per display type so ±max spans the full
-                            // parameter range. UI shows a normalised [-1, +1] proxy with a
-                            // consistent drag speed (600 px for a full sweep) so every curve
-                            // feels the same regardless of its underlying physical scale.
-                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve));
-                            let mut off_norm = if off_max > 0.0 { *offset / off_max } else { 0.0 };
-                            ui.vertical(|ui| {
-                                if ui.add(
-                                    egui::DragValue::new(&mut off_norm)
-                                        .range(-1.0..=1.0)
-                                        .speed(1.0 / 300.0)
-                                        .fixed_decimals(2)
-                                ).changed() {
-                                    *offset = (off_norm.clamp(-1.0, 1.0)) * off_max;
-                                    changed = true;
-                                }
-                                ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
-                            });
-                            // Tilt shares the normalised [-1, +1] proxy for consistent feel.
-                            // Internal storage is the physical value used by apply_curve_adjustments
-                            // (±2 range). UI multiplies/divides by TILT_MAX on read/write.
                             const TILT_MAX: f32 = 2.0;
-                            let mut tilt_norm = (*tilt / TILT_MAX).clamp(-1.0, 1.0);
-                            ui.vertical(|ui| {
-                                if ui.add(
-                                    egui::DragValue::new(&mut tilt_norm)
-                                        .range(-1.0..=1.0)
-                                        .speed(1.0 / 300.0)
-                                        .fixed_decimals(2)
-                                ).changed() {
-                                    *tilt = tilt_norm.clamp(-1.0, 1.0) * TILT_MAX;
-                                    changed = true;
-                                }
-                                ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
-                            });
-                            if changed {
-                                *params.slot_curve_meta.lock() = meta;
+                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve));
+
+                            let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
+                            if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {
+                                let mut off_norm = off_p.value();
+                                ui.vertical(|ui| {
+                                    let resp = ui.add(
+                                        egui::DragValue::new(&mut off_norm)
+                                            .range(-1.0..=1.0)
+                                            .speed(1.0 / 300.0)
+                                            .fixed_decimals(2)
+                                    );
+                                    if resp.drag_started() { setter.begin_set_parameter(off_p); }
+                                    if resp.changed() {
+                                        let clamped = off_norm.clamp(-1.0, 1.0);
+                                        setter.set_parameter(off_p, clamped);
+                                        if let Some(mut meta) = params.slot_curve_meta.try_lock() {
+                                            meta[editing_slot][editing_curve].1 = clamped * off_max;
+                                        }
+                                    }
+                                    if resp.drag_stopped() { setter.end_set_parameter(off_p); }
+                                    crate::editor::delayed_tooltip(ui, &resp,
+                                        format!("Slot {} · {} · Offset", editing_slot + 1, curve_label));
+                                    ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
+                                });
+                            }
+
+                            if let Some(tilt_p) = params.tilt_param(editing_slot, editing_curve) {
+                                let mut tilt_norm = tilt_p.value();
+                                ui.vertical(|ui| {
+                                    let resp = ui.add(
+                                        egui::DragValue::new(&mut tilt_norm)
+                                            .range(-1.0..=1.0)
+                                            .speed(1.0 / 300.0)
+                                            .fixed_decimals(2)
+                                    );
+                                    if resp.drag_started() { setter.begin_set_parameter(tilt_p); }
+                                    if resp.changed() {
+                                        let clamped = tilt_norm.clamp(-1.0, 1.0);
+                                        setter.set_parameter(tilt_p, clamped);
+                                        if let Some(mut meta) = params.slot_curve_meta.try_lock() {
+                                            meta[editing_slot][editing_curve].0 = clamped * TILT_MAX;
+                                        }
+                                    }
+                                    if resp.drag_stopped() { setter.end_set_parameter(tilt_p); }
+                                    crate::editor::delayed_tooltip(ui, &resp,
+                                        format!("Slot {} · {} · Tilt", editing_slot + 1, curve_label));
+                                    ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
+                                });
                             }
                         }
                     });
@@ -741,6 +796,9 @@ pub fn create_editor(
                     }
                     // Render popup (egui Area — appears above matrix)
                     let _ = crate::editor::module_popup::show_popup(ui, &params);
+
+                    // Persist preset menu state across frames via egui temp storage.
+                    ui.ctx().data_mut(|d| d.insert_temp(preset_key, preset_state.clone()));
                 });
         },
     )
