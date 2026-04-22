@@ -66,7 +66,7 @@ impl Default for SpectralForge {
 }
 
 impl Plugin for SpectralForge {
-    const NAME: &'static str = "Spectral Forge (SC)";
+    const NAME: &'static str = "Spectral Forge";
     const VENDOR: &'static str = "Kim";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -252,7 +252,7 @@ impl Plugin for SpectralForge {
 }
 
 impl ClapPlugin for SpectralForge {
-    const CLAP_ID: &'static str = "com.spectral-forge.spectral-forge-sc";
+    const CLAP_ID: &'static str = "com.spectral-forge.spectral-forge";
     const CLAP_DESCRIPTION: Option<&'static str> = Some("Spectral compressor");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
@@ -264,7 +264,7 @@ impl ClapPlugin for SpectralForge {
 impl Vst3Plugin for SpectralForge {
     // Every VST3 plugin requires a globally unique 16-byte ID.
     // This is exactly 16 characters long.
-    const VST3_CLASS_ID: [u8; 16] = *b"TaikakimSpcFrgSC";
+    const VST3_CLASS_ID: [u8; 16] = *b"TaikakimSpcForge";
 
     // This tells the DAW what folder to put your plugin in.
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
