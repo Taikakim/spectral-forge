@@ -34,6 +34,7 @@ pub enum GainMode {
     Add,
     Subtract,
     Pull,
+    Match,
 }
 
 // ── VirtualRowKind ─────────────────────────────────────────────────────────

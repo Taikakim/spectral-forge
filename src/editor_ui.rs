@@ -92,10 +92,15 @@ pub fn create_editor(
                         let slot_gain_mode_snap = params.slot_gain_mode.lock()[editing_slot];
 
                         // Adaptive curve selector buttons
-                        for (i, &label) in spec.curve_labels.iter().enumerate() {
+                        for (i, &default_label) in spec.curve_labels.iter().enumerate() {
+                            let label = crv::curve_label_for(
+                                editing_type, i, slot_gain_mode_snap, default_label,
+                            );
                             let gain_disabled = editing_type == crate::dsp::modules::ModuleType::Gain
                                 && i == 1
-                                && slot_gain_mode_snap != crate::dsp::modules::GainMode::Pull;
+                                && !matches!(slot_gain_mode_snap,
+                                    crate::dsp::modules::GainMode::Pull
+                                    | crate::dsp::modules::GainMode::Match);
                             let is_active = editing_curve == i && !gain_disabled;
                             let (fill, text_color, stroke_color) = if gain_disabled {
                                 (spec.color_dim, th::LABEL_DIM, spec.color_dim)
@@ -306,7 +311,10 @@ pub fn create_editor(
                     let grid_editing_slot  = *params.editing_slot.lock() as usize;
                     let grid_editing_type  = params.slot_module_types.lock()[grid_editing_slot];
                     let grid_curve_raw     = *params.editing_curve.lock() as usize;
-                    let grid_display_idx   = crv::display_curve_idx(grid_editing_type, grid_curve_raw);
+                    let grid_gain_mode     = params.slot_gain_mode.lock()[grid_editing_slot];
+                    let grid_display_idx   = crv::display_curve_idx(
+                        grid_editing_type, grid_curve_raw, grid_gain_mode,
+                    );
                     crv::paint_grid(ui.painter(), curve_rect, grid_display_idx, db_min, db_max, sr);
 
                     // 2. Spectrum + suppression gradient (always shown)
@@ -329,6 +337,7 @@ pub fn create_editor(
                         let editing_slot  = *params.editing_slot.lock() as usize;
                         let slot_types    = *params.slot_module_types.lock();
                         let editing_type  = slot_types[editing_slot];
+                        let slot_gain_mode_snap = params.slot_gain_mode.lock()[editing_slot];
                         let spec          = crate::dsp::modules::module_spec(editing_type);
                         let num_c         = spec.num_curves;
                         let raw_curve = *params.editing_curve.lock() as usize;
@@ -376,7 +385,7 @@ pub fn create_editor(
                         for i in 0..num_c.min(7) {
                             if i == editing_curve { continue; }
                             let (tilt, offset) = slot_meta[i];
-                            let disp_i = crv::display_curve_idx(editing_type, i);
+                            let disp_i = crv::display_curve_idx(editing_type, i, slot_gain_mode_snap);
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[i], disp_i,
                                 spec.color_dim, 1.0,
@@ -386,29 +395,30 @@ pub fn create_editor(
 
                         // Draw active curve (lit) + interactive widget
                         if editing_curve < num_c && !all_gains.is_empty() {
-                            let (tilt, offset) = slot_meta[editing_curve];
-                            let disp_curve = crv::display_curve_idx(editing_type, editing_curve);
-                            crv::paint_response_curve(
-                                ui.painter(), curve_rect, &all_gains[editing_curve], disp_curve,
-                                spec.color_lit, 2.0,
-                                db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset,
-                            );
-
-                            // Live SC peak-hold envelope overlay — 1-px darker line behind the
-                            // active curve when editing the Gain module's PEAK HOLD curve.
-                            let show_overlay = editing_type == crate::dsp::modules::ModuleType::Gain
-                                && editing_curve == 1;
-                            if show_overlay {
+                            // Live SC envelope overlay — painted first so the active curve draws
+                            // on top. SC affects every Gain mode, so show it for any Gain curve.
+                            if editing_type == crate::dsp::modules::ModuleType::Gain {
                                 if let Some(ref env_arc) = sc_envelope_rx {
                                     if let Some(mut rx) = env_arc.try_lock() {
                                         let env = rx.read();
                                         crv::paint_peak_hold_envelope_overlay(
                                             ui.painter(), curve_rect, &env[..num_bins],
                                             spec.color_lit, sr, fft_size,
+                                            db_min, db_max,
                                         );
                                     }
                                 }
                             }
+
+                            let (tilt, offset) = slot_meta[editing_curve];
+                            let disp_curve = crv::display_curve_idx(
+                                editing_type, editing_curve, slot_gain_mode_snap,
+                            );
+                            crv::paint_response_curve(
+                                ui.painter(), curve_rect, &all_gains[editing_curve], disp_curve,
+                                spec.color_lit, 2.0,
+                                db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset,
+                            );
 
                             let mut nodes = slot_nodes[editing_curve];
                             let cwr = crv::curve_widget(
@@ -457,20 +467,36 @@ pub fn create_editor(
                                 }
                             }
 
-                            // Cursor tooltip — use display index for correct physical units
+                            // Cursor tooltip — use display index for correct physical units.
+                            // Exception: Gain's GAIN curve in Pull/Match modes is a clamped
+                            // [0,1] wet/dry mix, so format it as a percentage instead of dB.
                             let max_hz = (sr / 2.0).max(20_001.0);
                             if let Some(hover) = ui.input(|i| i.pointer.hover_pos()) {
                                 if curve_rect.contains(hover) {
                                     let freq = crv::screen_to_freq(hover.x, curve_rect, max_hz);
-                                    let val  = crv::screen_y_to_physical(hover.y, disp_curve, db_min, db_max, curve_rect);
-                                    let unit = crv::curve_y_unit(disp_curve);
                                     let freq_str = if freq >= 1_000.0 {
                                         format!("{:.2} kHz", freq / 1_000.0)
                                     } else {
                                         format!("{:.0} Hz", freq)
                                     };
-                                    let val_str = format!("{:.1} {}", val, unit);
-                                    let label   = format!("{}\n{}", freq_str, val_str);
+                                    let val_str = {
+                                        use crate::dsp::modules::{GainMode, ModuleType};
+                                        let gm = params.slot_gain_mode.lock()[editing_slot];
+                                        let is_mix_curve = editing_type == ModuleType::Gain
+                                            && editing_curve == 0
+                                            && matches!(gm, GainMode::Pull | GainMode::Match);
+                                        if is_mix_curve {
+                                            let db = crv::screen_y_to_physical(hover.y, 5, db_min, db_max, curve_rect);
+                                            let g  = 10f32.powf(db / 20.0).clamp(0.0, 1.0);
+                                            let effect = if gm == GainMode::Match { "match" } else { "pull" };
+                                            format!("{:.0}% dry · {:.0}% {}", g * 100.0, (1.0 - g) * 100.0, effect)
+                                        } else {
+                                            let val  = crv::screen_y_to_physical(hover.y, disp_curve, db_min, db_max, curve_rect);
+                                            let unit = crv::curve_y_unit(disp_curve);
+                                            format!("{:.1} {}", val, unit)
+                                        }
+                                    };
+                                    let label = format!("{}\n{}", freq_str, val_str);
                                     let tip_pos = hover + egui::vec2(12.0, -28.0);
                                     let font    = egui::FontId::proportional(10.0);
                                     let galley  = ui.painter().layout_no_wrap(
@@ -497,11 +523,15 @@ pub fn create_editor(
                         let edit_spec = crate::dsp::modules::module_spec(edit_ty);
                         let edit_curve = (*params.editing_curve.lock() as usize)
                             .min(edit_spec.num_curves.saturating_sub(1));
-                        let curve_label = edit_spec
+                        let edit_gain_mode = params.slot_gain_mode.lock()[edit_slot];
+                        let default_label = edit_spec
                             .curve_labels
                             .get(edit_curve)
                             .copied()
                             .unwrap_or("");
+                        let curve_label = crv::curve_label_for(
+                            edit_ty, edit_curve, edit_gain_mode, default_label,
+                        );
 
                         let name_edit_key = ui.id().with(("name_edit", edit_slot));
                         let is_editing: bool = ui.data(|d| d.get_temp(name_edit_key).unwrap_or(false));
@@ -574,21 +604,33 @@ pub fn create_editor(
                     ui.separator();
                     ui.add_space(2.0);
 
-                    // ── Per-module SC strip (SC-aware modules only) ──────────
+                    // ── Per-module SC strip (always reserves space so the
+                    // tilt/offset row below doesn't shift between SC-aware and
+                    // non-SC modules — the strip is rendered invisibly when the
+                    // current module doesn't support sidechaining).
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
                         let slot_type = params.slot_module_types.lock()[edit_slot];
-                        if crate::dsp::modules::module_spec(slot_type).supports_sidechain {
+                        let supports_sc = crate::dsp::modules::module_spec(slot_type).supports_sidechain;
+                        let mut sc_builder = egui::UiBuilder::new();
+                        if !supports_sc { sc_builder = sc_builder.invisible(); }
+                        ui.scope_builder(sc_builder, |ui| {
                             sc_strip_ui(ui, &params, edit_slot);
-                            ui.separator();
-                        }
+                        });
+                        ui.separator();
                     }
 
-                    // ── GainMode selector (Gain module only) ──────────────────
+                    // ── GainMode selector — visible only for Gain modules, but the
+                    // row is still laid out invisibly for other modules so the knob
+                    // row below stays in the same vertical position regardless.
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
                         let slot_type = params.slot_module_types.lock()[edit_slot];
-                        if slot_type == crate::dsp::modules::ModuleType::Gain {
+                        let is_gain = slot_type == crate::dsp::modules::ModuleType::Gain;
+
+                        let mut mode_builder = egui::UiBuilder::new();
+                        if !is_gain { mode_builder = mode_builder.invisible(); }
+                        ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
                                 ui.label(egui::RichText::new("Mode").color(th::LABEL_DIM).size(9.0));
@@ -596,7 +638,12 @@ pub fn create_editor(
 
                                 let cur_mode = params.slot_gain_mode.lock()[edit_slot];
                                 use crate::dsp::modules::GainMode;
-                                for (label, mode) in [("Add", GainMode::Add), ("Subtract", GainMode::Subtract), ("Pull", GainMode::Pull)] {
+                                for (label, mode) in [
+                                    ("Add",      GainMode::Add),
+                                    ("Subtract", GainMode::Subtract),
+                                    ("Pull",     GainMode::Pull),
+                                    ("Match",    GainMode::Match),
+                                ] {
                                     let is_active = cur_mode == mode;
                                     let fill     = if is_active { th::BORDER } else { th::BG };
                                     let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
@@ -605,13 +652,14 @@ pub fn create_editor(
                                     )
                                     .fill(fill)
                                     .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
-                                    if ui.add(btn).clicked() {
+                                    let resp = ui.add(btn);
+                                    if is_gain && resp.clicked() {
                                         params.slot_gain_mode.lock()[edit_slot] = mode;
                                     }
                                 }
                             });
-                            ui.add_space(2.0);
-                        }
+                        });
+                        ui.add_space(2.0);
                     }
 
                     use nih_plug_egui::widgets::ParamSlider;
@@ -671,6 +719,7 @@ pub fn create_editor(
                         let editing_slot  = *params.editing_slot.lock() as usize;
                         let slot_types    = *params.slot_module_types.lock();
                         let editing_type  = slot_types[editing_slot];
+                        let editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
                         let editing_curve = (*params.editing_curve.lock() as usize)
                             .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
 
@@ -700,7 +749,7 @@ pub fn create_editor(
                             ui.add_space(8.0);
                             let crv_col = spec.color_lit;
                             const TILT_MAX: f32 = 2.0;
-                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve));
+                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve, editing_gain_mode));
 
                             let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
                             if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {

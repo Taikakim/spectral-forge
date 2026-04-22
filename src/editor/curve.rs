@@ -1,7 +1,27 @@
 use serde::{Serialize, Deserialize};
 use nih_plug_egui::egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use crate::editor::theme as th;
-use crate::dsp::modules::ModuleType;
+use crate::dsp::modules::{GainMode, ModuleType};
+
+/// Return the curve label to show for `(module_type, curve_idx)`, accounting for
+/// gain-mode context. The Gain module's curve 0 is titled "GAIN" by default but
+/// acts as a wet/dry MIX in Pull/Match modes; callers should display "MIX" there
+/// so the tooltip unit (percentage) agrees with the axis label.
+pub fn curve_label_for(
+    module_type: ModuleType,
+    curve_idx: usize,
+    gain_mode: GainMode,
+    default_label: &'static str,
+) -> &'static str {
+    if module_type == ModuleType::Gain
+        && curve_idx == 0
+        && matches!(gain_mode, GainMode::Pull | GainMode::Match)
+    {
+        "MIX"
+    } else {
+        default_label
+    }
+}
 
 /// Paint a dashed polyline through `pts` with the given `stroke`.
 /// `dash` and `gap` are in pixels.
@@ -196,8 +216,8 @@ pub fn screen_to_freq(x: f32, rect: Rect, max_hz: f32) -> f32 {
 ///   0  Threshold dBFS           1  Ratio 1–20           2/3 Attack/Release ms
 ///   4  Knee dB                  5  Makeup/Gain dB        6  Mix %
 ///   7  Amount 0–200%            8  Freeze Length ms      9  Freeze Threshold dBFS
-///   10 Portamento/SC-smooth ms  11 Resistance 0–2
-pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize) -> usize {
+///   10 Portamento/SC-smooth ms  11 Resistance 0–2        12 Dry-mix % (shares idx-5 dB mapping)
+pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: GainMode) -> usize {
     match module_type {
         ModuleType::Dynamics => match curve_idx {
             5 => 6,             // MIX → % display (was wrongly shown as Makeup dB)
@@ -222,7 +242,13 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize) -> usize {
             _ => curve_idx,
         },
         ModuleType::Gain => match curve_idx {
-            0 => 5,             // GAIN → dB (same ±18 dB makeup scale)
+            // In Add/Subtract the curve is a ±18 dB gain; in Pull/Match it's a
+            // clamped [0, 1] wet/dry mix drawn on the same screen scale but with
+            // percentage grid labels.
+            0 => match gain_mode {
+                GainMode::Pull | GainMode::Match => 12,
+                _ => 5,
+            },
             1 => 10,            // PEAK HOLD → ms
             _ => curve_idx,
         },
@@ -249,7 +275,7 @@ pub fn curve_offset_max(display_idx: usize) -> f32 {
         1      => 19.0,  // Ratio 1–20: offset +19 reaches 20:1 from neutral 1:1
         2 | 3  => 2.0,   // Attack/Release multiplier: 0× to 3× of global value
         4      => 8.0,   // Knee dB 1.5–48: offset +7 reaches 48 dB from neutral (6 dB)
-        5      => 8.0,   // Makeup/Gain dB: ±8 gain ≈ ±18 dB around neutral
+        5 | 12 => 8.0,   // Makeup/Gain dB / dry-mix %: ±8 gain ≈ ±18 dB around neutral
         6      => 1.0,   // Mix %: ±1 covers 0–200 %
         7      => 1.0,   // Amount/Balance 0–200 %: ±1 covers full range
         8      => 7.0,   // Freeze Length 0–4000 ms: offset +7 reaches 4000 ms from 500 ms
@@ -274,6 +300,7 @@ pub fn screen_y_to_physical(y: f32, curve_idx: usize, db_min: f32, db_max: f32, 
         9 => -80.0 + t * 80.0,
         10 => 1000.0_f32.powf(t),
         11 => t * 2.0,                    // Resistance 0–2
+        12 => -18.0 + t * 36.0,           // Dry-mix: screen y maps to ±18 dB (reported raw; tooltip converts to %)
         _ => 0.0,
     }
 }
@@ -289,6 +316,7 @@ pub fn curve_y_unit(display_idx: usize) -> &'static str {
         6 | 7  => "%",
         8 | 10 => "ms",
         11     => "",       // Resistance: dimensionless
+        12     => "%",      // Dry-mix percentage (tooltip formats itself)
         _      => "",
     }
 }
@@ -347,7 +375,7 @@ pub fn gain_to_display(
         2 => (global_attack_ms  * gain.max(0.01)).clamp(1.0, 1024.0),
         3 => (global_release_ms * gain.max(0.01)).clamp(1.0, 1024.0),
         4 => (gain * 6.0).clamp(1.5, 48.0),
-        5 => if gain > 1e-6 { 20.0 * gain.log10() } else { -60.0 },
+        5 | 12 => if gain > 1e-6 { 20.0 * gain.log10() } else { -60.0 },
         6 => (gain * 100.0).clamp(0.0, 100.0),
         // Effects curves — tilt/offset not used (passed as 0.0/0.0 from UI)
         7 => gain.clamp(0.0, 2.0) * 100.0,                  // Phase Amount: 0-200%
@@ -370,7 +398,7 @@ pub fn physical_to_y(v: f32, curve_idx: usize, db_min: f32, db_max: f32, rect: R
         1 => log_to_y(v, 1.0, 20.0, rect),
         2 | 3 => log_to_y(v, 1.0, 1024.0, rect),
         4 => log_to_y(v, 1.5, 48.0, rect),
-        5 => linear_to_y(v, -18.0, 18.0, rect),
+        5 | 12 => linear_to_y(v, -18.0, 18.0, rect),
         6 => linear_to_y(v, 0.0, 100.0, rect),
         7 => linear_to_y(v, 0.0, 200.0, rect),
         8 => log_to_y(v.max(10.0), 10.0, 4000.0, rect),    // Freeze Length 10ms–4000ms
@@ -463,6 +491,15 @@ fn curve_grid_lines(curve_idx: usize, db_min: f32, db_max: f32) -> Vec<(f32, Str
             (0.5,  "0.5".to_string()),
             (1.0,  "1.0".to_string()),
             (1.5,  "1.5".to_string()),
+        ],
+        // Dry-mix %: same screen scale as idx 5 (±18 dB) but labelled as the
+        // clamped wet/dry percentage the Pull/Match modes actually apply.
+        //   0 dB → 100 % dry,  −6 dB → 50 %,  −12 dB → 25 %, −18 dB → ~12 %
+        12 => vec![
+            (  0.0, "100%".to_string()),
+            ( -6.0,  "50%".to_string()),
+            (-12.0,  "25%".to_string()),
+            (-18.0,  "12%".to_string()),
         ],
         _ => vec![],
     }
@@ -585,11 +622,13 @@ pub fn paint_response_curve(
 }
 
 /// Paint a 1-px darker overlay line reflecting the live SC peak-hold envelope
-/// for the Gain PEAK HOLD curve. Uses the same log-frequency mapping as
+/// behind the active Gain curve. Uses the same log-frequency mapping as
 /// `paint_response_curve` so the overlay aligns with the drawn response.
 ///
-/// `envelope[k]` is the linear magnitude for bin `k` (0 dB = 1.0).
-/// `curve_color` is the lit curve colour; the overlay uses a darkened derivative.
+/// `envelope[k]` is the raw FFT-bin linear magnitude for bin `k`. This matches
+/// the convention of `spectrum_display`: the same `4/fft_size` normalisation
+/// is applied here so the overlay sits on the same dBFS scale as the pre/post
+/// spectrum display (a unit sinusoid peaks at roughly 0 dB).
 pub fn paint_peak_hold_envelope_overlay(
     painter: &Painter,
     rect: Rect,
@@ -597,8 +636,10 @@ pub fn paint_peak_hold_envelope_overlay(
     curve_color: Color32,
     sample_rate: f32,
     fft_size: usize,
+    db_min: f32,
+    db_max: f32,
 ) {
-    if envelope.is_empty() { return; }
+    if envelope.is_empty() || fft_size == 0 { return; }
     // Derive a darker tone from curve_color (r/3, g/3, b/3, opaque).
     let dim = Color32::from_rgb(
         curve_color.r() / 3,
@@ -607,14 +648,16 @@ pub fn paint_peak_hold_envelope_overlay(
     );
     let n = envelope.len();
     let max_hz = (sample_rate / 2.0).max(20_001.0);
+    let norm_factor = 4.0 / fft_size as f32;
+    let range = (db_max - db_min).max(1.0);
     let mut prev: Option<Pos2> = None;
     for k in 1..n {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
-        let mag  = envelope[k].max(1e-12);
+        let mag  = (envelope[k] * norm_factor).max(1e-12);
         let db   = 20.0 * mag.log10();
-        // Map dB to normalised vertical: 0 dB at top, -90 dB at bottom.
-        let norm = ((db + 90.0) / 90.0).clamp(0.0, 1.0);
+        // Map dB onto the spectrum display range [db_min..db_max]. Top = db_max, bottom = db_min.
+        let norm = ((db - db_min) / range).clamp(0.0, 1.0);
         let y    = rect.max.y - norm * rect.height();
         if let Some(p) = prev {
             painter.line_segment([p, Pos2::new(x, y)], Stroke::new(1.0, dim));

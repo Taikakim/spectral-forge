@@ -238,7 +238,7 @@ Spectral Forge accepts one stereo sidechain (SC) input. In Bitwig, route any tra
 | Module          | SC role                                                                  |
 |-----------------|--------------------------------------------------------------------------|
 | **Dynamics**    | External detector for per-bin gain reduction.                            |
-| **Gain**        | In Pull mode: pulls output magnitude toward the SC magnitude per bin. PEAK HOLD curve smooths it. |
+| **Gain**        | All four modes use SC — see Gain Modes below. Pull and Match apply a per-bin peak-hold; Add and Subtract combine SC with the GAIN curve instantaneously. |
 | **Phase Smear** | Modulates per-bin smear amount by SC magnitude, smoothed by PEAK HOLD curve. |
 | **Freeze**      | Gates the freeze threshold; louder SC raises effective threshold.        |
 
@@ -274,11 +274,41 @@ To duck the mids by the sides of the SC input: route a stereo SC, target the slo
 
 The small yellow bar in the top bar (right of Falloff) lights up when the plugin is receiving audio on the SC input. If the bar stays dim while playing your project, the SC isn't reaching the plugin — check your host routing.
 
-### Gain Pull peak-hold curve
+### Gain modes
 
-In Gain/Pull mode, the second curve — **PEAK HOLD** — sets per-bin peak-hold time (1 ms to ~500 ms, log). Longer hold prevents pumping on percussive SC material; shorter hold tracks detail. In Add and Subtract modes the curve is grayed and has no effect.
+The Gain module has four modes, selectable via the Mode row beneath the curve area. All four use the SC input; what differs is how it's combined with the drawn GAIN curve and the main signal.
 
-When editing the PEAK HOLD curve, a thin animated darker line shows the live per-bin SC envelope the module is currently seeing.
+| Mode         | Formula (per bin)                                    | Temporal behaviour         |
+|--------------|------------------------------------------------------|----------------------------|
+| **Add**      | `bins *= g + sc`                                     | Instantaneous, no envelope |
+| **Subtract** | `bins *= max(g - sc, 0)`                             | Instantaneous, no envelope |
+| **Pull**     | `target_mag = main_mag * g + sc_env * (1 - g)`       | Per-bin peak-hold on SC    |
+| **Match**    | `bins *= g + (1 - g) * ERB_smoothed(sc_env / main)`  | Per-bin peak-hold on SC    |
+
+`g` is the per-bin value of the GAIN curve; `sc` is the gained SC magnitude after per-module SC gain and channel selection; `sc_env` is that SC run through a per-bin peak follower whose release time is set by the PEAK HOLD curve.
+
+**Add / Subtract** — `g` is a dB gain (neutral = 0 dB). Draw above neutral to boost, below to cut; SC is added (Add) or subtracted (Subtract) on top.
+
+**Pull** — `g` is a wet/dry morph clamped to `[0, 1]`. At `g = 1` the main signal passes through; at `g = 0` the main's magnitude is replaced with the peak-held SC magnitude bin-for-bin. Pull is a magnitude-swap / cross-synthesis tool — harmonic peaks in the main get flattened to the SC's per-bin shape. Great for sound-design morphs, not for timbre matching.
+
+**Match** — `g` is a wet/dry mix clamped to `[0, 1]`, same meaning as Pull. At `g = 0` the module applies a smooth per-bin EQ curve derived from the ratio of ERB-smoothed SC to ERB-smoothed main (log-domain, re-exponentiated). Unlike Pull, the main's narrow harmonic peaks are preserved — Match only shifts the broad spectral balance toward the SC. Boost/cut is clamped to ±12 dB.
+
+### GAIN / MIX curve (context-dependent)
+
+The first curve retitles itself by mode — both on the tab button and the "Editing: …" header — so the label matches what the curve actually controls:
+
+- **Add / Subtract** → the curve is labelled **GAIN** and the hover tooltip shows dB values.
+- **Pull / Match** → the curve is labelled **MIX**, because `g` is a clamped `[0, 1]` wet/dry, not a dB gain. The tooltip shows the effective mix percentage (`X% dry · Y% pull` or `match`). Draw above neutral = 100% dry (clamped); draw below neutral to apply the effect.
+
+The second curve — **PEAK HOLD** — sets per-bin peak-hold time (1 ms to ~500 ms, log). It is live in **Pull** and **Match** (which both run the SC through the per-bin peak follower) and grayed/disabled in Add and Subtract. Longer hold prevents pumping on percussive SC material; shorter hold tracks detail.
+
+### Live SC envelope overlay
+
+When a Gain slot is selected for editing, a thin darker line is drawn behind every curve showing the live per-bin SC magnitude the module is currently seeing (post per-module SC gain, pre peak-hold). The overlay uses the same dBFS reference as the pre/post spectrum display, so a unit sine on the SC sits at roughly 0 dB — matching main and SC on the graph now means matching their actual levels. This is the signal Add/Subtract directly combine with the GAIN curve, and the input to the peak follower in Pull/Match.
+
+### Layout stability
+
+The per-module SC strip (SC gain · source selector) only has meaning for SC-aware modules (Dynamics, Freeze, Phase Smear, Gain). On other modules the strip is rendered invisibly so the tilt/offset row below keeps its vertical position; switching between modules does not shift surrounding controls.
 
 ---
 
@@ -302,7 +332,7 @@ Nothing is routed to Master unless explicitly connected. If no sends reach slot 
 | Freeze            | Spectral freeze — holds the current FFT frame             |
 | Phase Smear       | Per-bin phase randomisation                               |
 | Contrast          | Spectral contrast enhancer — boosts peaks, cuts valleys   |
-| Gain              | Per-bin gain shaping (Add / Subtract / Pull modes)        |
+| Gain              | Per-bin gain shaping (Add / Subtract / Pull / Match modes) |
 | Mid/Side          | M/S balance, expansion, phase decorrelation               |
 | T/S Split         | Transient/Sustained spectral split                        |
 | Harmonic          | Harmonic emphasis                                         |

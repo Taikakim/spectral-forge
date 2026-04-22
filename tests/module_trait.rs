@@ -196,6 +196,74 @@ fn gain_add_mode_does_not_use_peak_hold() {
 }
 
 #[test]
+fn gain_match_preserves_harmonics_but_tilts_broadband() {
+    // Match should:
+    //   (a) multiply each bin by a smooth EQ curve (phase preserved, no bin-exact morph)
+    //   (b) preserve the main's harmonic peaks — a narrow peak in main stays a narrow peak
+    //   (c) tilt main's broad spectral shape toward SC's — louder SC in a region boosts main there
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{GainModule, GainMode, ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = GainModule::new();
+    m.set_gain_mode(GainMode::Match);
+    m.reset(48000.0, 2048);
+
+    let num_bins = 1025usize;
+    // Main: flat = 1.0, with one narrow harmonic peak at bin 200.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|k| {
+        if k == 200 { Complex::new(10.0, 0.0) } else { Complex::new(1.0, 0.0) }
+    }).collect();
+    let peak_before = bins[200].norm();
+    let neighbor_before = bins[201].norm();
+
+    // SC: broadly 4× louder than main's baseline (constant 4.0).
+    let sc = vec![4.0f32; num_bins];
+
+    // GAIN curve = 0 (full match), PEAK HOLD at default 1.0.
+    let gain_curve = vec![0.0f32; num_bins];
+    let peak_curve = vec![1.0f32; num_bins];
+    let curves_vec: Vec<Vec<f32>> = vec![gain_curve, peak_curve];
+    let curves_ref: Vec<&[f32]> = curves_vec.iter().map(|v| &v[..]).collect();
+
+    let mut supp = vec![0.0f32; num_bins];
+    let ctx = ModuleContext {
+        sample_rate: 48000.0, fft_size: 2048, num_bins,
+        attack_ms: 10.0, release_ms: 80.0,
+        sensitivity: 0.5, suppression_width: 0.0,
+        auto_makeup: false, delta_monitor: false,
+    };
+
+    // Run a handful of hops so peak_env settles on the 4.0 SC.
+    let fresh_bins = bins.clone();
+    for i in 0..20 {
+        bins = fresh_bins.clone();
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+                  &mut bins, Some(&sc), &curves_ref, &mut supp, &ctx);
+        let _ = i;
+    }
+
+    // Every bin must be finite and have no imaginary part introduced (real-scalar multiply).
+    for (k, c) in bins.iter().enumerate() {
+        assert!(c.re.is_finite() && c.im.is_finite(), "non-finite at k={}", k);
+        assert!(c.im.abs() < 1e-5, "imag leaked at k={}: {:?}", k, c);
+    }
+
+    // The spectral peak at bin 200 must still tower over its neighbors —
+    // Match preserves narrow features (unlike Pull which would flatten them).
+    let peak_after = bins[200].norm();
+    let neighbor_after = bins[201].norm();
+    assert!(peak_after > 3.0 * neighbor_after,
+        "peak flattened: peak={} neighbor={} (ratio before={})",
+        peak_after, neighbor_after, peak_before / neighbor_before);
+
+    // Broadband tilt: SC is louder than main, so flat regions should be boosted,
+    // but clamped to the ±12 dB ceiling (linear ≈ 3.98).
+    assert!(neighbor_after > 1.2, "no broadband boost (neighbor={})", neighbor_after);
+    assert!(neighbor_after < 4.1,  "boost exceeded clamp (neighbor={})", neighbor_after);
+}
+
+#[test]
 fn phase_smear_sc_modulates_amount() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::{PhaseSmearModule, ModuleContext, SpectralModule};

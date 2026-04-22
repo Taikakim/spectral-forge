@@ -5,8 +5,13 @@ use crate::dsp::pipeline::{MAX_NUM_BINS, OVERLAP};
 
 pub struct GainModule {
     pub(crate) mode: GainMode,
-    /// Per-bin peak-hold envelope state. Only written in Pull mode.
+    /// Per-bin peak-hold envelope state. Used by Pull and Match.
     peak_env: Vec<f32>,
+    /// Scratch integral images of ln(mag) for ERB-smoothed envelopes (Match only).
+    /// Length `MAX_NUM_BINS + 1`; index 0 is a zero sentinel so the running-sum
+    /// formula `cum[hi+1] - cum[lo]` covers an inclusive `[lo..=hi]` range.
+    cum_main_log: Vec<f32>,
+    cum_sc_log:   Vec<f32>,
     sample_rate: f32,
     fft_size: usize,
 }
@@ -16,6 +21,8 @@ impl GainModule {
         Self {
             mode: GainMode::Add,
             peak_env: vec![0.0f32; MAX_NUM_BINS],
+            cum_main_log: vec![0.0f32; MAX_NUM_BINS + 1],
+            cum_sc_log:   vec![0.0f32; MAX_NUM_BINS + 1],
             sample_rate: 44100.0,
             fft_size: 2048,
         }
@@ -90,6 +97,68 @@ impl SpectralModule for GainModule {
                         let target_mag = cur_mag * g + sc_eff * (1.0 - g);
                         bins[k] *= target_mag / cur_mag;
                     }
+                }
+            }
+            GainMode::Match => {
+                // Timbre-match: derive a smooth per-bin EQ multiplier from the ratio of
+                // ERB-smoothed SC vs. main log-magnitudes. Preserves main's harmonic
+                // structure (the multiplier is a smooth envelope, applied to raw bins)
+                // while tilting its broad spectral shape toward the SC's.
+                //
+                // GAIN curve (0..1) is the wet/dry mix: 1 = keep main, 0 = full match.
+                // PEAK HOLD curve controls the per-bin temporal release on SC (same as
+                // Pull) — Match still benefits from temporal stability.
+                const MAX_BOOST_DB: f32 = 12.0;
+                let max_lin = 10f32.powf(MAX_BOOST_DB / 20.0);
+                let min_lin = 1.0 / max_lin;
+                // Log floor ~ -120 dBFS so silent bins don't drive a -huge multiplier.
+                const LOG_FLOOR: f32 = -13.8;
+
+                let hop_ms = self.fft_size as f32 / (OVERLAP as f32 * self.sample_rate) * 1000.0;
+                let sr = self.sample_rate;
+                let fft_size = self.fft_size;
+
+                // Step 1: update peak-held SC envelope (same rule as Pull).
+                for k in 0..n {
+                    let sc_raw = sidechain.and_then(|s| s.get(k)).copied().unwrap_or(0.0).max(0.0);
+                    let hold_curve = curves.get(1).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
+                    let hold_ms = super::peak_hold_curve_to_ms(hold_curve);
+                    let release_coeff = (-hop_ms / hold_ms.max(0.1)).exp();
+                    if sc_raw > self.peak_env[k] {
+                        self.peak_env[k] = sc_raw;
+                    } else {
+                        self.peak_env[k] = release_coeff * self.peak_env[k]
+                            + (1.0 - release_coeff) * sc_raw;
+                    }
+                }
+
+                // Step 2: build integral images of ln(mag) for main and peak-held SC.
+                self.cum_main_log[0] = 0.0;
+                self.cum_sc_log[0]   = 0.0;
+                for k in 0..n {
+                    let main_log = bins[k].norm().max(1e-6).ln().max(LOG_FLOOR);
+                    let sc_log   = self.peak_env[k].max(1e-6).ln().max(LOG_FLOOR);
+                    self.cum_main_log[k + 1] = self.cum_main_log[k] + main_log;
+                    self.cum_sc_log[k + 1]   = self.cum_sc_log[k]   + sc_log;
+                }
+
+                // Step 3: per-bin ERB-proportional smoothing + apply matched multiplier,
+                // mixed with GAIN curve. ERB(f) ≈ 24.7·(4.37·f/1000 + 1) Hz; half-window
+                // in bins = ERB·fft/sr·0.5. At low freq it's ~1 bin; at high freq tens of bins.
+                for k in 0..n {
+                    let g = curves.get(0).and_then(|c| c.get(k)).copied()
+                            .unwrap_or(1.0).clamp(0.0, 1.0);
+                    let freq_hz = (k as f32 * sr / fft_size as f32).max(20.0);
+                    let erb_hz = 24.7 * (4.37 * freq_hz / 1000.0 + 1.0);
+                    let half_w = ((erb_hz * fft_size as f32 / sr) * 0.5).max(1.0) as usize;
+                    let lo = k.saturating_sub(half_w);
+                    let hi = (k + half_w).min(n - 1);
+                    let count = (hi - lo + 1) as f32;
+                    let smooth_main = (self.cum_main_log[hi + 1] - self.cum_main_log[lo]) / count;
+                    let smooth_sc   = (self.cum_sc_log[hi + 1]   - self.cum_sc_log[lo])   / count;
+                    let matched_mul = (smooth_sc - smooth_main).exp().clamp(min_lin, max_lin);
+                    let mul = g + (1.0 - g) * matched_mul;
+                    bins[k] *= mul;
                 }
             }
         }
