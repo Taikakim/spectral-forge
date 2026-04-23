@@ -222,18 +222,33 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
 
 // ── apply_curve_transform ──────────────────────────────────────────────────
 
-/// Apply spectral tilt (pivoted at 1 kHz in log-frequency space) and additive offset
-/// to a slice of pre-bin curve gains, then clamp to `[0.0, ∞)`.
-pub fn apply_curve_transform(gains: &mut [f32], tilt: f32, offset: f32, sample_rate: f32, fft_size: usize) {
+/// Apply spectral tilt (pivoted at 1 kHz), additive offset, and curvature (S-curve blend)
+/// to a slice of per-bin curve gains, then clamp to [0, ∞).
+/// curvature ∈ [0, 1]: 0 = straight tilt, 1 = full smoothstep S-curve pivoted at 1 kHz.
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
+pub fn apply_curve_transform(
+    gains: &mut [f32],
+    tilt: f32,
+    offset: f32,
+    curvature: f32,
+    sample_rate: f32,
+    fft_size: usize,
+) {
     if gains.is_empty() { return; }
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return; }
     const LOG_20: f32 = 1.301_030;
     const LOG_RANGE: f32 = 3.0;
     const PIVOT: f32 = 0.566_32; // log10(1000/20) / log10(20000/20)
+    // Smoothstep value at the pivot — used to zero the sigmoid shape there.
+    const S_PIVOT: f32 = 3.0 * PIVOT * PIVOT - 2.0 * PIVOT * PIVOT * PIVOT;
     for (k, g) in gains.iter_mut().enumerate() {
         let freq_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let norm = ((freq_hz.log10() - LOG_20) / LOG_RANGE).clamp(0.0, 1.0);
-        let t = tilt * (norm - PIVOT);
+        let linear_shape  = norm - PIVOT;
+        let s             = 3.0 * norm * norm - 2.0 * norm * norm * norm; // smoothstep(norm)
+        let sigmoid_shape = s - S_PIVOT;
+        let shape = linear_shape + curvature * (sigmoid_shape - linear_shape);
+        let t = tilt * shape;
         *g = ((*g + offset) * (1.0 + t)).max(0.0);
     }
 }

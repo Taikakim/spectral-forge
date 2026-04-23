@@ -197,7 +197,10 @@ impl Pipeline {
                 self.slot_curve_cache[s][c].copy_from_slice(&shared.curve_rx[s][c].read()[..MAX_NUM_BINS]);
                 if let Some(ref meta) = meta_guard {
                     let (tilt, offset) = meta[s][c];
-                    apply_curve_transform(&mut self.slot_curve_cache[s][c], tilt, offset, self.sample_rate, self.fft_size);
+                    let curvature = params.curvature_param(s, c)
+                        .map(|p| p.smoothed.next_step(block_size))
+                        .unwrap_or(0.0);
+                    apply_curve_transform(&mut self.slot_curve_cache[s][c], tilt, offset, curvature, self.sample_rate, self.fft_size);
                 }
             }
         }
