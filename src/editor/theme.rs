@@ -132,3 +132,26 @@ pub const STROKE_THIN:   f32 = 1.0;
 pub const STROKE_BORDER: f32 = 1.0;
 pub const STROKE_CURVE:  f32 = 1.0;
 pub const NODE_RADIUS:   f32 = 5.0;
+
+// ─── Font size base values (at 1× scale) ─────────────────────────────────────
+
+/// Grid axis labels (Hz / value markers).
+pub const FONT_SIZE_GRID:  f32 = 9.0;
+/// Cursor hover tooltip.
+pub const FONT_SIZE_HOVER: f32 = 10.0;
+/// Widget labels (Tilt, Offset, Curv, etc.).
+pub const FONT_SIZE_LABEL: f32 = 9.0;
+
+// ─── Scaling helpers ──────────────────────────────────────────────────────────
+
+/// Scale a layout measurement by the UI scale factor.
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4.
+#[inline]
+pub fn scaled(base: f32, scale: f32) -> f32 { base * scale }
+
+/// Scale a stroke width; snaps to 2× at scale ≥ 1.75 to avoid blurry sub-pixel rendering.
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4.
+#[inline]
+pub fn scaled_stroke(base: f32, scale: f32) -> f32 {
+    if scale >= 1.75 { base * 2.0 } else { base * scale }
+}

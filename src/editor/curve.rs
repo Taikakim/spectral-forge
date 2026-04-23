@@ -270,6 +270,7 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
 /// curve type. Values chosen so that ±off_max reaches (or saturates) the
 /// full display range relative to the neutral gain of 1.0.
 pub fn curve_offset_max(display_idx: usize) -> f32 {
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
     match display_idx {
         0 | 9  => 1.5,   // Threshold dBFS: ±1.5 → ±neutral; clamps cover full ±80 dBFS
         1      => 19.0,  // Ratio 1–20: offset +19 reaches 20:1 from neutral 1:1
@@ -307,6 +308,7 @@ pub fn screen_y_to_physical(y: f32, curve_idx: usize, db_min: f32, db_max: f32, 
 
 /// Unit label for a curve's y-axis (used in cursor tooltip, indexed by display_curve_idx).
 pub fn curve_y_unit(display_idx: usize) -> &'static str {
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
     match display_idx {
         0 | 9  => "dBFS",
         1      => "x",
@@ -353,7 +355,8 @@ pub fn paint_hover_text(
         format!("{}  /  {:.1} {}", format_freq_hz(freq_hz), phys, unit)
     };
     let tip_pos = cursor_pos + vec2(12.0, -28.0);
-    let galley  = painter.layout_no_wrap(text, FontId::proportional(10.0), th::GRID_TEXT);
+    let scale  = painter.ctx().pixels_per_point();
+    let galley = painter.layout_no_wrap(text, FontId::proportional(th::scaled(th::FONT_SIZE_HOVER, scale)), th::GRID_TEXT);
     let bg_rect = Rect::from_min_size(
         tip_pos - vec2(3.0, 3.0),
         galley.size() + vec2(6.0, 6.0),
@@ -415,6 +418,7 @@ pub fn gain_to_display(
     db_min: f32,
     db_max: f32,
 ) -> f32 {
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
     match curve_idx {
         0 => {
             // Matches the pipeline formula: log-based ±60 dBFS range centred at −20 dBFS.
@@ -443,6 +447,7 @@ pub fn gain_to_display(
 
 /// Map a physical value to pixel y for a given curve type.
 pub fn physical_to_y(v: f32, curve_idx: usize, db_min: f32, db_max: f32, rect: Rect) -> f32 {
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
     match curve_idx {
         0 => linear_to_y(v, db_min, db_max, rect),
         1 => log_to_y(v, 1.0, 20.0, rect),
@@ -560,8 +565,10 @@ fn curve_grid_lines(curve_idx: usize, db_min: f32, db_max: f32) -> Vec<(f32, Str
 pub fn paint_grid(painter: &Painter, rect: Rect, curve_idx: usize, db_min: f32, db_max: f32, sample_rate: f32) {
     let nyquist = sample_rate / 2.0;
     let max_hz  = nyquist.max(20_001.0);
-    let grid_stroke = Stroke::new(th::STROKE_THIN, th::GRID_LINE);
-    let font = nih_plug_egui::egui::FontId::proportional(9.0);
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+    let scale = painter.ctx().pixels_per_point();
+    let grid_stroke = Stroke::new(th::scaled_stroke(th::STROKE_THIN, scale), th::GRID_LINE);
+    let font = nih_plug_egui::egui::FontId::proportional(th::scaled(th::FONT_SIZE_GRID, scale));
 
     // Vertical lines at Hz intervals
     for &f in HZ_VERTICALS {
