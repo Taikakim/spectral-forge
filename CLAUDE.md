@@ -2,6 +2,14 @@
 
 This document is for AI assistants (Claude, etc.) working on this codebase.
 
+## UI Parameter Specification — READ BEFORE TOUCHING DISPLAY CODE
+
+**`docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md` is the authoritative source
+of truth for all curve display behaviour**: axis ranges, grid lines, unit labels, offset/tilt/
+curvature transforms, hover text, and UI scaling rules. Any work touching these areas MUST
+follow that spec exactly. If the spec is unclear or a situation arises where following it would
+cause a problem, STOP and ask rather than guessing or improvising.
+
 ## What it is
 
 A **spectral dynamics and modular multi-fx** CLAP plugin for Linux/Windows, written in Rust.
