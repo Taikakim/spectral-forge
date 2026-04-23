@@ -1,5 +1,5 @@
 pub mod curve_config;
-pub use curve_config::CurveDisplayConfig;
+pub use curve_config::{CurveDisplayConfig, curve_display_config};
 pub mod curve;
 pub mod theme;
 pub mod spectrum_display;

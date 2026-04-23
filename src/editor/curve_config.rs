@@ -17,6 +17,9 @@ pub struct CurveDisplayConfig {
     pub y_log:      bool,
     /// Exactly 4 horizontal guide lines: (physical_value, display_label).
     pub grid_lines: &'static [(f32, &'static str)],
+    // NOTE: gain_to_phys is intentionally absent — unit conversion requires context
+    // (db_min/db_max, global_attack_ms etc.) that a bare fn(f32)->f32 cannot carry.
+    // Conversion logic lives in gain_to_display() / screen_y_to_physical() in curve.rs.
 }
 
 /// Return the display config for a given module type, curve index, and gain mode.
@@ -44,6 +47,8 @@ pub fn curve_display_config(
 // ── Per-module config helpers ────────────────────────────────────────────────
 
 fn dynamics_config(i: usize) -> CurveDisplayConfig {
+    // 0 Threshold · 1 Ratio · 2 Attack · 3 Release · 4 Knee · 5 Mix
+    // (Dynamics has 6 curves; MAKEUP is handled by the standalone Gain module)
     match i {
         0 => CurveDisplayConfig {
             y_label: "dBFS", y_min: -60.0, y_max: 0.0, y_log: false,
@@ -149,6 +154,7 @@ fn mid_side_config(i: usize) -> CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
         },
+        // 2 DECORREL · 3 TRANSIENT · 4 PAN — all use 0–100% range
         _ => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],
