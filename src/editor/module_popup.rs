@@ -59,7 +59,7 @@ pub fn show_popup(
                 ui.set_min_width(140.0);
                 ui.label(
                     egui::RichText::new("Assign module")
-                        .color(th::LABEL_DIM).size(9.0)
+                        .color(th::LABEL_DIM).size(th::FONT_SIZE_LABEL)
                 );
                 ui.separator();
 
