@@ -444,7 +444,7 @@ impl Default for SpectralForgeParams {
              .with_unit(" dB"),
 
             // Generated per-slot / per-curve / per-node FloatParam initializers.
-            // Produced by build.rs; totals 1341 fields.
+            // Produced by build.rs; totals 1404 fields.
             generated: GeneratedParams::default(),
         }
     }

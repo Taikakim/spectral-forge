@@ -55,7 +55,7 @@ fn is_generated_curv_id(id: &str) -> bool {
         return false;
     }
     let b = id.as_bytes();
-    b.len() >= 7
+    b.len() >= 8
         && b[0] == b's'
         && b[1].is_ascii_digit()
         && b[2] == b'c'
