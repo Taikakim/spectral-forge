@@ -479,24 +479,18 @@ pub fn create_editor(
                                     if is_mix_curve {
                                         // Special Gain Pull/Match tooltip: show wet/dry split instead of dB value.
                                         let freq = crv::screen_to_freq(hover.x, curve_rect, (sr / 2.0).max(20_001.0));
-                                        let freq_str = if freq >= 1_000.0 {
-                                            format!("{:.2} kHz", freq / 1_000.0)
-                                        } else {
-                                            format!("{:.0} Hz", freq)
-                                        };
-                                        let db  = crv::screen_y_to_physical(hover.y, 5, db_min, db_max, curve_rect);
-                                        let g   = 10f32.powf(db / 20.0).clamp(0.0, 1.0);
+                                        let db     = crv::screen_y_to_physical(hover.y, 5, db_min, db_max, curve_rect);
+                                        let g      = 10f32.powf(db / 20.0).clamp(0.0, 1.0);
                                         let effect = if gm == GainMode::Match { "match" } else { "pull" };
-                                        let label = format!("{}\n{:.0}% dry · {:.0}% {}", freq_str, g * 100.0, (1.0 - g) * 100.0, effect);
+                                        let label  = format!("{}\n{:.0}% dry · {:.0}% {}", crv::format_freq_hz(freq), g * 100.0, (1.0 - g) * 100.0, effect);
                                         let tip_pos = hover + egui::vec2(12.0, -28.0);
-                                        let font    = egui::FontId::proportional(10.0);
-                                        let galley  = ui.painter().layout_no_wrap(label.clone(), font.clone(), th::GRID_TEXT);
+                                        let galley  = ui.painter().layout_no_wrap(label, egui::FontId::proportional(10.0), th::GRID_TEXT);
                                         let bg_rect = egui::Rect::from_min_size(
                                             tip_pos - egui::vec2(3.0, 3.0),
                                             galley.size() + egui::vec2(6.0, 6.0),
                                         );
                                         ui.painter().rect_filled(bg_rect, 2.0, egui::Color32::from_black_alpha(180));
-                                        ui.painter().text(tip_pos, egui::Align2::LEFT_TOP, label, font, th::GRID_TEXT);
+                                        ui.painter().galley(tip_pos, galley, th::GRID_TEXT);
                                     } else {
                                         crv::paint_hover_text(
                                             ui.painter(), hover, curve_rect, disp_curve, db_min, db_max, sr,

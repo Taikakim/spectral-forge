@@ -321,6 +321,15 @@ pub fn curve_y_unit(display_idx: usize) -> &'static str {
     }
 }
 
+/// Format a frequency in Hz as a human-readable string: "440 Hz" or "1.00 kHz".
+pub fn format_freq_hz(hz: f32) -> String {
+    if hz >= 1_000.0 {
+        format!("{:.2} kHz", hz / 1_000.0)
+    } else {
+        format!("{:.0} Hz", hz)
+    }
+}
+
 /// Paint cursor tooltip: "440 Hz  /  -18.3 dBFS"
 /// Single shared routine for all curves — no per-curve hover paths.
 /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
@@ -333,31 +342,24 @@ pub fn paint_hover_text(
     db_max: f32,
     sample_rate: f32,
 ) {
-    use nih_plug_egui::egui::{Align2, FontId, vec2};
+    use nih_plug_egui::egui::{FontId, vec2};
     let nyquist = (sample_rate / 2.0).max(20_001.0);
     let freq_hz = screen_to_freq(cursor_pos.x, rect, nyquist);
     let phys    = screen_y_to_physical(cursor_pos.y, display_idx, db_min, db_max, rect);
     let unit    = curve_y_unit(display_idx);
-    let freq_str = if freq_hz >= 1_000.0 {
-        format!("{:.2} kHz", freq_hz / 1_000.0)
-    } else {
-        format!("{:.0} Hz", freq_hz)
-    };
     let text = if unit.is_empty() {
-        format!("{}  /  {:.2}", freq_str, phys)
+        format!("{}  /  {:.2}", format_freq_hz(freq_hz), phys)
     } else {
-        format!("{}  /  {:.1} {}", freq_str, phys, unit)
+        format!("{}  /  {:.1} {}", format_freq_hz(freq_hz), phys, unit)
     };
     let tip_pos = cursor_pos + vec2(12.0, -28.0);
-    let font    = FontId::proportional(10.0);
-    let galley  = painter.layout_no_wrap(text.clone(), font.clone(), th::GRID_TEXT);
-    let text_size = galley.size();
+    let galley  = painter.layout_no_wrap(text, FontId::proportional(10.0), th::GRID_TEXT);
     let bg_rect = Rect::from_min_size(
         tip_pos - vec2(3.0, 3.0),
-        text_size + vec2(6.0, 6.0),
+        galley.size() + vec2(6.0, 6.0),
     );
     painter.rect_filled(bg_rect, 2.0, Color32::from_black_alpha(180));
-    painter.text(tip_pos, Align2::LEFT_TOP, text, font, th::GRID_TEXT);
+    painter.galley(tip_pos, galley, th::GRID_TEXT);
 }
 
 /// Map a physical value to pixel y using a linear scale.
