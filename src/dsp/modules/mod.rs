@@ -235,6 +235,7 @@ pub fn apply_curve_transform(
     fft_size: usize,
 ) {
     if gains.is_empty() { return; }
+    // curvature only shapes the tilt; if tilt=0, curvature has no effect.
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return; }
     const LOG_20: f32 = 1.301_030;
     const LOG_RANGE: f32 = 3.0;
