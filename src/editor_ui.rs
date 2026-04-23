@@ -468,48 +468,40 @@ pub fn create_editor(
                                 }
                             }
 
-                            // Cursor tooltip — use display index for correct physical units.
-                            // Exception: Gain's GAIN curve in Pull/Match modes is a clamped
-                            // [0,1] wet/dry mix, so format it as a percentage instead of dB.
-                            let max_hz = (sr / 2.0).max(20_001.0);
+                            // Cursor tooltip. Exception: Gain GAIN curve in Pull/Match mode uses a custom format.
                             if let Some(hover) = ui.input(|i| i.pointer.hover_pos()) {
                                 if curve_rect.contains(hover) {
-                                    let freq = crv::screen_to_freq(hover.x, curve_rect, max_hz);
-                                    let freq_str = if freq >= 1_000.0 {
-                                        format!("{:.2} kHz", freq / 1_000.0)
-                                    } else {
-                                        format!("{:.0} Hz", freq)
-                                    };
-                                    let val_str = {
-                                        use crate::dsp::modules::{GainMode, ModuleType};
-                                        let gm = params.slot_gain_mode.lock()[editing_slot];
-                                        let is_mix_curve = editing_type == ModuleType::Gain
-                                            && editing_curve == 0
-                                            && matches!(gm, GainMode::Pull | GainMode::Match);
-                                        if is_mix_curve {
-                                            let db = crv::screen_y_to_physical(hover.y, 5, db_min, db_max, curve_rect);
-                                            let g  = 10f32.powf(db / 20.0).clamp(0.0, 1.0);
-                                            let effect = if gm == GainMode::Match { "match" } else { "pull" };
-                                            format!("{:.0}% dry · {:.0}% {}", g * 100.0, (1.0 - g) * 100.0, effect)
+                                    use crate::dsp::modules::{GainMode, ModuleType};
+                                    let gm = params.slot_gain_mode.lock()[editing_slot];
+                                    let is_mix_curve = editing_type == ModuleType::Gain
+                                        && editing_curve == 0
+                                        && matches!(gm, GainMode::Pull | GainMode::Match);
+                                    if is_mix_curve {
+                                        // Special Gain Pull/Match tooltip: show wet/dry split instead of dB value.
+                                        let freq = crv::screen_to_freq(hover.x, curve_rect, (sr / 2.0).max(20_001.0));
+                                        let freq_str = if freq >= 1_000.0 {
+                                            format!("{:.2} kHz", freq / 1_000.0)
                                         } else {
-                                            let val  = crv::screen_y_to_physical(hover.y, disp_curve, db_min, db_max, curve_rect);
-                                            let unit = crv::curve_y_unit(disp_curve);
-                                            format!("{:.1} {}", val, unit)
-                                        }
-                                    };
-                                    let label = format!("{}\n{}", freq_str, val_str);
-                                    let tip_pos = hover + egui::vec2(12.0, -28.0);
-                                    let font    = egui::FontId::proportional(10.0);
-                                    let galley  = ui.painter().layout_no_wrap(
-                                        label.clone(), font.clone(), th::GRID_TEXT,
-                                    );
-                                    let text_size = galley.size();
-                                    let bg_rect = egui::Rect::from_min_size(
-                                        tip_pos - egui::vec2(3.0, 3.0),
-                                        text_size + egui::vec2(6.0, 6.0),
-                                    );
-                                    ui.painter().rect_filled(bg_rect, 2.0, egui::Color32::from_black_alpha(180));
-                                    ui.painter().text(tip_pos, egui::Align2::LEFT_TOP, label, font, th::GRID_TEXT);
+                                            format!("{:.0} Hz", freq)
+                                        };
+                                        let db  = crv::screen_y_to_physical(hover.y, 5, db_min, db_max, curve_rect);
+                                        let g   = 10f32.powf(db / 20.0).clamp(0.0, 1.0);
+                                        let effect = if gm == GainMode::Match { "match" } else { "pull" };
+                                        let label = format!("{}\n{:.0}% dry · {:.0}% {}", freq_str, g * 100.0, (1.0 - g) * 100.0, effect);
+                                        let tip_pos = hover + egui::vec2(12.0, -28.0);
+                                        let font    = egui::FontId::proportional(10.0);
+                                        let galley  = ui.painter().layout_no_wrap(label.clone(), font.clone(), th::GRID_TEXT);
+                                        let bg_rect = egui::Rect::from_min_size(
+                                            tip_pos - egui::vec2(3.0, 3.0),
+                                            galley.size() + egui::vec2(6.0, 6.0),
+                                        );
+                                        ui.painter().rect_filled(bg_rect, 2.0, egui::Color32::from_black_alpha(180));
+                                        ui.painter().text(tip_pos, egui::Align2::LEFT_TOP, label, font, th::GRID_TEXT);
+                                    } else {
+                                        crv::paint_hover_text(
+                                            ui.painter(), hover, curve_rect, disp_curve, db_min, db_max, sr,
+                                        );
+                                    }
                                 }
                             }
                         }
