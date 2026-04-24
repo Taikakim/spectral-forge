@@ -387,10 +387,14 @@ pub fn create_editor(
                             if i == editing_curve { continue; }
                             let (tilt, offset, curvature) = slot_meta[i];
                             let disp_i = crv::display_curve_idx(editing_type, i, slot_gain_mode_snap);
+                            let offset_fn = crate::editor::curve_config::curve_display_config(
+                                editing_type, i, slot_gain_mode_snap,
+                            ).offset_fn;
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[i], disp_i,
                                 spec.color_dim, 1.0,
                                 db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset, curvature,
+                                offset_fn,
                             );
                         }
 
@@ -415,10 +419,14 @@ pub fn create_editor(
                             let disp_curve = crv::display_curve_idx(
                                 editing_type, editing_curve, slot_gain_mode_snap,
                             );
+                            let offset_fn = crate::editor::curve_config::curve_display_config(
+                                editing_type, editing_curve, slot_gain_mode_snap,
+                            ).offset_fn;
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[editing_curve], disp_curve,
                                 spec.color_lit, 2.0,
                                 db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset, curvature,
+                                offset_fn,
                             );
 
                             let mut nodes = slot_nodes[editing_curve];
@@ -706,7 +714,7 @@ pub fn create_editor(
                         let editing_slot  = *params.editing_slot.lock() as usize;
                         let slot_types    = *params.slot_module_types.lock();
                         let editing_type  = slot_types[editing_slot];
-                        let _editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
+                        let editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
                         let editing_curve = (*params.editing_curve.lock() as usize)
                             .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
 
@@ -738,12 +746,35 @@ pub fn create_editor(
                             let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
                             if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {
                                 let mut off_norm = off_p.value();
+                                // Capture what we need for the physical-unit formatter.
+                                let off_cfg = crate::editor::curve_config::curve_display_config(
+                                    editing_type, editing_curve, editing_gain_mode,
+                                );
+                                let off_disp_idx = crv::display_curve_idx(
+                                    editing_type, editing_curve, editing_gain_mode,
+                                );
+                                let off_atk_ms  = atk_ms;
+                                let off_rel_ms  = rel_ms;
+                                let off_db_min  = db_min;
+                                let off_db_max  = db_max;
                                 ui.vertical(|ui| {
                                     let resp = ui.add(
                                         egui::DragValue::new(&mut off_norm)
                                             .range(-1.0..=1.0)
                                             .speed(1.0 / 300.0)
-                                            .fixed_decimals(2)
+                                            .custom_formatter(move |v, _range| {
+                                                let g_off = (off_cfg.offset_fn)(1.0, v as f32);
+                                                let phys = crv::gain_to_display(
+                                                    off_disp_idx, g_off,
+                                                    off_atk_ms, off_rel_ms,
+                                                    off_db_min, off_db_max,
+                                                );
+                                                if off_cfg.y_label.is_empty() {
+                                                    format!("{:.2}", phys)
+                                                } else {
+                                                    format!("{:.1} {}", phys, off_cfg.y_label)
+                                                }
+                                            })
                                     );
                                     if resp.drag_started() { setter.begin_set_parameter(off_p); }
                                     if resp.changed() {

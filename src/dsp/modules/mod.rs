@@ -235,20 +235,24 @@ pub struct CurveTransform {
 /// Shared between the audio thread (pipeline.rs) and the GUI (editor_ui.rs).
 pub const TILT_MAX: f32 = 2.0;
 
-/// Apply spectral tilt (pivoted at 1 kHz), additive offset, and curvature (S-curve blend)
+/// Apply spectral tilt (pivoted at 1 kHz), calibrated offset, and curvature (S-curve blend)
 /// to a slice of per-bin curve gains, then clamp to [0, ∞).
 /// curvature ∈ [0, 1]: 0 = straight tilt, 1 = full smoothstep S-curve pivoted at 1 kHz.
+/// `offset_fn` maps (raw_gain, offset_norm) → offset-shifted gain; must be a plain fn pointer
+/// (no allocation, no locking) and must satisfy offset_fn(g, 0.0) == g.
 /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
 pub fn apply_curve_transform(
     gains: &mut [f32],
     tilt: f32,
     offset: f32,
     curvature: f32,
+    offset_fn: fn(f32, f32) -> f32,
     sample_rate: f32,
     fft_size: usize,
 ) {
     if gains.is_empty() { return; }
     // curvature only shapes the tilt; if tilt=0, curvature has no effect.
+    // offset_fn(g, 0.0) == g for all calibrations, so offset=0 is also a no-op.
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return; }
     const LOG_20: f32 = 1.301_030;
     const LOG_RANGE: f32 = 3.0;
@@ -263,7 +267,8 @@ pub fn apply_curve_transform(
         let sigmoid_shape = s - S_PIVOT;
         let shape = linear_shape + curvature * (sigmoid_shape - linear_shape);
         let t = tilt * shape;
-        *g = ((*g + offset) * (1.0 + t)).max(0.0);
+        let g_off = offset_fn(*g, offset);
+        *g = (g_off * (1.0 + t)).max(0.0);
     }
 }
 

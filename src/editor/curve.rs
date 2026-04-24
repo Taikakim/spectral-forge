@@ -386,12 +386,21 @@ fn log_to_y(v: f32, y_min: f32, y_max: f32, rect: Rect) -> f32 {
 /// In log-normalised [0, 20 Hz … 20 kHz = 1] space this sits at ≈ 0.566.
 const TILT_PIVOT_NORM: f32 = 0.566_32; // log10(1000/20) / log10(20000/20)
 
-/// Apply per-curve tilt, additive offset, and curvature (S-curve blend) to a raw gain.
+/// Apply per-curve tilt, calibrated offset, and curvature (S-curve blend) to a raw gain.
 /// `curvature` ∈ [0, 1]: 0 = straight tilt, 1 = full smoothstep S-curve pivoted at 1 kHz.
+/// `offset_fn` is the per-curve calibrated transform from `CurveDisplayConfig::offset_fn`.
 /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
 #[inline]
-pub fn apply_curve_adjustments(gain: f32, freq_hz: f32, tilt: f32, offset: f32, curvature: f32) -> f32 {
+pub fn apply_curve_adjustments(
+    gain: f32,
+    freq_hz: f32,
+    tilt: f32,
+    offset: f32,
+    curvature: f32,
+    offset_fn: fn(f32, f32) -> f32,
+) -> f32 {
     // curvature only shapes the tilt; if tilt=0, curvature has no effect.
+    // offset_fn(g, 0.0) == g for all calibrations, so offset=0 is also a no-op.
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return gain; }
     // Map freq to log-normalised [0, 1] (20 Hz → 0, 20 kHz → 1).
     const LOG_20: f32 = 1.301_030; // log10(20.0)
@@ -405,7 +414,8 @@ pub fn apply_curve_adjustments(gain: f32, freq_hz: f32, tilt: f32, offset: f32, 
     let sigmoid_shape = s - S_PIVOT;
     let shape = linear_shape + curvature * (sigmoid_shape - linear_shape);
     let t = tilt * shape;
-    ((gain + offset) * (1.0 + t)).max(0.0)
+    let g_off = offset_fn(gain, offset);
+    (g_off * (1.0 + t)).max(0.0)
 }
 
 /// Convert a curve's linear gain to its physical display value (no freq scaling).
@@ -656,6 +666,7 @@ pub fn paint_response_curve(
     tilt: f32,
     offset: f32,
     curvature: f32,
+    offset_fn: fn(f32, f32) -> f32,
 ) {
     if gains.len() < 2 { return; }
     let n = gains.len();
@@ -666,7 +677,7 @@ pub fn paint_response_curve(
     let pts: Vec<Pos2> = (0..n).map(|k| {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
-        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature);
+        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature, offset_fn);
         let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max);
         let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
         Pos2::new(x, y)
