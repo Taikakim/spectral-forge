@@ -23,6 +23,15 @@ serde_json = "1"
 directories = "5.0"
 opener = "0.7"
 
+[features]
+# Enables probe infrastructure for calibration integration tests.
+# Zero cost in normal builds (neither debug nor release).
+probe = []
+
+[[test]]
+name = "calibration_roundtrip"
+required-features = ["probe"]
+
 [dev-dependencies]
 approx = "0.5"
 tempfile = "3"

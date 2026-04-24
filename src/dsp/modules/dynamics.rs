@@ -16,6 +16,8 @@ pub struct DynamicsModule {
     bp_mix:       Vec<f32>,
     num_bins:     usize,
     sample_rate:  f32,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe: crate::dsp::modules::ProbeSnapshot,
 }
 
 impl DynamicsModule {
@@ -32,6 +34,8 @@ impl DynamicsModule {
             bp_mix:       Vec::new(),
             num_bins:     0,
             sample_rate:  44100.0,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe: Default::default(),
         }
     }
 }
@@ -130,8 +134,25 @@ impl SpectralModule for DynamicsModule {
             _ => &mut self.engine,
         };
         eng.process_bins(bins, sidechain, &params, self.sample_rate, suppression_out);
+
+        #[cfg(any(test, feature = "probe"))]
+        {
+            let k = self.num_bins / 2;
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                threshold_db: Some(self.bp_threshold[k]),
+                ratio:        Some(self.bp_ratio[k]),
+                attack_ms:    Some(self.bp_attack[k]),
+                release_ms:   Some(self.bp_release[k]),
+                knee_db:      Some(self.bp_knee[k]),
+                mix_pct:      Some(self.bp_mix[k] * 100.0),
+                ..Default::default()
+            };
+        }
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::Dynamics }
     fn num_curves(&self) -> usize { 6 }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }

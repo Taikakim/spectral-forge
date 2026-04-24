@@ -81,10 +81,10 @@ pub struct ModuleContext {
 // ── ProbeSnapshot (test-only) ──────────────────────────────────────────────
 
 /// Test-only snapshot of the last set of internal parameters a module derived
-/// from its curves. Populated in `process()` when `cfg(test)` is active; zero
-/// cost in release builds. Used by `tests/calibration_roundtrip.rs` to verify
-/// every offset_fn's ±1 → [y_min, y_max] claim is respected end-to-end.
-#[cfg(test)]
+/// from its curves. Populated in `process()` when `cfg(any(test, feature = "probe"))`
+/// is active; zero cost in normal builds. Used by `tests/calibration_roundtrip.rs`
+/// to verify every offset_fn's ±1 → [y_min, y_max] claim is respected end-to-end.
+#[cfg(any(test, feature = "probe"))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProbeSnapshot {
     pub threshold_db:  Option<f32>,
@@ -131,13 +131,13 @@ pub trait SpectralModule: Send {
 
     fn num_curves(&self) -> usize;
 
+    fn num_outputs(&self) -> Option<usize> { None }
+
     /// Test-only: return the last set of internal parameters computed during
     /// `process()`. Default implementation returns an empty snapshot.
     /// See `tests/calibration_roundtrip.rs`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> ProbeSnapshot { ProbeSnapshot::default() }
-
-    fn num_outputs(&self) -> Option<usize> { None }
 
     /// Update the operating mode for Gain modules. Default no-op for all other types.
     fn set_gain_mode(&mut self, _: GainMode) {}
