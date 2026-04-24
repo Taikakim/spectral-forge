@@ -129,8 +129,10 @@ Curves map linear gain values (1.0 = neutral) to physical units. The Dynamics mo
 Each module type has its own `ModuleSpec` listing which curve labels it uses; `num_curves()` for a
 Dynamics slot is 6, for PhaseSmear 2, for Freeze 4, etc.
 
-**Tilt/offset transforms** (`apply_curve_transform`) are applied on top of the raw curve per-block.
-They are stored in `slot_curve_meta[slot][curve] = (tilt, offset)`.
+**Tilt/offset/curvature transforms** (`apply_curve_transform`) are applied on top of the raw
+curve per-block. They are per-slot/per-curve FloatParams: `s{s}c{c}_tilt`, `s{s}c{c}_offset`,
+`s{s}c{c}curv`. The `CurveTransform` struct in `dsp::modules` and `params.curve_transform(s, c)`
+give a snapshot helper for GUI callers.
 
 ## Data flow
 

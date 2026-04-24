@@ -706,7 +706,7 @@ pub fn create_editor(
                         let editing_slot  = *params.editing_slot.lock() as usize;
                         let slot_types    = *params.slot_module_types.lock();
                         let editing_type  = slot_types[editing_slot];
-                        let editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
+                        let _editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
                         let editing_curve = (*params.editing_curve.lock() as usize)
                             .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
 
