@@ -345,6 +345,7 @@ pub fn create_editor(
                     }
 
                     // 3 + 4. Response curves + interactive widget (unified — all module types)
+                    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
                     {
                         let editing_slot  = *params.editing_slot.lock() as usize;
                         let slot_types    = *params.slot_module_types.lock();

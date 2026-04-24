@@ -3,6 +3,8 @@ use crate::editor::theme as th;
 
 /// Paint stalactite suppression bars hanging from the top.
 /// `suppression`: gain reduction magnitude in dB per bin (>= 0).
+///
+/// UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
 pub fn paint_suppression(painter: &Painter, rect: Rect, suppression: &[f32]) {
     if suppression.is_empty() { return; }
     let n = suppression.len();

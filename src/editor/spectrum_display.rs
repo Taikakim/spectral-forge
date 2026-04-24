@@ -26,6 +26,8 @@ fn db_y(db: f32, db_min: f32, db_max: f32, rect: Rect) -> f32 {
 /// - `suppression` — gain reduction per bin in dB (≥ 0).
 /// - `db_min/max`  — vertical display range from graph settings.
 /// - `sidechain_active` — if true, overlays a second SC-coloured gradient layer.
+///
+/// UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
 pub fn paint_spectrum_and_suppression(
     painter: &Painter,
     rect: Rect,
