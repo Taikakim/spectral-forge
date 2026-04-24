@@ -36,9 +36,13 @@ const ASSIGNABLE: &[ModuleType] = &[
 
 /// Render the popup if open. Call every frame from the main UI closure.
 /// Returns true if the popup consumed a click.
+///
+/// UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+/// `scale` is the frame-scoped UI scale factor; font sizes flow through `th::scaled`.
 pub fn show_popup(
     ui:     &mut Ui,
     params: &SpectralForgeParams,
+    scale:  f32,
 ) -> bool {
     let key = ui.id().with("module_popup");
     let state: PopupState = ui.data(|d| d.get_temp(key).unwrap_or_default());
@@ -59,7 +63,7 @@ pub fn show_popup(
                 ui.set_min_width(140.0);
                 ui.label(
                     egui::RichText::new("Assign module")
-                        .color(th::LABEL_DIM).size(th::FONT_SIZE_LABEL)
+                        .color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale))
                 );
                 ui.separator();
 
@@ -87,7 +91,7 @@ pub fn show_popup(
                     if ts_full {
                         ui.label(
                             egui::RichText::new("(max 2 active)")
-                                .color(th::LABEL_DIM).size(8.0)
+                                .color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_TINY, scale))
                         );
                     }
                 }
@@ -102,7 +106,7 @@ pub fn show_popup(
                 ui.separator();
                 ui.label(
                     egui::RichText::new("DSP change takes effect\non host restart.")
-                        .color(th::LABEL_DIM).size(8.0)
+                        .color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_TINY, scale))
                 );
             });
         });
@@ -142,14 +146,21 @@ fn assign_module(params: &SpectralForgeParams, slot: usize, ty: ModuleType) {
     for c in 0..spec.num_curves.min(7) {
         nodes[slot][c] = crate::editor::curve::default_nodes_for_curve(c);
     }
-    // Reset tilt/offset for this slot.
-    let mut meta = params.slot_curve_meta.lock();
+    // Reset tilt/offset/curvature FloatParam smoothers for this slot.
+    // assign_module has no ParamSetter access so we reset the smoothers directly;
+    // the audio thread reads tilt/offset via smoothed.next(), so this takes effect
+    // on the next processing block without host notification.
     for c in 0..7 {
-        meta[slot][c] = (0.0, 0.0);
+        if let Some(p) = params.tilt_param(slot, c) {
+            p.smoothed.reset(0.0);
+        }
+        if let Some(p) = params.offset_param(slot, c) {
+            p.smoothed.reset(0.0);
+        }
+        if let Some(p) = params.curvature_param(slot, c) {
+            p.smoothed.reset(0.0);
+        }
     }
-    // NOTE: curvature FloatParams (s{slot}c{c}curv) are not reset here because
-    // assign_module has no access to ParamSetter. Curvature survives module type
-    // changes — the user can reset it via the Curve DragValue in the editor.
     // Reset editing_curve to 0 if it's now out of range.
     let num_c = spec.num_curves;
     let mut ec = params.editing_curve.lock();

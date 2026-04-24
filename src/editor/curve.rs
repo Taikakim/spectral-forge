@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use nih_plug_egui::egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use crate::editor::theme as th;
+use crate::editor::curve_config::CurveDisplayConfig;
 use crate::dsp::modules::{GainMode, ModuleType};
 
 /// Return the curve label to show for `(module_type, curve_idx)`, accounting for
@@ -210,7 +211,9 @@ pub fn screen_to_freq(x: f32, rect: Rect, max_hz: f32) -> f32 {
 }
 
 /// Map a per-module curve slot index to the canonical display index used by
-/// gain_to_display, physical_to_y, screen_y_to_physical, curve_grid_lines, and curve_y_unit.
+/// gain_to_display, physical_to_y, and screen_y_to_physical. The per-curve
+/// grid lines and Y-axis unit label now live in `CurveDisplayConfig` and are
+/// looked up via `curve_config::curve_display_config`.
 ///
 /// Display indices:
 ///   0  Threshold dBFS           1  Ratio 1–20           2/3 Attack/Release ms
@@ -301,25 +304,13 @@ pub fn screen_y_to_physical(y: f32, curve_idx: usize, db_min: f32, db_max: f32, 
         9 => -80.0 + t * 80.0,
         10 => 1000.0_f32.powf(t),
         11 => t * 2.0,                    // Resistance 0–2
-        12 => -18.0 + t * 36.0,           // Dry-mix: screen y maps to ±18 dB (reported raw; tooltip converts to %)
+        12 => {
+            // Dry-mix %: screen y → dB (-18..+18) → clamped wet/dry percentage.
+            // Matches the grid labels: 0 dB=100 %, -6 dB=50 %, -12 dB=25 %, -18 dB≈12 %.
+            let db = -18.0 + t * 36.0;
+            (100.0 * 10f32.powf(db / 20.0)).clamp(0.0, 100.0)
+        }
         _ => 0.0,
-    }
-}
-
-/// Unit label for a curve's y-axis (used in cursor tooltip, indexed by display_curve_idx).
-pub fn curve_y_unit(display_idx: usize) -> &'static str {
-    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
-    match display_idx {
-        0 | 9  => "dBFS",
-        1      => "x",
-        2 | 3  => "ms",
-        4      => "dB",
-        5      => "dB",
-        6 | 7  => "%",
-        8 | 10 => "ms",
-        11     => "",       // Resistance: dimensionless
-        12     => "%",      // Dry-mix percentage (tooltip formats itself)
-        _      => "",
     }
 }
 
@@ -334,12 +325,15 @@ pub fn format_freq_hz(hz: f32) -> String {
 
 /// Paint cursor tooltip: "440 Hz  /  -18.3 dBFS"
 /// Single shared routine for all curves — no per-curve hover paths.
+/// The physical Y value comes from `screen_y_to_physical` (indexed by `display_idx`);
+/// the unit label and formatting come from `cfg`.
 /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
 pub fn paint_hover_text(
     painter: &Painter,
     cursor_pos: Pos2,
     rect: Rect,
     display_idx: usize,
+    cfg: &CurveDisplayConfig,
     db_min: f32,
     db_max: f32,
     sample_rate: f32,
@@ -348,11 +342,10 @@ pub fn paint_hover_text(
     let nyquist = (sample_rate / 2.0).max(20_001.0);
     let freq_hz = screen_to_freq(cursor_pos.x, rect, nyquist);
     let phys    = screen_y_to_physical(cursor_pos.y, display_idx, db_min, db_max, rect);
-    let unit    = curve_y_unit(display_idx);
-    let text = if unit.is_empty() {
+    let text = if cfg.y_label.is_empty() {
         format!("{}  /  {:.2}", format_freq_hz(freq_hz), phys)
     } else {
-        format!("{}  /  {:.1} {}", format_freq_hz(freq_hz), phys, unit)
+        format!("{}  /  {:.1} {}", format_freq_hz(freq_hz), phys, cfg.y_label)
     };
     let tip_pos = cursor_pos + vec2(12.0, -28.0);
     let scale  = painter.ctx().pixels_per_point();
@@ -382,30 +375,40 @@ fn log_to_y(v: f32, y_min: f32, y_max: f32, rect: Rect) -> f32 {
 
 // ─── Physical value mapping ───────────────────────────────────────────────────
 
-/// Pivot frequency for the tilt control: 1 kHz.
-/// In log-normalised [0, 20 Hz … 20 kHz = 1] space this sits at ≈ 0.566.
-const TILT_PIVOT_NORM: f32 = 0.566_32; // log10(1000/20) / log10(20000/20)
-
-/// Apply per-curve tilt, additive offset, and curvature (S-curve blend) to a raw gain.
+/// Apply per-curve tilt, calibrated offset, and curvature (S-curve blend) to a raw gain.
 /// `curvature` ∈ [0, 1]: 0 = straight tilt, 1 = full smoothstep S-curve pivoted at 1 kHz.
-/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
+/// `offset_fn` is the per-curve calibrated transform from `CurveDisplayConfig::offset_fn`.
+/// `nyquist` — host Nyquist frequency (sample_rate / 2); governs the log-range used for
+/// the tilt shape so it matches any sample rate.
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2 and §3.
 #[inline]
-pub fn apply_curve_adjustments(gain: f32, freq_hz: f32, tilt: f32, offset: f32, curvature: f32) -> f32 {
+pub fn apply_curve_adjustments(
+    gain: f32,
+    freq_hz: f32,
+    tilt: f32,
+    offset: f32,
+    curvature: f32,
+    offset_fn: fn(f32, f32) -> f32,
+    nyquist: f32,
+) -> f32 {
     // curvature only shapes the tilt; if tilt=0, curvature has no effect.
+    // offset_fn(g, 0.0) == g for all calibrations, so offset=0 is also a no-op.
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return gain; }
-    // Map freq to log-normalised [0, 1] (20 Hz → 0, 20 kHz → 1).
+    // Map freq to log-normalised [0, 1] (20 Hz → nyquist).
+    // Pivot at 1 kHz — computed dynamically so it stays centred at 1 kHz across sample rates.
     const LOG_20: f32 = 1.301_030; // log10(20.0)
-    const LOG_RANGE: f32 = 3.0;    // log10(20000/20) = log10(1000)
-    // Pre-computed smoothstep value at the pivot — centres the sigmoid shape there.
-    const S_PIVOT: f32 = 3.0 * TILT_PIVOT_NORM * TILT_PIVOT_NORM
-                       - 2.0 * TILT_PIVOT_NORM * TILT_PIVOT_NORM * TILT_PIVOT_NORM;
-    let norm = ((freq_hz.max(20.0).log10() - LOG_20) / LOG_RANGE).clamp(0.0, 1.0);
-    let linear_shape  = norm - TILT_PIVOT_NORM;
+    let log_range  = (nyquist / 20.0).log10(); // e.g. 3.0 at 20 kHz Nyquist (40 kHz SR)
+    let pivot      = (1000.0_f32 / 20.0).log10() / log_range;
+    // Smoothstep value at the pivot — centres the sigmoid shape there.
+    let s_pivot    = 3.0 * pivot * pivot - 2.0 * pivot * pivot * pivot;
+    let norm = ((freq_hz.max(20.0).log10() - LOG_20) / log_range).clamp(0.0, 1.0);
+    let linear_shape  = norm - pivot;
     let s             = 3.0 * norm * norm - 2.0 * norm * norm * norm; // smoothstep(norm)
-    let sigmoid_shape = s - S_PIVOT;
+    let sigmoid_shape = s - s_pivot;
     let shape = linear_shape + curvature * (sigmoid_shape - linear_shape);
     let t = tilt * shape;
-    ((gain + offset) * (1.0 + t)).max(0.0)
+    let g_off = offset_fn(gain, offset);
+    (g_off * (1.0 + t)).max(0.0)
 }
 
 /// Convert a curve's linear gain to its physical display value (no freq scaling).
@@ -477,92 +480,26 @@ const HZ_VERTICALS_HI: &[f32] = &[
     21_000., 22_000., 24_000., 26_000., 28_000.,
     30_000., 35_000., 40_000., 45_000.,
 ];
-const HZ_LABELS: &[(f32, &str)] = &[(100., "100"), (1_000., "1k"), (10_000., "10k"), (20_000., "20k")];
+/// Fixed frequency labels shown on the X axis (excluding the rightmost Nyquist label,
+/// which is added dynamically by `paint_grid`).
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
+const HZ_LABELS: &[(f32, &str)] = &[(100., "100"), (1_000., "1k"), (10_000., "10k")];
 
-/// Grid horizontal lines per curve type: (physical value, label).
-fn curve_grid_lines(curve_idx: usize, db_min: f32, db_max: f32) -> Vec<(f32, String)> {
-    match curve_idx {
-        0 => {
-            // Threshold: one reference line at -12 dBFS (fixed)
-            if -12.0 >= db_min && -12.0 <= db_max {
-                vec![(-12.0, "-12 dB".to_string())]
-            } else {
-                vec![]
-            }
-        }
-        1 => vec![
-            (1.25,  "1:1.25".to_string()),
-            (2.5,   "1:2.5".to_string()),
-            (5.0,   "1:5".to_string()),
-            (10.0,  "1:10".to_string()),
-        ],
-        2 | 3 => vec![
-            (64.0,  "64ms".to_string()),
-            (128.0, "128ms".to_string()),
-            (256.0, "256ms".to_string()),
-            (512.0, "512ms".to_string()),
-        ],
-        4 => vec![
-            (3.0,  "3dB".to_string()),
-            (6.0,  "6dB".to_string()),
-            (12.0, "12dB".to_string()),
-            (24.0, "24dB".to_string()),
-        ],
-        5 => vec![
-            (-12.0, "-12dB".to_string()),
-            ( -6.0,  "-6dB".to_string()),
-            (  0.0,   "0dB".to_string()),
-            (  6.0,  "+6dB".to_string()),
-            ( 12.0, "+12dB".to_string()),
-        ],
-        6 => vec![
-            (20.0,  "20%".to_string()),
-            (40.0,  "40%".to_string()),
-            (60.0,  "60%".to_string()),
-            (80.0,  "80%".to_string()),
-        ],
-        7 => vec![
-            (50.0,  "50%".to_string()),
-            (100.0, "100%".to_string()),
-            (150.0, "150%".to_string()),
-        ],
-        8 => vec![
-            (100.0,  "100ms".to_string()),
-            (500.0,  "500ms".to_string()),
-            (1000.0, "1s".to_string()),
-            (2000.0, "2s".to_string()),
-        ],
-        9 => vec![
-            (-12.0, "-12dB".to_string()),
-            (-40.0, "-40dB".to_string()),
-            (-60.0, "-60dB".to_string()),
-        ],
-        10 => vec![
-            (10.0,  "10ms".to_string()),
-            (100.0, "100ms".to_string()),
-            (500.0, "500ms".to_string()),
-        ],
-        11 => vec![
-            (0.5,  "0.5".to_string()),
-            (1.0,  "1.0".to_string()),
-            (1.5,  "1.5".to_string()),
-        ],
-        // Dry-mix %: same screen scale as idx 5 (±18 dB) but labelled as the
-        // clamped wet/dry percentage the Pull/Match modes actually apply.
-        //   0 dB → 100 % dry,  −6 dB → 50 %,  −12 dB → 25 %, −18 dB → ~12 %
-        12 => vec![
-            (  0.0, "100%".to_string()),
-            ( -6.0,  "50%".to_string()),
-            (-12.0,  "25%".to_string()),
-            (-18.0,  "12%".to_string()),
-        ],
-        _ => vec![],
-    }
-}
-
-/// Paint background grid: vertical Hz lines + curve-specific horizontal lines.
+/// Paint background grid: vertical Hz lines + curve-specific horizontal lines + Y-axis label.
+/// `cfg` supplies the horizontal grid lines and Y-axis unit label.
+/// `display_idx` is the canonical curve index used by `physical_to_y` to map each
+/// `cfg.grid_lines` physical value back to a pixel Y position.
 /// `sample_rate` is used to extend the grid beyond 20 kHz at high sample rates.
-pub fn paint_grid(painter: &Painter, rect: Rect, curve_idx: usize, db_min: f32, db_max: f32, sample_rate: f32) {
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
+pub fn paint_grid(
+    painter: &Painter,
+    rect: Rect,
+    cfg: &CurveDisplayConfig,
+    display_idx: usize,
+    db_min: f32,
+    db_max: f32,
+    sample_rate: f32,
+) {
     // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
     let scale   = painter.ctx().pixels_per_point();
     let nyquist = sample_rate / 2.0;
@@ -602,8 +539,9 @@ pub fn paint_grid(painter: &Painter, rect: Rect, curve_idx: usize, db_min: f32, 
             th::GRID_TEXT,
         );
     }
-    // Extra label at Nyquist for high SR
-    if sample_rate > 44_100.0 {
+    // Always show the Nyquist label at the right edge.
+    // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
+    {
         let nyq_khz = (nyquist / 1000.0).round() as u32;
         let label = format!("{}k", nyq_khz);
         let x = freq_to_x_max(nyquist, max_hz, rect);
@@ -616,9 +554,16 @@ pub fn paint_grid(painter: &Painter, rect: Rect, curve_idx: usize, db_min: f32, 
         );
     }
 
-    // Horizontal lines per curve type
-    for (v, label) in curve_grid_lines(curve_idx, db_min, db_max) {
-        let y = physical_to_y(v, curve_idx, db_min, db_max, rect);
+    // Horizontal grid lines driven by CurveDisplayConfig.grid_lines.
+    // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
+    for &(v, label) in cfg.grid_lines {
+        // Skip values that fall outside the curve's configured display range
+        // (e.g. Threshold grid line -48 dBFS when db_min > -48).
+        if v < cfg.y_min || v > cfg.y_max { continue; }
+        // For curves whose runtime display range is user-adjustable (threshold),
+        // also respect the current db_min/db_max window.
+        if display_idx == 0 && (v < db_min || v > db_max) { continue; }
+        let y = physical_to_y(v, display_idx, db_min, db_max, rect);
         painter.line_segment(
             [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
             grid_stroke,
@@ -628,6 +573,21 @@ pub fn paint_grid(painter: &Painter, rect: Rect, curve_idx: usize, db_min: f32, 
             nih_plug_egui::egui::Align2::LEFT_BOTTOM,
             label,
             font.clone(),
+            th::GRID_TEXT,
+        );
+    }
+
+    // Y-axis unit label at top-left of the rect.
+    // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
+    if !cfg.y_label.is_empty() {
+        let label_font = nih_plug_egui::egui::FontId::proportional(
+            th::scaled(th::FONT_SIZE_LABEL, scale),
+        );
+        painter.text(
+            Pos2::new(rect.left() + 2.0, rect.top() + 2.0),
+            nih_plug_egui::egui::Align2::LEFT_TOP,
+            cfg.y_label,
+            label_font,
             th::GRID_TEXT,
         );
     }
@@ -656,6 +616,7 @@ pub fn paint_response_curve(
     tilt: f32,
     offset: f32,
     curvature: f32,
+    offset_fn: fn(f32, f32) -> f32,
 ) {
     if gains.len() < 2 { return; }
     let n = gains.len();
@@ -666,7 +627,7 @@ pub fn paint_response_curve(
     let pts: Vec<Pos2> = (0..n).map(|k| {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
-        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature);
+        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature, offset_fn, max_hz);
         let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max);
         let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
         Pos2::new(x, y)
@@ -698,6 +659,8 @@ pub fn paint_peak_hold_envelope_overlay(
     db_max: f32,
 ) {
     if envelope.is_empty() || fft_size == 0 { return; }
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+    let scale = painter.ctx().pixels_per_point();
     // Derive a darker tone from curve_color (r/3, g/3, b/3, opaque).
     let dim = Color32::from_rgb(
         curve_color.r() / 3,
@@ -708,6 +671,7 @@ pub fn paint_peak_hold_envelope_overlay(
     let max_hz = (sample_rate / 2.0).max(20_001.0);
     let norm_factor = 4.0 / fft_size as f32;
     let range = (db_max - db_min).max(1.0);
+    let overlay_stroke = Stroke::new(th::scaled_stroke(th::STROKE_THIN, scale), dim);
     let mut prev: Option<Pos2> = None;
     for k in 1..n {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
@@ -718,7 +682,7 @@ pub fn paint_peak_hold_envelope_overlay(
         let norm = ((db - db_min) / range).clamp(0.0, 1.0);
         let y    = rect.max.y - norm * rect.height();
         if let Some(p) = prev {
-            painter.line_segment([p, Pos2::new(x, y)], Stroke::new(1.0, dim));
+            painter.line_segment([p, Pos2::new(x, y)], overlay_stroke);
         }
         prev = Some(Pos2::new(x, y));
     }

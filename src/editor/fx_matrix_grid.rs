@@ -20,12 +20,17 @@ pub fn slot_name_str(bytes: &[u8; 32]) -> String {
 /// Paint the 9×9 routing matrix grid, with optional virtual half-height rows for T/S Split slots.
 ///
 /// Returns `MatrixInteraction` describing any clicks this frame.
+///
+/// UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+/// `scale` is the frame-scoped UI scale factor (ctx.pixels_per_point()); all fonts and
+/// strokes flow through `th::scaled` / `th::scaled_stroke`.
 pub fn paint_fx_matrix_grid(
     ui:           &mut Ui,
     module_types: &[ModuleType; 9],
     slot_names:   &[[u8; 32]; 9],
     route_matrix: &mut RouteMatrix,
     editing_slot: usize,
+    scale:        f32,
 ) -> MatrixInteraction {
     use crate::dsp::modules::{VirtualRowKind, MAX_SLOTS};
 
@@ -81,7 +86,7 @@ pub fn paint_fx_matrix_grid(
             hdr_rect.center(),
             egui::Align2::CENTER_CENTER,
             &name,
-            egui::FontId::proportional(7.5),
+            egui::FontId::proportional(th::scaled(th::FONT_SIZE_MATRIX_AXIS, scale)),
             if ty == ModuleType::Empty { th::LABEL_DIM } else { spec.color_lit },
         );
     }
@@ -111,7 +116,7 @@ pub fn paint_fx_matrix_grid(
                     label_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     &display_name,
-                    egui::FontId::proportional(8.5),
+                    egui::FontId::proportional(th::scaled(th::FONT_SIZE_MATRIX_ROW, scale)),
                     if ty_row == ModuleType::Empty { th::LABEL_DIM } else { spec_row.color_lit },
                 );
 
@@ -138,9 +143,9 @@ pub fn paint_fx_matrix_grid(
                             spec.color_dim
                         };
                         let stroke = if is_selected {
-                            Stroke::new(1.5, th::BORDER)
+                            Stroke::new(th::scaled_stroke(th::STROKE_MEDIUM, scale), th::BORDER)
                         } else {
-                            Stroke::new(0.5, th::GRID_LINE)
+                            Stroke::new(th::scaled_stroke(th::STROKE_HAIRLINE, scale), th::GRID_LINE)
                         };
                         painter.rect(cell_rect, 2.0, fill, stroke, StrokeKind::Middle);
 
@@ -165,7 +170,7 @@ pub fn paint_fx_matrix_grid(
                             cell_rect.center(),
                             egui::Align2::CENTER_CENTER,
                             &label_str,
-                            egui::FontId::proportional(8.0),
+                            egui::FontId::proportional(th::scaled(th::FONT_SIZE_MATRIX_CELL, scale)),
                             text_col,
                         );
 
@@ -190,7 +195,7 @@ pub fn paint_fx_matrix_grid(
                         // Off-diagonal send cell
                         let is_feedback = col > row;
                         let bg = if is_feedback { th::BG_FEEDBACK } else { th::BG_RAISED };
-                        painter.rect(cell_rect, 0.0, bg, Stroke::new(0.5, th::GRID_LINE), StrokeKind::Middle);
+                        painter.rect(cell_rect, 0.0, bg, Stroke::new(th::scaled_stroke(th::STROKE_HAIRLINE, scale), th::GRID_LINE), StrokeKind::Middle);
 
                         let src_ty = module_types[row];
                         let dst_ty = module_types[col];
@@ -221,7 +226,7 @@ pub fn paint_fx_matrix_grid(
                                 cell_rect.center(),
                                 egui::Align2::CENTER_CENTER,
                                 "\u{2014}",
-                                egui::FontId::proportional(8.0),
+                                egui::FontId::proportional(th::scaled(th::FONT_SIZE_MATRIX_CELL, scale)),
                                 th::GRID_LINE,
                             );
                         }
@@ -253,7 +258,7 @@ pub fn paint_fx_matrix_grid(
                 );
                 painter.text(
                     lbl_rect.center(), egui::Align2::CENTER_CENTER,
-                    &vrow_label, egui::FontId::proportional(7.5), border_col,
+                    &vrow_label, egui::FontId::proportional(th::scaled(th::FONT_SIZE_MATRIX_AXIS, scale)), border_col,
                 );
 
                 for col in 0..n {
@@ -262,13 +267,13 @@ pub fn paint_fx_matrix_grid(
                         Vec2::new(CELL - 1.0, HALF_CELL - 1.0),
                     );
                     painter.rect_filled(cell_rect, 0.0, th::BG_RAISED);
-                    painter.rect_stroke(cell_rect, 0.0, Stroke::new(0.5, th::GRID_LINE), StrokeKind::Middle);
+                    painter.rect_stroke(cell_rect, 0.0, Stroke::new(th::scaled_stroke(th::STROKE_HAIRLINE, scale), th::GRID_LINE), StrokeKind::Middle);
 
                     if col == *parent_slot || col == 8 {
                         // Self-send and Master column: show ⊘
                         painter.text(
                             cell_rect.center(), egui::Align2::CENTER_CENTER,
-                            "\u{2298}", egui::FontId::proportional(7.0), th::GRID_LINE,
+                            "\u{2298}", egui::FontId::proportional(th::scaled(th::FONT_SIZE_MATRIX_VROW, scale)), th::GRID_LINE,
                         );
                     } else {
                         let send_val = &mut route_matrix.send[*vrow_src][col];

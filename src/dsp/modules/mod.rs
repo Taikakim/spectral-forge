@@ -220,37 +220,58 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
     }
 }
 
-// ── apply_curve_transform ──────────────────────────────────────────────────
+// ── CurveTransform and apply_curve_transform ──────────────────────────────
 
-/// Apply spectral tilt (pivoted at 1 kHz), additive offset, and curvature (S-curve blend)
+/// Per-curve display+DSP transform (offset, tilt, curvature).
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CurveTransform {
+    pub offset:    f32,  // [-1, 1] normalized
+    pub tilt:      f32,  // [-1, 1] normalized (multiply by TILT_MAX for gain-space)
+    pub curvature: f32,  // [0, 1]
+}
+
+/// Maximum physical tilt in dB/octave units (normalized tilt × TILT_MAX = physical tilt).
+/// Shared between the audio thread (pipeline.rs) and the GUI (editor_ui.rs).
+pub const TILT_MAX: f32 = 2.0;
+
+/// Apply spectral tilt (pivoted at 1 kHz), calibrated offset, and curvature (S-curve blend)
 /// to a slice of per-bin curve gains, then clamp to [0, ∞).
 /// curvature ∈ [0, 1]: 0 = straight tilt, 1 = full smoothstep S-curve pivoted at 1 kHz.
+/// `offset_fn` maps (raw_gain, offset_norm) → offset-shifted gain; must be a plain fn pointer
+/// (no allocation, no locking) and must satisfy offset_fn(g, 0.0) == g.
 /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
 pub fn apply_curve_transform(
     gains: &mut [f32],
     tilt: f32,
     offset: f32,
     curvature: f32,
+    offset_fn: fn(f32, f32) -> f32,
     sample_rate: f32,
     fft_size: usize,
 ) {
     if gains.is_empty() { return; }
     // curvature only shapes the tilt; if tilt=0, curvature has no effect.
+    // offset_fn(g, 0.0) == g for all calibrations, so offset=0 is also a no-op.
     if tilt.abs() < 1e-6 && offset.abs() < 1e-6 { return; }
     const LOG_20: f32 = 1.301_030;
-    const LOG_RANGE: f32 = 3.0;
-    const PIVOT: f32 = 0.566_32; // log10(1000/20) / log10(20000/20)
+    // Compute log range and pivot from sample_rate so the tilt shape is correct at any Nyquist.
+    // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
+    let nyquist   = sample_rate * 0.5;
+    let log_range = (nyquist / 20.0).log10(); // 3.0 at 20 kHz Nyquist (40 kHz SR)
+    let pivot     = (1000.0_f32 / 20.0).log10() / log_range;
     // Smoothstep value at the pivot — used to zero the sigmoid shape there.
-    const S_PIVOT: f32 = 3.0 * PIVOT * PIVOT - 2.0 * PIVOT * PIVOT * PIVOT;
+    let s_pivot   = 3.0 * pivot * pivot - 2.0 * pivot * pivot * pivot;
     for (k, g) in gains.iter_mut().enumerate() {
         let freq_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
-        let norm = ((freq_hz.log10() - LOG_20) / LOG_RANGE).clamp(0.0, 1.0);
-        let linear_shape  = norm - PIVOT;
+        let norm = ((freq_hz.log10() - LOG_20) / log_range).clamp(0.0, 1.0);
+        let linear_shape  = norm - pivot;
         let s             = 3.0 * norm * norm - 2.0 * norm * norm * norm; // smoothstep(norm)
-        let sigmoid_shape = s - S_PIVOT;
+        let sigmoid_shape = s - s_pivot;
         let shape = linear_shape + curvature * (sigmoid_shape - linear_shape);
         let t = tilt * shape;
-        *g = ((*g + offset) * (1.0 + t)).max(0.0);
+        let g_off = offset_fn(*g, offset);
+        *g = (g_off * (1.0 + t)).max(0.0);
     }
 }
 

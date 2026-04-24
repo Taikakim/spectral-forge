@@ -178,7 +178,8 @@ impl Pipeline {
         shared: &mut SharedState,
         params: &crate::params::SpectralForgeParams,
     ) {
-        use crate::dsp::modules::{apply_curve_transform, ModuleContext};
+        use crate::dsp::modules::{apply_curve_transform, ModuleContext, TILT_MAX};
+        use crate::editor::curve_config::curve_display_config;
 
         let fft_size = self.fft_size;
         let num_bins = fft_size / 2 + 1;
@@ -189,19 +190,45 @@ impl Pipeline {
         let output_gain_db    = params.output_gain.smoothed.next_step(block_size);
         let global_mix        = params.mix.smoothed.next_step(block_size).clamp(0.0, 1.0);
 
-        // ── Read all 9×7 slot curves from triple-buffer + apply tilt/offset ──
-        // Non-blocking: if GUI holds the lock this block, skip tilt/offset (not catastrophic).
-        let meta_guard = params.slot_curve_meta.try_lock();
+        // Snapshot slot module types and gain modes early — needed for offset_fn lookup below.
+        // Uses try_lock with fallback so we never block on the audio thread.
+        let slot_types_snap: [crate::dsp::modules::ModuleType; 9] = params.slot_module_types.try_lock()
+            .map(|g| *g)
+            .unwrap_or([crate::dsp::modules::ModuleType::Empty; 9]);
+        let slot_gain_mode_snap: [crate::dsp::modules::GainMode; 9] = params.slot_gain_mode.try_lock()
+            .map(|g| *g)
+            .unwrap_or([crate::dsp::modules::GainMode::Add; 9]);
+
+        // ── Read all 9×7 slot curves from triple-buffer + apply tilt/offset/curvature ──
+        // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
         for s in 0..9 {
             for c in 0..7 {
-                self.slot_curve_cache[s][c].copy_from_slice(&shared.curve_rx[s][c].read()[..MAX_NUM_BINS]);
-                if let Some(ref meta) = meta_guard {
-                    let (tilt, offset) = meta[s][c];
-                    let curvature = params.curvature_param(s, c)
-                        .map(|p| p.smoothed.next_step(block_size))
-                        .unwrap_or(0.0);
-                    apply_curve_transform(&mut self.slot_curve_cache[s][c], tilt, offset, curvature, self.sample_rate, self.fft_size);
-                }
+                self.slot_curve_cache[s][c]
+                    .copy_from_slice(&shared.curve_rx[s][c].read()[..MAX_NUM_BINS]);
+                let tilt_norm = params.tilt_param(s, c)
+                    .map(|p| p.smoothed.next_step(block_size))
+                    .unwrap_or(0.0);
+                let offset = params.offset_param(s, c)
+                    .map(|p| p.smoothed.next_step(block_size))
+                    .unwrap_or(0.0);
+                let curvature = params.curvature_param(s, c)
+                    .map(|p| p.smoothed.next_step(block_size))
+                    .unwrap_or(0.0);
+                // Look up per-curve calibrated offset function (no allocation).
+                let offset_fn = curve_display_config(
+                    slot_types_snap[s],
+                    c,
+                    slot_gain_mode_snap[s],
+                ).offset_fn;
+                apply_curve_transform(
+                    &mut self.slot_curve_cache[s][c],
+                    tilt_norm * TILT_MAX,
+                    offset,
+                    curvature,
+                    offset_fn,
+                    self.sample_rate,
+                    self.fft_size,
+                );
             }
         }
 
@@ -315,10 +342,6 @@ impl Pipeline {
         let slot_sc_channel_arr: [ScChannel; 9] = params.slot_sc_channel.try_lock()
             .map(|g| *g)
             .unwrap_or([ScChannel::Follow; 9]);
-
-        let slot_types_snap: [crate::dsp::modules::ModuleType; 9] = params.slot_module_types.try_lock()
-            .map(|g| *g)
-            .unwrap_or([crate::dsp::modules::ModuleType::Empty; 9]);
 
         // Precompute ScSource per (channel, slot).
         let mut slot_sc_source_ch: [[ScSource; 9]; 2] = [[ScSource::LR; 9]; 2];

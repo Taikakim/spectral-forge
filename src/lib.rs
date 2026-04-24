@@ -178,7 +178,7 @@ impl Plugin for SpectralForge {
 
         // Old state: decode legacy persist fields and inject graph-node / tilt / matrix values
         // into state.params so nih-plug's normal deserialization path sets param.value() correctly.
-        use crate::param_ids::{NUM_SLOTS, NUM_CURVES, NUM_NODES, NUM_MATRIX_ROWS, graph_node_id, tilt_id, matrix_id};
+        use crate::param_ids::{NUM_SLOTS, NUM_CURVES, NUM_NODES, NUM_MATRIX_ROWS, graph_node_id, matrix_id};
         use nih_plug::wrapper::state::ParamValue;
 
         // ── Graph nodes ───────────────────────────────────────────────────────
@@ -195,20 +195,6 @@ impl Plugin for SpectralForge {
                             state.params.entry(graph_node_id(s, c, n, 'q'))
                                 .or_insert_with(|| ParamValue::F32(node.q));
                         }
-                    }
-                }
-            }
-        }
-
-        // ── Tilt (offset migration skipped — off_max varies per curve type) ──
-        if let Some(meta_json) = state.fields.get("slot_curve_meta") {
-            if let Ok(meta) = serde_json::from_str::<[[(f32, f32); NUM_CURVES]; NUM_SLOTS]>(meta_json) {
-                for s in 0..NUM_SLOTS {
-                    for c in 0..NUM_CURVES {
-                        let (tilt_phys, _offset_phys) = meta[s][c];
-                        let tilt_norm = (tilt_phys / 2.0).clamp(-1.0, 1.0);
-                        state.params.entry(tilt_id(s, c))
-                            .or_insert_with(|| ParamValue::F32(tilt_norm));
                     }
                 }
             }

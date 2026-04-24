@@ -128,19 +128,35 @@ pub const SC_METER_COLOR_DIM: Color32 = Color32::from_rgb(0x55, 0x48, 0x10);
 
 // ─── Stroke widths & geometry ─────────────────────────────────────────────────
 
-pub const STROKE_THIN:   f32 = 1.0;
-pub const STROKE_BORDER: f32 = 1.0;
-pub const STROKE_CURVE:  f32 = 1.0;
-pub const NODE_RADIUS:   f32 = 5.0;
+pub const STROKE_HAIRLINE: f32 = 0.5;
+pub const STROKE_THIN:     f32 = 1.0;
+pub const STROKE_BORDER:   f32 = 1.0;
+pub const STROKE_CURVE:    f32 = 1.0;
+pub const STROKE_MEDIUM:   f32 = 1.5;
+pub const NODE_RADIUS:     f32 = 5.0;
 
 // ─── Font size base values (at 1× scale) ─────────────────────────────────────
 
 /// Grid axis labels (Hz / value markers).
-pub const FONT_SIZE_GRID:  f32 = 9.0;
+pub const FONT_SIZE_GRID:         f32 = 9.0;
 /// Cursor hover tooltip.
-pub const FONT_SIZE_HOVER: f32 = 10.0;
+pub const FONT_SIZE_HOVER:        f32 = 10.0;
+/// Compact button text (FFT/Scale choice buttons, slot-header labels).
+pub const FONT_SIZE_BUTTON:       f32 = 10.0;
 /// Widget labels (Tilt, Offset, Curv, etc.).
-pub const FONT_SIZE_LABEL: f32 = 9.0;
+pub const FONT_SIZE_LABEL:        f32 = 9.0;
+/// Primary button text (curve selector labels, slot header).
+pub const FONT_SIZE_VALUE:        f32 = 11.0;
+/// Secondary text (popup tertiary notes, disabled captions).
+pub const FONT_SIZE_TINY:         f32 = 8.0;
+/// FX matrix column header (top axis) labels.
+pub const FONT_SIZE_MATRIX_AXIS:  f32 = 7.5;
+/// FX matrix row-label text (left axis, slightly larger than column header).
+pub const FONT_SIZE_MATRIX_ROW:   f32 = 8.5;
+/// FX matrix cell text.
+pub const FONT_SIZE_MATRIX_CELL:  f32 = 8.0;
+/// FX matrix T/S virtual-row icon and self-send markers.
+pub const FONT_SIZE_MATRIX_VROW:  f32 = 7.0;
 
 // ─── Scaling helpers ──────────────────────────────────────────────────────────
 
