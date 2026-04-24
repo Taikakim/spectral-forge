@@ -14,6 +14,8 @@ pub struct GainModule {
     cum_sc_log:   Vec<f32>,
     sample_rate: f32,
     fft_size: usize,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe: crate::dsp::modules::ProbeSnapshot,
 }
 
 impl GainModule {
@@ -25,6 +27,8 @@ impl GainModule {
             cum_sc_log:   vec![0.0f32; MAX_NUM_BINS + 1],
             sample_rate: 44100.0,
             fft_size: 2048,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe: Default::default(),
         }
     }
 
@@ -59,12 +63,35 @@ impl SpectralModule for GainModule {
         _ctx: &ModuleContext,
     ) {
         let n = bins.len();
+        #[cfg(any(test, feature = "probe"))]
+        let probe_k = if n == 0 { 0 } else { n / 2 };
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_gain_db:      Option<f32> = None;
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_gain_pct:     Option<f32> = None;
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_peak_hold_ms: Option<f32> = None;
+
+        // PEAK HOLD probe is a pure function of curve 1 at probe_k — compute it
+        // here regardless of mode so Add/Subtract tests also populate it if ever
+        // needed, and Pull/Match tests see the same value the DSP uses below.
+        #[cfg(any(test, feature = "probe"))]
+        if n > 0 {
+            let hold_curve = curves.get(1).and_then(|c| c.get(probe_k)).copied().unwrap_or(1.0);
+            probe_peak_hold_ms = Some(super::peak_hold_curve_to_ms(hold_curve));
+        }
+
         match self.mode {
             GainMode::Add => {
                 for k in 0..n {
                     let g  = curves.get(0).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
                     let sc = sidechain.and_then(|s| s.get(k)).copied().unwrap_or(0.0).max(0.0);
                     bins[k] *= g + sc;
+
+                    #[cfg(any(test, feature = "probe"))]
+                    if k == probe_k {
+                        probe_gain_db = Some(20.0 * g.max(1e-6).log10());
+                    }
                 }
             }
             GainMode::Subtract => {
@@ -72,6 +99,11 @@ impl SpectralModule for GainModule {
                     let g  = curves.get(0).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
                     let sc = sidechain.and_then(|s| s.get(k)).copied().unwrap_or(0.0).max(0.0);
                     bins[k] *= (g - sc).max(0.0);
+
+                    #[cfg(any(test, feature = "probe"))]
+                    if k == probe_k {
+                        probe_gain_db = Some(20.0 * g.max(1e-6).log10());
+                    }
                 }
             }
             GainMode::Pull => {
@@ -96,6 +128,11 @@ impl SpectralModule for GainModule {
                     if cur_mag > 1e-10 {
                         let target_mag = cur_mag * g + sc_eff * (1.0 - g);
                         bins[k] *= target_mag / cur_mag;
+                    }
+
+                    #[cfg(any(test, feature = "probe"))]
+                    if k == probe_k {
+                        probe_gain_pct = Some(g * 100.0);
                     }
                 }
             }
@@ -159,9 +196,25 @@ impl SpectralModule for GainModule {
                     let matched_mul = (smooth_sc - smooth_main).exp().clamp(min_lin, max_lin);
                     let mul = g + (1.0 - g) * matched_mul;
                     bins[k] *= mul;
+
+                    #[cfg(any(test, feature = "probe"))]
+                    if k == probe_k {
+                        probe_gain_pct = Some(g * 100.0);
+                    }
                 }
             }
         }
+
+        #[cfg(any(test, feature = "probe"))]
+        {
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                gain_db:      probe_gain_db,
+                gain_pct:     probe_gain_pct,
+                peak_hold_ms: probe_peak_hold_ms,
+                ..Default::default()
+            };
+        }
+
         suppression_out.fill(0.0);
     }
 
@@ -169,4 +222,7 @@ impl SpectralModule for GainModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Gain }
     fn num_curves(&self) -> usize { 2 }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }

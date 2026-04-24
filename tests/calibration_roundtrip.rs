@@ -345,6 +345,107 @@ fn contrast_amount_offset_extremes() {
         "contrast ratio lo: want {}, got {}", cfg.y_min, probe.ratio.unwrap());
 }
 
+// ── Gain ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn gain_add_offset_extremes() {
+    let mut m = create_module(ModuleType::Gain, SAMPLE_RATE, FFT_SIZE);
+    m.set_gain_mode(GainMode::Add);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    let cfg = curve_display_config(ModuleType::Gain, 0, GainMode::Add);
+
+    let g_hi = (cfg.offset_fn)(1.0, 1.0);
+    let probe = run_case(&mut m, nc, 0, g_hi);
+    assert!((probe.gain_db.unwrap() - cfg.y_max).abs() < 0.5,
+        "gain Add hi: want {}, got {}", cfg.y_max, probe.gain_db.unwrap());
+
+    let g_lo = (cfg.offset_fn)(1.0, -1.0);
+    let probe = run_case(&mut m, nc, 0, g_lo);
+    assert!((probe.gain_db.unwrap() - cfg.y_min).abs() < 0.5,
+        "gain Add lo: want {}, got {}", cfg.y_min, probe.gain_db.unwrap());
+}
+
+#[test]
+fn gain_subtract_offset_extremes() {
+    let mut m = create_module(ModuleType::Gain, SAMPLE_RATE, FFT_SIZE);
+    m.set_gain_mode(GainMode::Subtract);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    // Subtract uses the same curve 0 config as Add (dB range).
+    let cfg = curve_display_config(ModuleType::Gain, 0, GainMode::Subtract);
+
+    let g_hi = (cfg.offset_fn)(1.0, 1.0);
+    let probe = run_case(&mut m, nc, 0, g_hi);
+    assert!((probe.gain_db.unwrap() - cfg.y_max).abs() < 0.5,
+        "gain Subtract hi: want {}, got {}", cfg.y_max, probe.gain_db.unwrap());
+
+    let g_lo = (cfg.offset_fn)(1.0, -1.0);
+    let probe = run_case(&mut m, nc, 0, g_lo);
+    assert!((probe.gain_db.unwrap() - cfg.y_min).abs() < 0.5,
+        "gain Subtract lo: want {}, got {}", cfg.y_min, probe.gain_db.unwrap());
+}
+
+#[test]
+fn gain_pull_offset_extremes() {
+    let mut m = create_module(ModuleType::Gain, SAMPLE_RATE, FFT_SIZE);
+    m.set_gain_mode(GainMode::Pull);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    let cfg = curve_display_config(ModuleType::Gain, 0, GainMode::Pull);
+
+    // off_gain_pct(1, +1) returns g unchanged (1.0) → 100% = y_natural = y_max.
+    let g_hi = (cfg.offset_fn)(1.0, 1.0);
+    let probe = run_case(&mut m, nc, 0, g_hi);
+    assert!((probe.gain_pct.unwrap() - cfg.y_max).abs() < 1.0,
+        "gain Pull hi: want {}, got {}", cfg.y_max, probe.gain_pct.unwrap());
+
+    let g_lo = (cfg.offset_fn)(1.0, -1.0);
+    let probe = run_case(&mut m, nc, 0, g_lo);
+    assert!((probe.gain_pct.unwrap() - cfg.y_min).abs() < 1.0,
+        "gain Pull lo: want {}, got {}", cfg.y_min, probe.gain_pct.unwrap());
+}
+
+#[test]
+fn gain_match_offset_extremes() {
+    let mut m = create_module(ModuleType::Gain, SAMPLE_RATE, FFT_SIZE);
+    m.set_gain_mode(GainMode::Match);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    let cfg = curve_display_config(ModuleType::Gain, 0, GainMode::Match);
+
+    let g_hi = (cfg.offset_fn)(1.0, 1.0);
+    let probe = run_case(&mut m, nc, 0, g_hi);
+    assert!((probe.gain_pct.unwrap() - cfg.y_max).abs() < 1.0,
+        "gain Match hi: want {}, got {}", cfg.y_max, probe.gain_pct.unwrap());
+
+    let g_lo = (cfg.offset_fn)(1.0, -1.0);
+    let probe = run_case(&mut m, nc, 0, g_lo);
+    assert!((probe.gain_pct.unwrap() - cfg.y_min).abs() < 1.0,
+        "gain Match lo: want {}, got {}", cfg.y_min, probe.gain_pct.unwrap());
+}
+
+#[test]
+fn gain_peak_hold_offset_extremes() {
+    let mut m = create_module(ModuleType::Gain, SAMPLE_RATE, FFT_SIZE);
+    // Mode doesn't affect curve 1 (PEAK HOLD) config; use Pull so the DSP path
+    // consumes the curve too, though the probe records it regardless of mode.
+    m.set_gain_mode(GainMode::Pull);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    let cfg = curve_display_config(ModuleType::Gain, 1, GainMode::Pull);
+
+    let g_hi = (cfg.offset_fn)(1.0, 1.0);
+    let probe = run_case(&mut m, nc, 1, g_hi);
+    assert!((probe.peak_hold_ms.unwrap() - cfg.y_max).abs() < 1.0,
+        "gain peak hold hi: want {}, got {}", cfg.y_max, probe.peak_hold_ms.unwrap());
+
+    let g_lo = (cfg.offset_fn)(1.0, -1.0);
+    let probe = run_case(&mut m, nc, 1, g_lo);
+    assert!((probe.peak_hold_ms.unwrap() - cfg.y_min).abs() < 1.0,
+        "gain peak hold lo: want {}, got {}", cfg.y_min, probe.peak_hold_ms.unwrap());
+}
+
 /// T3b: GUI display-mapping contract — the scalar functions in
 /// `editor::curve` that convert curve gains → physical units and
 /// physical units ↔ pixel y must agree with the DSP and with the
