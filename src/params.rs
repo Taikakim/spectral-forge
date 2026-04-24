@@ -143,9 +143,6 @@ pub struct SpectralForgeParams {
     /// Per-slot per-curve nodes. [slot 0..=8][curve 0..6][node 0..5].
     pub slot_curve_nodes: Arc<Mutex<[[[CurveNode; NUM_NODES]; 7]; 9]>>,
 
-    /// Per-slot per-curve tilt and offset. [slot][curve] = (tilt, offset). Default: (0.0, 0.0).
-    pub slot_curve_meta: Arc<Mutex<[[(f32, f32); 7]; 9]>>,
-
     /// Which curve within the editing slot is selected (0..num_curves for that type).
     pub editing_curve: Arc<Mutex<u8>>,
 
@@ -173,7 +170,7 @@ pub struct SpectralForgeParams {
     pub ui_scale: Arc<Mutex<f32>>,          // GUI scale factor: 1.0 / 1.25 / 1.5 / 1.75 / 2.0
 
     /// Migration flag: set to `true` after the one-shot copy from legacy persist fields
-    /// (slot_curve_nodes, slot_curve_meta, route_matrix) into the generated FloatParam fields.
+    /// (slot_curve_nodes, route_matrix) into the generated FloatParam fields.
     /// `pub` so tests can inspect it directly.
     pub migrated_v1: Arc<std::sync::atomic::AtomicBool>,
 
@@ -304,7 +301,6 @@ impl Default for SpectralForgeParams {
                     std::array::from_fn(|c| crate::editor::curve::default_nodes_for_curve(c))
                 })
             )),
-            slot_curve_meta: Arc::new(Mutex::new([[(0.0f32, 0.0f32); 7]; 9])),
             editing_curve:   Arc::new(Mutex::new(0u8)),
             route_matrix:    Arc::new(Mutex::new(RouteMatrix::default())),
 
@@ -498,6 +494,16 @@ impl SpectralForgeParams {
         Some(curv_dispatch!(self, slot, curve))
     }
 
+    /// Snapshot the three transform params for one slot/curve. GUI-side convenience.
+    /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
+    pub fn curve_transform(&self, slot: usize, curve: usize) -> crate::dsp::modules::CurveTransform {
+        crate::dsp::modules::CurveTransform {
+            offset:    self.offset_param(slot, curve).map_or(0.0, |p| p.value()),
+            tilt:      self.tilt_param(slot, curve).map_or(0.0, |p| p.value()),
+            curvature: self.curvature_param(slot, curve).map_or(0.0, |p| p.value()),
+        }
+    }
+
     /// Returns a reference to the matrix-cell FloatParam for the given row/col.
     /// Returns `None` if any index is out of range.
     pub fn matrix_cell(&self, row: usize, col: usize) -> Option<&FloatParam> {
@@ -540,24 +546,6 @@ impl SpectralForgeParams {
                             y_p.smoothed.reset(node.y);
                             q_p.smoothed.reset(node.q);
                         }
-                    }
-                }
-            }
-        }
-
-        // ── Tilt: slot_curve_meta stores physical (÷2 = normalized) ─────────
-        // Physical tilt is stored as normalized × 2.0 (TILT_MAX). We reverse to get the
-        // normalized value that the FloatParam accepts.
-        // Offset migration is skipped: off_max varies per curve type and is not available
-        // in params.rs without importing editor code. Offsets default to 0.0 on first load.
-        {
-            let legacy_meta = self.slot_curve_meta.lock();
-            for s in 0..crate::param_ids::NUM_SLOTS {
-                for c in 0..crate::param_ids::NUM_CURVES {
-                    let (tilt_phys, _offset_phys) = legacy_meta[s][c];
-                    if let Some(tilt_p) = self.tilt_param(s, c) {
-                        let tilt_norm = (tilt_phys / 2.0).clamp(-1.0, 1.0);
-                        tilt_p.smoothed.reset(tilt_norm);
                     }
                 }
             }
@@ -726,7 +714,6 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_targets",       slot_targets);
         persist_out!("slot_gain_mode",     slot_gain_mode);
         persist_out!("slot_curve_nodes",   slot_curve_nodes);
-        persist_out!("slot_curve_meta",    slot_curve_meta);
         persist_out!("editing_curve",      editing_curve);
         persist_out!("route_matrix",       route_matrix);
         persist_out!("fx_module_names",    fx_module_names);
@@ -775,7 +762,6 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_targets"        => persist_in!("slot_targets",       slot_targets,       data),
                 "slot_gain_mode"      => persist_in!("slot_gain_mode",     slot_gain_mode,     data),
                 "slot_curve_nodes"    => persist_in!("slot_curve_nodes",   slot_curve_nodes,   data),
-                "slot_curve_meta"     => persist_in!("slot_curve_meta",    slot_curve_meta,    data),
                 "editing_curve"       => persist_in!("editing_curve",      editing_curve,      data),
                 "route_matrix"        => persist_in!("route_matrix",       route_matrix,       data),
                 "fx_module_names"     => persist_in!("fx_module_names",    fx_module_names,    data),

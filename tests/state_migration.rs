@@ -87,26 +87,9 @@ fn legacy_matrix_migrates_smoother() {
     );
 }
 
-#[test]
-fn legacy_tilt_migrates_smoother() {
-    let params = SpectralForgeParams::default();
-
-    // Write physical tilt = 2.0 (max) into slot 1, curve 0.
-    // Expected normalized = 2.0 / 2.0 = 1.0.
-    {
-        let mut meta = params.slot_curve_meta.lock();
-        meta[1][0] = (2.0_f32, 0.0_f32);
-    }
-
-    params.migrate_legacy_if_needed();
-
-    let tilt_p = params.tilt_param(1, 0).unwrap();
-    let v = tilt_p.smoothed.next();
-    assert!(
-        (v - 1.0).abs() < 1e-6,
-        "tilt smoother should be 1.0 (normalized) after migration of phys=2.0, got {v}"
-    );
-}
+// NOTE: legacy_tilt_migrates_smoother was removed — slot_curve_meta was deleted in Task 2.
+// Tilt/offset/curvature are now stored only in the generated FloatParams; no migration path
+// from a legacy persist field is needed. Preset back-compat is waived for early dev.
 
 // ── filter_state tests ───────────────────────────────────────────────────────
 //

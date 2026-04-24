@@ -10,7 +10,6 @@ pub struct PluginState {
     pub slot_targets:      [FxChannelTarget; 9],
     pub slot_gain_mode:    [GainMode; 9],
     pub slot_curve_nodes:  [[[CurveNode; NUM_NODES]; 7]; 9],
-    pub slot_curve_meta:   [[(f32, f32); 7]; 9],
     pub route:             RouteMatrix,
 }
 
@@ -36,10 +35,6 @@ fn neutral_curves() -> [[CurveNode; NUM_NODES]; 7] {
     [neutral_nodes(); 7]
 }
 
-fn no_meta() -> [(f32, f32); 7] {
-    [(0.0, 0.0); 7]
-}
-
 /// Default preset: Dynamics → Dynamics → Gain → Master
 pub fn preset_default() -> PluginState {
     let mut types = [ModuleType::Empty; 9];
@@ -61,7 +56,6 @@ pub fn preset_default() -> PluginState {
         slot_targets:  [FxChannelTarget::All; 9],
         slot_gain_mode: [GainMode::Add; 9],
         slot_curve_nodes: [neutral_curves(); 9],
-        slot_curve_meta:  [no_meta(); 9],
         route: RouteMatrix::default(),
     }
 }

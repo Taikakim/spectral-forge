@@ -220,7 +220,16 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
     }
 }
 
-// ── apply_curve_transform ──────────────────────────────────────────────────
+// ── CurveTransform and apply_curve_transform ──────────────────────────────
+
+/// Per-curve display+DSP transform (offset, tilt, curvature).
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CurveTransform {
+    pub offset:    f32,  // [-1, 1] normalized
+    pub tilt:      f32,  // [-1, 1] normalized (multiply by TILT_MAX for gain-space)
+    pub curvature: f32,  // [0, 1]
+}
 
 /// Maximum physical tilt in dB/octave units (normalized tilt × TILT_MAX = physical tilt).
 /// Shared between the audio thread (pipeline.rs) and the GUI (editor_ui.rs).

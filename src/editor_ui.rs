@@ -735,9 +735,6 @@ pub fn create_editor(
                         if editing_curve < spec.num_curves {
                             ui.add_space(8.0);
                             let crv_col = spec.color_lit;
-                            use crate::dsp::modules::TILT_MAX;
-                            let off_max = crv::curve_offset_max(crv::display_curve_idx(editing_type, editing_curve, editing_gain_mode));
-
                             let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
                             if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {
                                 let mut off_norm = off_p.value();
@@ -752,9 +749,6 @@ pub fn create_editor(
                                     if resp.changed() {
                                         let clamped = off_norm.clamp(-1.0, 1.0);
                                         setter.set_parameter(off_p, clamped);
-                                        if let Some(mut meta) = params.slot_curve_meta.try_lock() {
-                                            meta[editing_slot][editing_curve].1 = clamped * off_max;
-                                        }
                                     }
                                     if resp.drag_stopped() { setter.end_set_parameter(off_p); }
                                     crate::editor::delayed_tooltip(ui, &resp,
@@ -776,9 +770,6 @@ pub fn create_editor(
                                     if resp.changed() {
                                         let clamped = tilt_norm.clamp(-1.0, 1.0);
                                         setter.set_parameter(tilt_p, clamped);
-                                        if let Some(mut meta) = params.slot_curve_meta.try_lock() {
-                                            meta[editing_slot][editing_curve].0 = clamped * TILT_MAX;
-                                        }
                                     }
                                     if resp.drag_stopped() { setter.end_set_parameter(tilt_p); }
                                     crate::editor::delayed_tooltip(ui, &resp,
