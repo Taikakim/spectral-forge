@@ -58,6 +58,11 @@ pub fn create_editor(
             let mut preset_state: crate::editor::PresetMenuState =
                 ctx.data(|d| d.get_temp(preset_key)).unwrap_or_default();
 
+            // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+            // Frame-scoped UI scale: read ctx.pixels_per_point() once per frame; all sizes,
+            // strokes, and font points below flow through th::scaled / th::scaled_stroke.
+            let scale = ctx.pixels_per_point();
+
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(th::BG))
                 .show(ctx, |ui| {
@@ -114,10 +119,10 @@ pub fn create_editor(
                                  spec.color_dim)
                             };
                             let btn = egui::Button::new(
-                                egui::RichText::new(label).color(text_color).size(11.0),
+                                egui::RichText::new(label).color(text_color).size(th::scaled(th::FONT_SIZE_VALUE, scale)),
                             )
                             .fill(fill)
-                            .stroke(egui::Stroke::new(th::STROKE_BORDER, stroke_color));
+                            .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), stroke_color));
                             let sense = if gain_disabled {
                                 egui::Sense::hover()
                             } else {
@@ -135,7 +140,7 @@ pub fn create_editor(
                             ui.add_space(4.0);
                         }
 
-                        ui.label(egui::RichText::new("Floor").color(th::LABEL_DIM).size(9.0));
+                        ui.label(egui::RichText::new("Floor").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         {
                             let mut v = *params.graph_db_min.lock();
                             if ui.add(
@@ -147,7 +152,7 @@ pub fn create_editor(
                             }
                         }
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("Ceil").color(th::LABEL_DIM).size(9.0));
+                        ui.label(egui::RichText::new("Ceil").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         {
                             let mut v = *params.graph_db_max.lock();
                             if ui.add(
@@ -159,7 +164,7 @@ pub fn create_editor(
                             }
                         }
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("Falloff").color(th::LABEL_DIM).size(9.0));
+                        ui.label(egui::RichText::new("Falloff").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         {
                             let mut v = *params.peak_falloff_ms.lock();
                             if ui.add(
@@ -187,7 +192,7 @@ pub fn create_editor(
                     // ── Second bar: FFT size selector ─────────────────────────────
                     ui.horizontal(|ui| {
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("FFT").color(th::LABEL_DIM).size(9.0));
+                        ui.label(egui::RichText::new("FFT").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         ui.add_space(2.0);
 
                         use crate::params::FftSizeChoice;
@@ -208,10 +213,10 @@ pub fn create_editor(
                                 (th::BG, th::LABEL_DIM)
                             };
                             let btn = egui::Button::new(
-                                egui::RichText::new(label).color(text_color).size(10.0),
+                                egui::RichText::new(label).color(text_color).size(th::scaled(th::FONT_SIZE_BUTTON, scale)),
                             )
                             .fill(fill)
-                            .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                            .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                             if ui.add(btn).clicked() {
                                 setter.begin_set_parameter(&params.fft_size);
                                 setter.set_parameter(&params.fft_size, choice);
@@ -220,7 +225,7 @@ pub fn create_editor(
                         }
 
                         ui.add_space(12.0);
-                        ui.label(egui::RichText::new("Scale").color(th::LABEL_DIM).size(9.0));
+                        ui.label(egui::RichText::new("Scale").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         ui.add_space(2.0);
 
                         const SCALE_STEPS: &[(f32, &str)] = &[
@@ -231,20 +236,20 @@ pub fn create_editor(
                             (2.0,  "2×"),
                         ];
                         let cur_scale = *params.ui_scale.lock();
-                        for &(scale, label) in SCALE_STEPS {
-                            let is_active = (cur_scale - scale).abs() < 0.01;
+                        for &(step_scale, label) in SCALE_STEPS {
+                            let is_active = (cur_scale - step_scale).abs() < 0.01;
                             let (fill, text_color) = if is_active {
                                 (th::BORDER, th::BG)
                             } else {
                                 (th::BG, th::LABEL_DIM)
                             };
                             let btn = egui::Button::new(
-                                egui::RichText::new(label).color(text_color).size(10.0),
+                                egui::RichText::new(label).color(text_color).size(th::scaled(th::FONT_SIZE_BUTTON, scale)),
                             )
                             .fill(fill)
-                            .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                            .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                             if ui.add(btn).clicked() {
-                                *params.ui_scale.lock() = scale;
+                                *params.ui_scale.lock() = step_scale;
                             }
                         }
                     });
@@ -254,7 +259,7 @@ pub fn create_editor(
                         let r = ui.available_rect_before_wrap();
                         ui.painter().line_segment(
                             [r.left_top(), r.right_top()],
-                            egui::Stroke::new(th::STROKE_BORDER, th::BORDER),
+                            egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER),
                         );
                     }
 
@@ -533,7 +538,7 @@ pub fn create_editor(
                                 .order(egui::Order::Foreground)
                                 .show(ui.ctx(), |ui| {
                                     let te = egui::TextEdit::singleline(&mut name_str)
-                                        .font(egui::FontId::proportional(10.0))
+                                        .font(egui::FontId::proportional(th::scaled(th::FONT_SIZE_BUTTON, scale)))
                                         .desired_width(120.0)
                                         .text_color(th::LABEL_DIM);
                                     let resp = ui.add(te);
@@ -569,7 +574,7 @@ pub fn create_editor(
                                 header_rect.left_top(),
                                 egui::Align2::LEFT_TOP,
                                 &header,
-                                egui::FontId::proportional(10.0),
+                                egui::FontId::proportional(th::scaled(th::FONT_SIZE_BUTTON, scale)),
                                 th::LABEL_DIM,
                             );
                             let header_resp = ui.interact(
@@ -600,7 +605,7 @@ pub fn create_editor(
                         let mut sc_builder = egui::UiBuilder::new();
                         if !supports_sc { sc_builder = sc_builder.invisible(); }
                         ui.scope_builder(sc_builder, |ui| {
-                            sc_strip_ui(ui, &params, edit_slot);
+                            sc_strip_ui(ui, &params, edit_slot, scale);
                         });
                         ui.separator();
                     }
@@ -618,7 +623,7 @@ pub fn create_editor(
                         ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
-                                ui.label(egui::RichText::new("Mode").color(th::LABEL_DIM).size(9.0));
+                                ui.label(egui::RichText::new("Mode").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                                 ui.add_space(2.0);
 
                                 let cur_mode = params.slot_gain_mode.lock()[edit_slot];
@@ -633,10 +638,10 @@ pub fn create_editor(
                                     let fill     = if is_active { th::BORDER } else { th::BG };
                                     let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
                                     let btn = egui::Button::new(
-                                        egui::RichText::new(label).color(text_col).size(9.0)
+                                        egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
                                     )
                                     .fill(fill)
-                                    .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                                    .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                     let resp = ui.add(btn);
                                     if is_gain && resp.clicked() {
                                         params.slot_gain_mode.lock()[edit_slot] = mode;
@@ -654,7 +659,7 @@ pub fn create_editor(
                             $ui.vertical(|ui| {
                                 ui.add(ParamSlider::for_param($param, setter).with_width(36.0));
                                 ui.label(
-                                    egui::RichText::new($label).color(th::LABEL_DIM).size(9.0),
+                                    egui::RichText::new($label).color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)),
                                 );
                             });
                         }};
@@ -667,10 +672,10 @@ pub fn create_editor(
                             (th::BG, th::LABEL_DIM)
                         };
                         let btn = egui::Button::new(
-                            egui::RichText::new(label).color(text_color).size(9.0),
+                            egui::RichText::new(label).color(text_color).size(th::scaled(th::FONT_SIZE_LABEL, scale)),
                         )
                         .fill(fill)
-                        .stroke(egui::Stroke::new(th::STROKE_BORDER, th::BORDER));
+                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                         ui.add(btn).clicked()
                     };
 
@@ -711,7 +716,7 @@ pub fn create_editor(
                         // Dynamics group box: only when the active slot is a Dynamics module
                         if editing_type == crate::dsp::modules::ModuleType::Dynamics {
                             let dyn_frame = egui::Frame::new()
-                                .stroke(egui::Stroke::new(th::STROKE_BORDER, th::GRID_LINE))
+                                .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::GRID_LINE))
                                 .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 4 });
                             let dyn_resp = dyn_frame.show(ui, |ui| {
                                 ui.horizontal(|ui| {
@@ -724,7 +729,7 @@ pub fn create_editor(
                             let lbl_pos = dyn_resp.response.rect.left_top() + egui::vec2(4.0, 0.0);
                             ui.painter().text(
                                 lbl_pos, egui::Align2::LEFT_TOP, "Dynamics",
-                                egui::FontId::proportional(8.0), th::LABEL_DIM,
+                                egui::FontId::proportional(th::scaled(th::FONT_SIZE_TINY, scale)), th::LABEL_DIM,
                             );
                         }
 
@@ -774,7 +779,7 @@ pub fn create_editor(
                                     if resp.drag_stopped() { setter.end_set_parameter(off_p); }
                                     crate::editor::delayed_tooltip(ui, &resp,
                                         format!("Slot {} · {} · Offset", editing_slot + 1, curve_label));
-                                    ui.label(egui::RichText::new("Offset").color(crv_col).size(9.0));
+                                    ui.label(egui::RichText::new("Offset").color(crv_col).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                                 });
                             }
 
@@ -795,7 +800,7 @@ pub fn create_editor(
                                     if resp.drag_stopped() { setter.end_set_parameter(tilt_p); }
                                     crate::editor::delayed_tooltip(ui, &resp,
                                         format!("Slot {} · {} · Tilt", editing_slot + 1, curve_label));
-                                    ui.label(egui::RichText::new("Tilt").color(crv_col).size(9.0));
+                                    ui.label(egui::RichText::new("Tilt").color(crv_col).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                                 });
                             }
 
@@ -813,7 +818,7 @@ pub fn create_editor(
                                     if resp.drag_stopped() { setter.end_set_parameter(curv_p); }
                                     crate::editor::delayed_tooltip(ui, &resp,
                                         format!("Slot {} · {} · Curvature", editing_slot + 1, curve_label));
-                                    ui.label(egui::RichText::new("Curv").color(crv_col).size(9.0));
+                                    ui.label(egui::RichText::new("Curv").color(crv_col).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                                 });
                             }
                         }
@@ -826,7 +831,7 @@ pub fn create_editor(
                     ui.label(
                         egui::RichText::new("ROUTING MATRIX")
                             .color(th::LABEL_DIM)
-                            .size(9.0),
+                            .size(th::scaled(th::FONT_SIZE_LABEL, scale)),
                     );
                     ui.add_space(2.0);
 
@@ -849,6 +854,7 @@ pub fn create_editor(
                                     &names_snap,
                                     route_matrix_ref,
                                     edit_slot,
+                                    scale,
                                 )
                             })
                             .inner
@@ -861,7 +867,7 @@ pub fn create_editor(
                         crate::editor::module_popup::open_popup(ui, slot, pos);
                     }
                     // Render popup (egui Area — appears above matrix)
-                    let _ = crate::editor::module_popup::show_popup(ui, &params);
+                    let _ = crate::editor::module_popup::show_popup(ui, &params, scale);
 
                     // Persist preset menu state across frames via egui temp storage.
                     ui.ctx().data_mut(|d| d.insert_temp(preset_key, preset_state.clone()));
@@ -877,11 +883,12 @@ fn sc_strip_ui(
     ui: &mut egui::Ui,
     params: &SpectralForgeParams,
     slot_idx: usize,
+    scale: f32,
 ) {
     use crate::params::ScChannel;
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("SC").color(th::LABEL_DIM).size(9.0));
+        ui.label(egui::RichText::new("SC").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
         // SC gain knob
         {
             let cur = params.slot_sc_gain_db.lock()[slot_idx];

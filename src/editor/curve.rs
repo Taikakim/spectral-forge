@@ -659,6 +659,8 @@ pub fn paint_peak_hold_envelope_overlay(
     db_max: f32,
 ) {
     if envelope.is_empty() || fft_size == 0 { return; }
+    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+    let scale = painter.ctx().pixels_per_point();
     // Derive a darker tone from curve_color (r/3, g/3, b/3, opaque).
     let dim = Color32::from_rgb(
         curve_color.r() / 3,
@@ -669,6 +671,7 @@ pub fn paint_peak_hold_envelope_overlay(
     let max_hz = (sample_rate / 2.0).max(20_001.0);
     let norm_factor = 4.0 / fft_size as f32;
     let range = (db_max - db_min).max(1.0);
+    let overlay_stroke = Stroke::new(th::scaled_stroke(th::STROKE_THIN, scale), dim);
     let mut prev: Option<Pos2> = None;
     for k in 1..n {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
@@ -679,7 +682,7 @@ pub fn paint_peak_hold_envelope_overlay(
         let norm = ((db - db_min) / range).clamp(0.0, 1.0);
         let y    = rect.max.y - norm * rect.height();
         if let Some(p) = prev {
-            painter.line_segment([p, Pos2::new(x, y)], Stroke::new(1.0, dim));
+            painter.line_segment([p, Pos2::new(x, y)], overlay_stroke);
         }
         prev = Some(Pos2::new(x, y));
     }

@@ -36,9 +36,13 @@ const ASSIGNABLE: &[ModuleType] = &[
 
 /// Render the popup if open. Call every frame from the main UI closure.
 /// Returns true if the popup consumed a click.
+///
+/// UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
+/// `scale` is the frame-scoped UI scale factor; font sizes flow through `th::scaled`.
 pub fn show_popup(
     ui:     &mut Ui,
     params: &SpectralForgeParams,
+    scale:  f32,
 ) -> bool {
     let key = ui.id().with("module_popup");
     let state: PopupState = ui.data(|d| d.get_temp(key).unwrap_or_default());
@@ -59,7 +63,7 @@ pub fn show_popup(
                 ui.set_min_width(140.0);
                 ui.label(
                     egui::RichText::new("Assign module")
-                        .color(th::LABEL_DIM).size(th::FONT_SIZE_LABEL)
+                        .color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale))
                 );
                 ui.separator();
 
@@ -87,7 +91,7 @@ pub fn show_popup(
                     if ts_full {
                         ui.label(
                             egui::RichText::new("(max 2 active)")
-                                .color(th::LABEL_DIM).size(8.0)
+                                .color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_TINY, scale))
                         );
                     }
                 }
@@ -102,7 +106,7 @@ pub fn show_popup(
                 ui.separator();
                 ui.label(
                     egui::RichText::new("DSP change takes effect\non host restart.")
-                        .color(th::LABEL_DIM).size(8.0)
+                        .color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_TINY, scale))
                 );
             });
         });
