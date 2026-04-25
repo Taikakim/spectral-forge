@@ -1,3 +1,5 @@
+> **Status (2026-04-24): SUPERSEDED.** This bridge plan (serialised Dynamics → Freeze → PhaseSmear via bool flags) was skipped in favour of the full FxMatrix. `EffectMode`/`DynamicsMode`/`freeze_enabled`/`phase_enabled` as described here do not exist in the codebase. Do not follow. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Serial FX Chain Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

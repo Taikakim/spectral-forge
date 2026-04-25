@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED.** Not yet implemented. Source of truth: [../STATUS.md](../STATUS.md).
+
 # Matrix Amp Nodes — Design Spec
 
 **Status:** Planned  

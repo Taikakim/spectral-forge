@@ -2,6 +2,18 @@
 
 This document is for AI assistants (Claude, etc.) working on this codebase.
 
+## Planning docs — CHECK STATUS BEFORE FOLLOWING ANY PLAN
+
+`docs/superpowers/` holds historical and current design specs and implementation plans.
+**Several are SUPERSEDED or DEFERRED** and must not be followed as written. Before relying
+on any file under `docs/superpowers/plans/` or `docs/superpowers/specs/`, consult
+[`docs/superpowers/STATUS.md`](docs/superpowers/STATUS.md) for its current status. Every
+individual plan/spec also carries a status banner at the top; if the banner and the STATUS
+index disagree, the STATUS index wins.
+
+Rule of thumb: **the code is the source of truth for anything marked IMPLEMENTED.** Plans
+are kept only for history.
+
 ## UI Parameter Specification — READ BEFORE TOUCHING DISPLAY CODE
 
 **`docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md` is the authoritative source

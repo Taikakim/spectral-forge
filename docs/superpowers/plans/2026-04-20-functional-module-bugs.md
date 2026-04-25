@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** Contrast / T/S Split / M/S Split / Freeze / silent-master fixes all merged. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Functional Module Bugs — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

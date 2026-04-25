@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** Authoritative for slot/matrix/module architecture (slots, FxMatrix, RouteMatrix, SpectralModule trait). Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Modular Processing Architecture — Design Spec
 
 **Date:** 2026-04-19  

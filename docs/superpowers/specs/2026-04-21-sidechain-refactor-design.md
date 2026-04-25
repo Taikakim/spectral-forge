@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Sidechain Refactor — Design
 
 **Date:** 2026-04-21

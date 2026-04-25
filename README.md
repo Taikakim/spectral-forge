@@ -6,6 +6,8 @@ Patent-safe design — does not use the Hilbert/convolution approach from oeksou
 
 The dynamics section is functional. The modular multi-fx routing system is under active development — expect things to be unfinished or experimental on the main branch. If you just want to use this, stick to the releases.
 
+Contributors and AI assistants: the design specs and implementation plans under `docs/superpowers/` include historical, in-progress, and deferred work. Check [`docs/superpowers/STATUS.md`](docs/superpowers/STATUS.md) before following any of them — several are SUPERSEDED.
+
 ---
 
 <img width="898" height="454" alt="Screenshot_20260421_115617" src="https://github.com/user-attachments/assets/12213421-60ca-4178-ade3-b7bba5575f09" />

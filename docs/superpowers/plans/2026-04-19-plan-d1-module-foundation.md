@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** `SpectralModule` trait, `RouteMatrix`, `apply_curve_transform`, module stubs landed. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Plan D1 — Module Foundation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

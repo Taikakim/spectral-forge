@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** `CurveDisplayConfig`, curvature transform, shared hover routine, UI scaling all landed. Spec addenda §2.3/§3.4/§4.4 are pending from calibration-audit T10. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # UI Parameter Specification — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

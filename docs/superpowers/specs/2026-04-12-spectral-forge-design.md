@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED — historical.** Foundational design. Partially superseded by the modular architecture spec (2026-04-19). Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Design: Spectral Forge — Modular Spectral Compressor CLAP Plugin
 
 **Date:** 2026-04-12  

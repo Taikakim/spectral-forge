@@ -1,3 +1,5 @@
+> **Status (2026-04-24): SUPERSEDED.** Effects (Freeze, PhaseRand, Contrast) landed as a fixed post-compressor stage per this plan, then were re-homed as independent `SpectralModule` implementations inside the modular FxMatrix. Do not follow this plan as written. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Effects Engines Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IN PROGRESS.** T1 (probe type) + T2 (Dynamics probe + threshold clamp) + T3 (Freeze probe + formula/y_min fixes) are merged. T4–T11 remain. Source of truth: this plan (for remaining tasks) + [../STATUS.md](../STATUS.md).
+
 # Calibration Audit Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

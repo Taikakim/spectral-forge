@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED — still tracked as future work.** Source of truth: [../STATUS.md](../STATUS.md).
+
 # Deferred: Dynamic Automation Parameter Naming
 
 **Status:** Deferred — tracked as future work

@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** `FxMatrix` and slot-based routing landed as described. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Modular 8×8 Matrix Architecture Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

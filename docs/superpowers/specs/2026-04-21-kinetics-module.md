@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics infrastructure (DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+
 # Kinetics Module — Design Spec
 
 **Status:** Planned  

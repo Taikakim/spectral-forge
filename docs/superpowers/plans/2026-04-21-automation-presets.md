@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED.** Generated automatable params (~1341 via `build.rs`), 1000 ms tooltips, JSON preset system. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Automation, Tooltips & Preset System — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

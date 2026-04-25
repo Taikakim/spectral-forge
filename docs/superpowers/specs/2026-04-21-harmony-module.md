@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics + instantaneous-frequency infrastructure (both DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+
 # Harmony Module — Design Spec
 
 **Status:** Planned  

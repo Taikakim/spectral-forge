@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED and LIVE.** This is the authoritative source of truth for curve display, transforms, axis rendering, hover text, and UI scaling — it remains normative even though the matching plan is merged. Addenda §2.3 / §3.4 / §4.4 are pending from calibration-audit T10. See [../STATUS.md](../STATUS.md).
+
 # Spectral Forge — UI Parameter Specification
 
 > **This document is the authoritative source of truth for all UI parameter display behaviour.**

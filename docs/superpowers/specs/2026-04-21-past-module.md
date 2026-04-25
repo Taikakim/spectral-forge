@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics + history-buffer infrastructure (both DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+
 # Past Module — Design Spec
 
 **Status:** Planned  

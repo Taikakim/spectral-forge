@@ -1,10 +1,15 @@
 # Architecture Overview
 
-Spectral Forge is a Soothe-style **spectral compressor** CLAP/VST3 plugin for Linux,
-written in Rust.  It performs per-FFT-bin dynamic gain reduction across up to 9
-parallel processing slots, each driven by 7 drawn parameter curves.
+Spectral Forge is a **spectral dynamics and modular multi-fx** CLAP plugin for
+Linux and Windows, written in Rust. It performs per-FFT-bin processing across up
+to 9 slots (8 user slots + Master), each assignable to a typed `SpectralModule`
+(Dynamics, Freeze, PhaseSmear, Contrast, Gain, MidSide, T/S Split, Harmonic,
+Master). Slots are wired through a `RouteMatrix` and each is driven by up to 7
+drawn parameter curves.
 
-Update this document whenever a major subsystem changes.
+Update this document whenever a major subsystem changes. For the status of
+design specs and implementation plans under `docs/superpowers/`, see
+[`docs/superpowers/STATUS.md`](docs/superpowers/STATUS.md).
 
 ---
 

@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED — not started.** No `BinPhysics` code exists yet. This plan remains a valid design reference and gates the seven physics-driven module specs (Circuit / Life / Kinetics / Harmony / Modulate / Past / Rhythm). Do not treat as implemented. Source of truth: [../STATUS.md](../STATUS.md).
+
 # BinPhysics Infrastructure — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

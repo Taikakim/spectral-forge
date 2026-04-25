@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics infrastructure (also DEFERRED). Not yet implemented. Source of truth: [../STATUS.md](../STATUS.md).
+
 # Circuit Module — Design Spec
 
 **Status:** Planned  

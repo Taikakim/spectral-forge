@@ -1,3 +1,5 @@
+> **Status (2026-04-24): IMPLEMENTED — historical.** The foundational plan that bootstrapped the plugin. The single-engine `Pipeline` it describes has since been replaced by the modular `FxMatrix`; this plan is kept only for history. Source of truth: the code + [../STATUS.md](../STATUS.md).
+
 # Spectral Forge Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

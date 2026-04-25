@@ -1,3 +1,5 @@
+> **Status (2026-04-24): DEFERRED — not started.** Still a valid design reference. Blocks the Circuit / Life / Kinetics / Harmony / Modulate / Past / Rhythm module specs. Source of truth: [../STATUS.md](../STATUS.md).
+
 # BinPhysics Infrastructure — Design Spec
 
 **Status:** Planned  
