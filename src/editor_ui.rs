@@ -713,17 +713,23 @@ pub fn create_editor(
 
                     ui.add_space(2.0);
 
-                    // Row 2 — module-specific controls
-                    ui.horizontal(|ui| {
-                        let editing_slot  = *params.editing_slot.lock() as usize;
-                        let slot_types    = *params.slot_module_types.lock();
-                        let editing_type  = slot_types[editing_slot];
-                        let editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
-                        let editing_curve = (*params.editing_curve.lock() as usize)
-                            .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
+                    // Row 2a — module-specific controls (Dynamics group box).
+                    // Always rendered (invisibly when not Dynamics) so the
+                    // Offset/Tilt/Curv row below sits at the same vertical
+                    // position regardless of the active module type — same
+                    // pattern as the SC strip and GainMode selector above.
+                    let editing_slot  = *params.editing_slot.lock() as usize;
+                    let slot_types    = *params.slot_module_types.lock();
+                    let editing_type  = slot_types[editing_slot];
+                    let editing_gain_mode = params.slot_gain_mode.lock()[editing_slot];
+                    let editing_curve = (*params.editing_curve.lock() as usize)
+                        .min(crate::dsp::modules::module_spec(editing_type).num_curves.saturating_sub(1));
 
-                        // Dynamics group box: only when the active slot is a Dynamics module
-                        if editing_type == crate::dsp::modules::ModuleType::Dynamics {
+                    let is_dynamics = editing_type == crate::dsp::modules::ModuleType::Dynamics;
+                    let mut dyn_builder = egui::UiBuilder::new();
+                    if !is_dynamics { dyn_builder = dyn_builder.invisible(); }
+                    ui.scope_builder(dyn_builder, |ui| {
+                        ui.horizontal(|ui| {
                             let dyn_frame = egui::Frame::new()
                                 .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::GRID_LINE))
                                 .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 4 });
@@ -740,12 +746,17 @@ pub fn create_editor(
                                 lbl_pos, egui::Align2::LEFT_TOP, "Dynamics",
                                 egui::FontId::proportional(th::scaled(th::FONT_SIZE_TINY, scale)), th::LABEL_DIM,
                             );
-                        }
+                        });
+                    });
 
-                        // Per-curve tilt and offset — backed by FloatParams for host automation.
+                    ui.add_space(2.0);
+
+                    // Row 2b — per-curve Offset / Tilt / Curv. Single code path
+                    // for every module type, fixed vertical position.
+                    ui.horizontal(|ui| {
                         let spec = crate::dsp::modules::module_spec(editing_type);
                         if editing_curve < spec.num_curves {
-                            ui.add_space(8.0);
+                            ui.add_space(4.0);
                             let crv_col = spec.color_lit;
                             let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
                             if let Some(off_p) = params.offset_param(editing_slot, editing_curve) {
