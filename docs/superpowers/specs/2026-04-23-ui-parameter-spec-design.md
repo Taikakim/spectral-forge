@@ -105,6 +105,18 @@ let tilt_gain = 1.0 + tilt * shape * tilt_scale; // tilt_scale sets the ±45° m
 `slot_curve_meta` type changes from `[[(f32, f32); 7]; 9]` to `[[CurveTransform; 7]; 9]`.
 Migration: read old `(tilt, offset)` tuple → `CurveTransform { tilt, offset, curvature: 0.0 }`.
 
+### §2.3 Calibration contract
+
+Every module's internal DSP must accept the full range implied by its curve's
+declared `offset_fn` extremes. When the normalized `offset` is +1, the
+DSP-observed parameter must reach the config's `y_max`; when `offset` is -1,
+it must reach `y_min`. If a module clamps for DSP safety, the clamp values
+MUST match `y_min` and `y_max`. Any tighter clamp is a bug.
+
+This contract is verified end-to-end by `tests/calibration_roundtrip.rs`.
+New modules MUST add themselves to that test's case table when they are
+introduced.
+
 ---
 
 ## 3. Axes, grid lines, and hover text
@@ -139,6 +151,17 @@ Format: `"440 Hz  /  -18.3 dBFS"` (frequency left, physical value + unit label r
 
 **Rule:** No curve may implement its own hover text path. Every hover display goes through this
 function. The physical value is computed by `config.gain_to_phys(gain)` at the cursor's bin.
+
+### §3.4 Curve and node rendering at limits
+
+- Curve values outside `[y_min, y_max]` are rendered as a flat line along the
+  exceeded border (top or bottom edge of the graph), not omitted.
+- Curve nodes whose computed y-position is outside the graph are drawn
+  truncated to the border with the dot still fully visible.
+- When a node is being dragged, its virtual (un-clipped) physical value is
+  shown in the hover tooltip.
+- Each curve config declares its allowed `[y_min, y_max]`; the UI renderer
+  is the sole place that enforces the visual clip.
 
 ---
 
@@ -179,6 +202,13 @@ pub fn scaled_stroke(base: f32, scale: f32) -> f32 {
    **At 2×** every 1px line is 2px, every hit area proportionally larger, fonts are sharp.
    **At 1.25×–1.5×** sub-pixel AA handles fractional widths.
    **At 1.75×+** stroke widths snap to the 2× integer value.
+
+### §4.4 Control row consistency
+
+The Offset / Tilt / Curve DragValue row is rendered at a fixed vertical
+position per slot, identical across all module types. Modules may not define
+their own layout for these controls. The row is drawn by a single shared code
+path in `editor_ui.rs` regardless of the slot's module type or curve count.
 
 ---
 
