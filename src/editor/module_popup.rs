@@ -32,6 +32,7 @@ const ASSIGNABLE: &[ModuleType] = &[
     ModuleType::MidSide,
     ModuleType::TransientSustainedSplit,
     ModuleType::Harmonic,
+    ModuleType::Future,
 ];
 
 /// Render the popup if open. Call every frame from the main UI closure.
