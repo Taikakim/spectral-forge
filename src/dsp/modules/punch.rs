@@ -60,6 +60,8 @@ impl PunchModule {
 
     pub fn set_mode(&mut self, mode: PunchMode) { self.mode = mode; }
     pub fn mode(&self) -> PunchMode { self.mode }
+
+    pub fn drift_accum_slice(&self, ch: usize) -> &[f32] { &self.drift_accum[ch] }
 }
 
 impl Default for PunchModule {
@@ -117,7 +119,7 @@ impl SpectralModule for PunchModule {
 
         let amount_curve = curves.get(0).copied().unwrap_or(&[][..]);
         let width_curve  = curves.get(1).copied().unwrap_or(&[][..]);
-        let _fillm_curve = curves.get(2).copied().unwrap_or(&[][..]); // Task 2c.5
+        let fillm_curve  = curves.get(2).copied().unwrap_or(&[][..]); // Task 2c.5
         let ampfl_curve  = curves.get(3).copied().unwrap_or(&[][..]);
         let heal_curve   = curves.get(4).copied().unwrap_or(&[][..]);
         let mix_curve    = curves.get(5).copied().unwrap_or(&[][..]);
@@ -206,6 +208,41 @@ impl SpectralModule for PunchModule {
                 dry.re * (1.0 - mix) + wet.re * mix,
                 dry.im * (1.0 - mix) + wet.im * mix,
             );
+
+            // ── Pitch-fill: drift neighbour bins toward the nearest peak ────────
+            let fillm_g = fillm_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+            let target_drift = if fillm_g > 1e-3 {
+                let mut best: Option<(usize, i64)> = None; // (peak_index, signed distance)
+                for i in 0..self.peak_count {
+                    let pk = self.peak_bin[i] as i64;
+                    let signed = pk - k as i64; // positive: peak is above us → drift up
+                    let dist = signed.unsigned_abs() as usize;
+                    if dist > 0 && dist <= half_w {
+                        if best.map(|(_, d)| (d.unsigned_abs() as usize) > dist).unwrap_or(true) {
+                            best = Some((i, signed));
+                        }
+                    }
+                }
+                if let Some((_, signed)) = best {
+                    // Drift fraction: scale by FILL_MODE (0..1 maps to 0..0.5 bin cap).
+                    let direction = (signed as f32).signum();
+                    direction * (fillm_g * 0.25).clamp(0.0, 0.5)
+                } else { 0.0 }
+            } else { 0.0 };
+
+            // Slew-rate limit drift to 0.005 bin/hop, then clamp to ±0.5 bins.
+            let prev_drift = self.drift_accum[ch][k];
+            let drift_step = (target_drift - prev_drift).clamp(-0.005, 0.005);
+            let new_drift  = (prev_drift + drift_step).clamp(-0.5, 0.5);
+            self.drift_accum[ch][k] = new_drift;
+
+            // Apply phase rotation: per-hop Δφ = (π/2) × drift_bins (assumes OVERLAP=4).
+            if new_drift.abs() > 1e-6 {
+                let dphi = std::f32::consts::FRAC_PI_2 * new_drift;
+                let (s, c) = dphi.sin_cos();
+                let rot = Complex::new(c, s);
+                bins[k] = bins[k] * rot;
+            }
 
             #[cfg(any(test, feature = "probe"))]
             if k == probe_k {

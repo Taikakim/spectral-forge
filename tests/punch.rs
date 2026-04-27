@@ -179,3 +179,45 @@ fn inverse_punch_carves_quiet_valleys_not_loud_peaks() {
     assert!(bins[200].norm() < 0.5,
         "inverse punch should carve quiet valley at 200; got {}", bins[200].norm());
 }
+
+#[test]
+fn pitch_fill_caps_drift_at_half_bin() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::dsp::modules::punch::{PunchModule, PunchMode};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = PunchModule::new();
+    m.set_mode(PunchMode::Direct);
+    m.reset(48000.0, 1024);
+
+    let mut sc = vec![0.0f32; 513];
+    sc[100] = 0.9;
+
+    let amount = vec![2.0f32; 513];
+    let width  = vec![1.0f32; 513];
+    let fillm  = vec![2.0f32; 513];   // max pitch fill
+    let ampfl  = vec![1.0f32; 513];
+    let heal   = vec![0.13f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &width, &fillm, &ampfl, &heal, &mix];
+
+    // Run 50 hops with the same input — pitch drift should accumulate but cap at 0.5 bins.
+    let mut bins;
+    let mut supp = vec![0.0f32; 513];
+    let ctx = ModuleContext::new(
+        48000.0, 1024, 513,
+        10.0, 100.0, 0.5,
+        1.0, false, false,
+    );
+    for _ in 0..50 {
+        bins = vec![Complex::new(1.0, 0.0); 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, Some(&sc), &curves, &mut supp, &ctx);
+    }
+    // Inspect the per-channel drift_accum array (test-only public).
+    for k in 0..513 {
+        assert!(m.drift_accum_slice(0)[k].abs() <= 0.5 + 1e-4,
+            "drift at bin {} = {} exceeded 0.5", k, m.drift_accum_slice(0)[k]);
+    }
+}
