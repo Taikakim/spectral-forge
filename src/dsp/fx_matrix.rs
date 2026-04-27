@@ -1,8 +1,9 @@
 use num_complex::Complex;
 use crate::dsp::modules::{
     ModuleContext, ModuleType, RouteMatrix, GainMode, SpectralModule,
-    create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, VirtualRowKind,
+    create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
 };
+use crate::dsp::amp_modes::AmpNodeState;
 use crate::params::{FxChannelTarget, StereoLink};
 
 pub struct FxMatrix {
@@ -12,6 +13,12 @@ pub struct FxMatrix {
     /// D3: virtual row output buffers for T/S Split — not yet written by process_hop.
     virtual_out: Vec<Vec<Complex<f32>>>,
     mix_buf:   Vec<Complex<f32>>,
+    /// Per-channel × row × col amp state. Channel 0 always present;
+    /// channel 1 used only for Independent / MidSide stereo.
+    pub amp_state: [Vec<Vec<AmpNodeState>>; 2],
+    /// Scratch buffer for amp transforms (so we apply amp to a copy of each source,
+    /// not the slot's own output buffer).
+    amp_scratch: Vec<Complex<f32>>,
 }
 
 impl FxMatrix {
@@ -23,6 +30,9 @@ impl FxMatrix {
                 ty => Some(create_module(ty, sample_rate, fft_size)),
             }
         }).collect();
+        let mk_amp_grid = || (0..MAX_MATRIX_ROWS).map(|_|
+            (0..MAX_SLOTS).map(|_| AmpNodeState::Linear).collect()
+        ).collect();
         Self {
             slots,
             slot_out:    (0..MAX_SLOTS).map(|_| vec![Complex::new(0.0, 0.0); num_bins]).collect(),
@@ -30,6 +40,8 @@ impl FxMatrix {
             virtual_out: (0..MAX_SPLIT_VIRTUAL_ROWS)
                              .map(|_| vec![Complex::new(0.0, 0.0); num_bins]).collect(),
             mix_buf: vec![Complex::new(0.0, 0.0); num_bins],
+            amp_state: [mk_amp_grid(), mk_amp_grid()],
+            amp_scratch: vec![Complex::new(0.0, 0.0); num_bins],
         }
     }
 
@@ -44,6 +56,43 @@ impl FxMatrix {
         for buf in &mut self.slot_supp   { buf.fill(0.0); }
         for buf in &mut self.virtual_out { buf.fill(Complex::new(0.0, 0.0)); }
         self.mix_buf.fill(Complex::new(0.0, 0.0));
+        self.amp_scratch.resize(num_bins, Complex::new(0.0, 0.0));
+        self.clear_amp_state();
+    }
+
+    /// Sync per-cell amp state to match the requested amp_modes in `rm`.
+    /// On mismatch: drops the old state (dealloc) and creates a new one (alloc) — both
+    /// inside permit_alloc, since this runs on the audio thread before process_hop.
+    /// On match: leaves state intact (preserves Vactrol cap level, Schmitt latch, etc.).
+    pub fn sync_amp_modes(&mut self, rm: &RouteMatrix, num_bins: usize) {
+        for ch in 0..2 {
+            for r in 0..MAX_MATRIX_ROWS {
+                for c in 0..MAX_SLOTS {
+                    let want = rm.amp_mode[r][c];
+                    if !self.amp_state[ch][r][c].matches(want) {
+                        nih_plug::util::permit_alloc(|| {
+                            self.amp_state[ch][r][c] = AmpNodeState::new(want, num_bins);
+                        });
+                    } else {
+                        // Same mode: ensure inner arrays match current num_bins.
+                        nih_plug::util::permit_alloc(|| {
+                            self.amp_state[ch][r][c].resize(num_bins);
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clear all amp state arrays to startup values (e.g. on preset load or FFT-size change).
+    pub fn clear_amp_state(&mut self) {
+        for ch in 0..2 {
+            for r in 0..MAX_MATRIX_ROWS {
+                for c in 0..MAX_SLOTS {
+                    self.amp_state[ch][r][c].clear();
+                }
+            }
+        }
     }
 
     /// Zero all per-module DSP state and pre-allocated output/scratch buffers.

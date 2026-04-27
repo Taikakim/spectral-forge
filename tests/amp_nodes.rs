@@ -119,3 +119,53 @@ fn route_matrix_default_is_all_linear() {
         }
     }
 }
+
+use spectral_forge::dsp::fx_matrix::FxMatrix;
+use spectral_forge::dsp::modules::ModuleType;
+
+#[test]
+fn fx_matrix_starts_with_all_linear_state() {
+    let types = [ModuleType::Empty; 9];
+    let fxm = FxMatrix::new(48000.0, 1024, &types);
+    // Per-channel × MAX_MATRIX_ROWS × MAX_SLOTS, all Linear initially.
+    assert_eq!(fxm.amp_state[0].len(), MAX_MATRIX_ROWS);
+    for r in 0..MAX_MATRIX_ROWS {
+        for c in 0..MAX_SLOTS {
+            assert!(matches!(fxm.amp_state[0][r][c], AmpNodeState::Linear));
+        }
+    }
+}
+
+#[test]
+fn fx_matrix_sync_amp_modes_allocates_state_for_non_linear() {
+    let types = [ModuleType::Empty; 9];
+    let mut fxm = FxMatrix::new(48000.0, 1024, &types);
+    let mut rm = RouteMatrix::default();
+    rm.amp_mode[0][1] = AmpMode::Vactrol;
+    rm.amp_mode[2][3] = AmpMode::Slew;
+
+    fxm.sync_amp_modes(&rm, 513);
+
+    assert!(matches!(fxm.amp_state[0][0][1], AmpNodeState::Vactrol { .. }));
+    assert!(matches!(fxm.amp_state[0][2][3], AmpNodeState::Slew    { .. }));
+    // Untouched cells stay Linear.
+    assert!(matches!(fxm.amp_state[0][0][0], AmpNodeState::Linear));
+}
+
+#[test]
+fn fx_matrix_sync_amp_modes_replaces_state_on_mode_change() {
+    let types = [ModuleType::Empty; 9];
+    let mut fxm = FxMatrix::new(48000.0, 1024, &types);
+    let mut rm = RouteMatrix::default();
+    rm.amp_mode[1][2] = AmpMode::Vactrol;
+    fxm.sync_amp_modes(&rm, 513);
+    assert!(matches!(fxm.amp_state[0][1][2], AmpNodeState::Vactrol { .. }));
+
+    rm.amp_mode[1][2] = AmpMode::Schmitt;
+    fxm.sync_amp_modes(&rm, 513);
+    assert!(matches!(fxm.amp_state[0][1][2], AmpNodeState::Schmitt { .. }));
+
+    rm.amp_mode[1][2] = AmpMode::Linear;
+    fxm.sync_amp_modes(&rm, 513);
+    assert!(matches!(fxm.amp_state[0][1][2], AmpNodeState::Linear));
+}
