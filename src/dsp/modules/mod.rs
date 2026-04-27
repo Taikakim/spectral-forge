@@ -89,6 +89,7 @@ impl Default for RouteMatrix {
 
 // ── ModuleContext ──────────────────────────────────────────────────────────
 
+#[derive(Copy, Clone)]
 pub struct ModuleContext<'block> {
     pub sample_rate:       f32,
     pub fft_size:          usize,

@@ -48,6 +48,11 @@ pub struct FxMatrix {
     /// True if any slot in 0..8 (or Master) opts in via spec.writes_bin_physics. When
     /// false, the BinPhysics assembly + velocity loops are skipped entirely.
     bin_physics_in_use: bool,
+
+    /// Per-slot writer flag, mirrors module_spec(ty).writes_bin_physics.
+    /// Indexed 0..MAX_SLOTS (includes Master at index 8). Recomputed by
+    /// recompute_phys_topology whenever a slot's module changes.
+    writer_bits: [bool; MAX_SLOTS],
 }
 
 impl FxMatrix {
@@ -77,6 +82,7 @@ impl FxMatrix {
             prev_mags:   vec![0.0; MAX_SLOTS * MAX_NUM_BINS],
             phys_order:  { let mut v = Vec::with_capacity(8); v.extend(0..8usize); v },
             bin_physics_in_use: false,
+            writer_bits: [false; MAX_SLOTS],
         };
         this.recompute_phys_topology();
         this
@@ -199,6 +205,7 @@ impl FxMatrix {
             let ty = self.slots[s].as_ref().map(|m| m.module_type())
                 .unwrap_or(ModuleType::Empty);
             let spec = module_spec(ty);
+            self.writer_bits[s] = spec.writes_bin_physics;
             if spec.writes_bin_physics {
                 writers[nw] = s; nw += 1;
                 any_writer = true;
@@ -211,7 +218,9 @@ impl FxMatrix {
         // it can still flip bin_physics_in_use:
         let master_ty = self.slots[8].as_ref().map(|m| m.module_type())
             .unwrap_or(ModuleType::Empty);
-        if module_spec(master_ty).writes_bin_physics { any_writer = true; }
+        let master_spec = module_spec(master_ty);
+        self.writer_bits[8] = master_spec.writes_bin_physics;
+        if master_spec.writes_bin_physics { any_writer = true; }
 
         self.phys_order.clear();
         for i in 0..nw { self.phys_order.push(writers[i]); }
@@ -447,19 +456,34 @@ impl FxMatrix {
                     }
                 }
             } else {
-                // Pass physics arg: Some(&mut mix_phys) when bin_physics_in_use, else None.
-                // slot_supp[s] and mix_phys are disjoint fields of Self; Rust split-field
-                // borrows don't reach this here because `module` already took slots[s],
-                // so `self` only needs to lend mix_buf, slot_supp[s], and mix_phys.
-                let physics_arg: Option<&mut crate::dsp::bin_physics::BinPhysics> =
-                    if self.bin_physics_in_use { Some(&mut self.mix_phys) } else { None };
+                // Writer/reader split for BinPhysics dispatch:
+                //   Writer slots (writes_bin_physics=true): physics = Some(&mut mix_phys),
+                //     ctx.bin_physics = None  — they MUTATE physics state.
+                //   Reader slots: physics = None, ctx.bin_physics = Some(&mix_phys)
+                //     — they OBSERVE physics via ctx.
+                // The two branches are mutually exclusive at runtime, so only one kind of
+                // borrow on mix_phys is live at any call site — borrow-checker safe.
+                let is_writer = self.writer_bits[s];
+                let mut ctx_for_slot = *ctx;
+                let physics_arg: Option<&mut crate::dsp::bin_physics::BinPhysics>;
+                if self.bin_physics_in_use && is_writer {
+                    ctx_for_slot.bin_physics = None;
+                    physics_arg = Some(&mut self.mix_phys);
+                } else {
+                    if self.bin_physics_in_use {
+                        ctx_for_slot.bin_physics = Some(&self.mix_phys);
+                    } else {
+                        ctx_for_slot.bin_physics = None;
+                    }
+                    physics_arg = None;
+                }
                 module.process(
                     channel, stereo_link, slot_targets[s],
                     &mut self.mix_buf[..num_bins],
                     sc_args[s], curves,
                     &mut self.slot_supp[s][..num_bins],
                     physics_arg,
-                    ctx,
+                    &ctx_for_slot,
                 );
                 // Snapshot mix_phys → slot_phys[s] and reset the workspace for the next slot.
                 if self.bin_physics_in_use {
@@ -526,15 +550,28 @@ impl FxMatrix {
         // Pass through Master module (slot 8) then write to complex_buf.
         if let Some(ref mut master_mod) = self.slots[8] {
             let curves_empty: &[&[f32]] = &[];
-            let physics_arg: Option<&mut crate::dsp::bin_physics::BinPhysics> =
-                if self.bin_physics_in_use { Some(&mut self.mix_phys) } else { None };
+            // Writer/reader split for Master (slot 8) — same semantics as main slot loop.
+            let is_writer = self.writer_bits[8];
+            let mut ctx_for_master = *ctx;
+            let physics_arg: Option<&mut crate::dsp::bin_physics::BinPhysics>;
+            if self.bin_physics_in_use && is_writer {
+                ctx_for_master.bin_physics = None;
+                physics_arg = Some(&mut self.mix_phys);
+            } else {
+                if self.bin_physics_in_use {
+                    ctx_for_master.bin_physics = Some(&self.mix_phys);
+                } else {
+                    ctx_for_master.bin_physics = None;
+                }
+                physics_arg = None;
+            }
             master_mod.process(
                 channel, stereo_link, slot_targets[8],
                 &mut self.mix_buf[..num_bins],
                 sc_args[8], curves_empty,
                 &mut self.slot_supp[8][..num_bins],
                 physics_arg,
-                ctx,
+                &ctx_for_master,
             );
         }
         // Snapshot mix_phys → slot_phys[8] and reset workspace.
