@@ -516,8 +516,7 @@ pub fn create_module(
         ModuleType::Punch                  => Box::new(punch::PunchModule::new()),
         ModuleType::Rhythm                 => Box::new(rhythm::RhythmModule::new()),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
-        // TODO(2e.2): replace with GeometryModule when that task is implemented
-        ModuleType::Geometry               => unimplemented!("GeometryModule: Task 2e.2"),
+        ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -548,3 +547,4 @@ pub mod future;
 pub use future::FutureMode;
 pub mod punch;
 pub mod rhythm;
+pub mod geometry;
