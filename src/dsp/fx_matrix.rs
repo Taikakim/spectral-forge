@@ -62,8 +62,10 @@ impl FxMatrix {
 
     /// Sync per-cell amp state to match the requested amp_modes in `rm`.
     /// On mismatch: drops the old state (dealloc) and creates a new one (alloc) — both
-    /// inside permit_alloc, since this runs on the audio thread before process_hop.
-    /// On match: leaves state intact (preserves Vactrol cap level, Schmitt latch, etc.).
+    /// inside `permit_alloc`, since this runs on the audio thread before process_hop.
+    /// On match for a non-Linear mode: ensure the inner Vecs are sized for `num_bins`
+    /// (cheap when unchanged, sanctioned alloc when growing).
+    /// On match for `Linear`: skip — no state to size, no syscall to make.
     pub fn sync_amp_modes(&mut self, rm: &RouteMatrix, num_bins: usize) {
         for ch in 0..2 {
             for r in 0..MAX_MATRIX_ROWS {
@@ -73,8 +75,9 @@ impl FxMatrix {
                         nih_plug::util::permit_alloc(|| {
                             self.amp_state[ch][r][c] = AmpNodeState::new(want, num_bins);
                         });
-                    } else {
-                        // Same mode: ensure inner arrays match current num_bins.
+                    } else if !matches!(self.amp_state[ch][r][c], AmpNodeState::Linear) {
+                        // Linear has no per-bin arrays — skip the resize entirely
+                        // so the all-Linear common case is a pure compare loop.
                         nih_plug::util::permit_alloc(|| {
                             self.amp_state[ch][r][c].resize(num_bins);
                         });
@@ -111,6 +114,9 @@ impl FxMatrix {
         for buf in &mut self.slot_supp   { buf.fill(0.0); }
         for buf in &mut self.virtual_out { buf.fill(Complex::new(0.0, 0.0)); }
         self.mix_buf.fill(Complex::new(0.0, 0.0));
+        // Vactrol caps, Schmitt latches, Slew histories — all cleared so user-facing
+        // Reset honours its "clear all module state" promise. RT-safe (in-place fills).
+        self.clear_amp_state();
     }
 
     /// Sync slot modules to the given type array. Called once per audio block.

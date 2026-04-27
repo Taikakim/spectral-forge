@@ -129,9 +129,11 @@ fn fx_matrix_starts_with_all_linear_state() {
     let fxm = FxMatrix::new(48000.0, 1024, &types);
     // Per-channel × MAX_MATRIX_ROWS × MAX_SLOTS, all Linear initially.
     assert_eq!(fxm.amp_state[0].len(), MAX_MATRIX_ROWS);
+    assert_eq!(fxm.amp_state[1].len(), MAX_MATRIX_ROWS);
     for r in 0..MAX_MATRIX_ROWS {
         for c in 0..MAX_SLOTS {
             assert!(matches!(fxm.amp_state[0][r][c], AmpNodeState::Linear));
+            assert!(matches!(fxm.amp_state[1][r][c], AmpNodeState::Linear));
         }
     }
 }
