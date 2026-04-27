@@ -497,7 +497,7 @@ pub fn create_module(
         ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
         ModuleType::Future                 => Box::new(future::FutureModule::new()),
         ModuleType::Punch                  => Box::new(punch::PunchModule::new()),
-        ModuleType::Rhythm                 => Box::new(master::EmptyModule), // stub; Task 3 replaces
+        ModuleType::Rhythm                 => Box::new(rhythm::RhythmModule::new()),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
@@ -528,3 +528,4 @@ pub mod mid_side;
 pub mod future;
 pub use future::FutureMode;
 pub mod punch;
+pub mod rhythm;
