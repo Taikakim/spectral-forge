@@ -2,9 +2,11 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::Mutex;
 use triple_buffer::Input as TbInput;
+use std::collections::HashMap;
 use std::sync::{Arc, atomic::Ordering};
 use crate::params::SpectralForgeParams;
 use crate::editor::{curve as crv, spectrum_display as sd, theme as th};
+use crate::editor::mod_ring::{ModRingState, mod_ring_overlay};
 
 
 pub fn create_editor(
@@ -538,6 +540,12 @@ pub fn create_editor(
                                 }
                             }
 
+                            // Alt-click on a node opens the Modulation Ring overlay.
+                            if let Some((node_screen_pos, node_idx)) = cwr.alt_clicked_node {
+                                let anchor_data = Some((node_screen_pos, editing_slot, editing_curve, node_idx));
+                                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("mod_ring_anchor"), anchor_data));
+                            }
+
                             // Cursor tooltip — unified path driven by CurveDisplayConfig.
                             // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §3.
                             if let Some(hover) = ui.input(|i| i.pointer.hover_pos()) {
@@ -549,6 +557,35 @@ pub fn create_editor(
                                         ui.painter(), hover, curve_rect, disp_curve, &hover_cfg,
                                         db_min, db_max, sr,
                                     );
+                                }
+                            }
+
+                            // Modulation Ring overlay — shown when a node was alt-clicked.
+                            {
+                                let anchor: Option<(egui::Pos2, usize, usize, usize)> =
+                                    ui.ctx().data(|d| d.get_temp(egui::Id::new("mod_ring_anchor"))).flatten();
+                                if let Some((anchor_pos, ring_slot, ring_curve, ring_node)) = anchor {
+                                    let key = (ring_slot, ring_curve, ring_node);
+                                    let mut states: HashMap<(usize, usize, usize), ModRingState> =
+                                        ui.ctx().data(|d| d.get_temp(egui::Id::new("mod_ring_states"))).unwrap_or_default();
+                                    let mut state = *states.get(&key).unwrap_or(&ModRingState::default());
+                                    let toggle_clicked = mod_ring_overlay(ui, anchor_pos, &state);
+                                    if let Some(t) = toggle_clicked {
+                                        state.toggle(t);
+                                    }
+                                    states.insert(key, state);
+                                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("mod_ring_states"), states));
+                                    // Close the ring when a click lands outside the overlay dots
+                                    // (the dots' interact() calls consume their own clicks, so any
+                                    // remaining click this frame is "outside"). Only close when no
+                                    // toggle was activated — if toggle_clicked is Some, that click
+                                    // was on a dot and should not close the ring.
+                                    if toggle_clicked.is_none() && ui.input(|i| i.pointer.any_click()) {
+                                        ui.ctx().data_mut(|d| d.insert_temp(
+                                            egui::Id::new("mod_ring_anchor"),
+                                            Option::<(egui::Pos2, usize, usize, usize)>::None,
+                                        ));
+                                    }
                                 }
                             }
                         }

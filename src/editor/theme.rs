@@ -158,6 +158,14 @@ pub const FONT_SIZE_MATRIX_CELL:  f32 = 8.0;
 /// FX matrix T/S virtual-row icon and self-send markers.
 pub const FONT_SIZE_MATRIX_VROW:  f32 = 7.0;
 
+// ─── Modulation Ring overlay ──────────────────────────────────────────────────
+
+pub const MOD_RING_RADIUS:     f32     = 16.0;
+pub const MOD_RING_DOT_RADIUS: f32     = 4.0;
+pub const MOD_RING_LIT:      Color32 = Color32::from_rgb(0xff, 0xc8, 0x40);
+pub const MOD_RING_DIM:      Color32 = Color32::from_rgb(0x60, 0x40, 0x18);
+pub const MOD_RING_DISABLED: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
+
 // ─── Scaling helpers ──────────────────────────────────────────────────────────
 
 /// Scale a layout measurement by the UI scale factor.

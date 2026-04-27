@@ -707,6 +707,8 @@ pub struct CurveWidgetResult {
     pub drag_started: bool,
     /// True if a drag gesture ended this frame (use to call `end_set_parameter`).
     pub drag_stopped: bool,
+    /// If an alt-click landed on a node this frame: `Some((screen_pos, node_index))`.
+    pub alt_clicked_node: Option<(Pos2, usize)>,
 }
 
 /// Draw interactive nodes for the active curve. Returns drag/change state.
@@ -725,6 +727,7 @@ pub fn curve_widget(
     let mut changed = false;
     let mut drag_started = false;
     let mut drag_stopped = false;
+    let mut alt_clicked_node: Option<(Pos2, usize)> = None;
     let node_color_lit  = th::curve_color_lit(curve_idx);
     let node_color_hover = {
         let c = node_color_lit;
@@ -807,6 +810,12 @@ pub fn curve_widget(
             changed = true;
         }
 
+        // Alt-click opens the Modulation Ring overlay for this node.
+        let alt_down = ui.input(|inp| inp.modifiers.alt);
+        if resp.clicked() && alt_down {
+            alt_clicked_node = Some((node_pos, i));
+        }
+
         crate::editor::delayed_tooltip(ui, &resp, format!("Node {} \u{2014} drag to adjust", i));
 
         let color = if resp.hovered() { node_color_hover } else { node_color_lit };
@@ -840,5 +849,5 @@ pub fn curve_widget(
         }
     }
 
-    CurveWidgetResult { changed, drag_started, drag_stopped }
+    CurveWidgetResult { changed, drag_started, drag_stopped, alt_clicked_node }
 }
