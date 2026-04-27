@@ -40,6 +40,7 @@ but if the two disagree, this index wins.
 | 2026-04-24-ui-spec-cleanup.md | IMPLEMENTED | Closed the 2026-04-24 spec-deviation review. |
 | 2026-04-27-phase-1-foundation-infra.md | IMPLEMENTED | All 8 PRs landed. ModuleContext borrowed, ModuleSpec hints (`wants_sidechain`, `panel_widget`, `heavy_cpu_for_mode`), `enable_heavy_modules` toggle, Reset-to-default button + `clear_state` plumbing, modulation-ring scaffold (toggles disabled until BPM sync). Unblocks every Phase 2+ sub-plan. |
 | 2026-04-27-phase-2a-matrix-amp-nodes.md | IMPLEMENTED | All 12 tasks merged: AmpMode/AmpCellParams + per-mode kernels (Vactrol/Schmitt/Slew/Stiction), RouteMatrix amp_mode + amp_params with serde-default, lazy-allocated FxMatrix amp_state, per-cell apply at all three accumulation sites in process_hop, theme dot constants + popup + matrix-cell indicator/right-click, calibration probe behind `feature = "probe"`, finite/bounded e2e test. |
+| 2026-04-27-phase-2b-future.md | IMPLEMENTED | All 9 tasks merged: FutureModule + PrintThrough/PreEcho kernels, per-channel ring (`MAX_ECHO_FRAMES = 64`), two-pass spread with phase-preserving `spread_scratch`, PreEcho feedback capped at 0.4 for closed-loop stability, per-slot `slot_future_mode` persistence + UI mode picker, ASSIGNABLE entry, calibration probes for both modes. Lookahead Duck + Crystal Ball deferred per audit. |
 
 ## Design specs (`docs/superpowers/specs/`)
 
