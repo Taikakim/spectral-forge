@@ -4,7 +4,7 @@ const ALL_TYPES: &[ModuleType] = &[
     ModuleType::Empty, ModuleType::Dynamics, ModuleType::Freeze,
     ModuleType::PhaseSmear, ModuleType::Contrast, ModuleType::Gain,
     ModuleType::MidSide, ModuleType::TransientSustainedSplit,
-    ModuleType::Harmonic, ModuleType::Master,
+    ModuleType::Harmonic, ModuleType::Future, ModuleType::Master,
 ];
 
 #[test]

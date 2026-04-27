@@ -47,7 +47,7 @@ pub fn curve_display_config(
         ModuleType::Gain     => gain_config(curve_idx, gain_mode),
         ModuleType::MidSide  => mid_side_config(curve_idx),
         ModuleType::TransientSustainedSplit => ts_split_config(curve_idx),
-        ModuleType::Future   => default_config(),
+        ModuleType::Future   => future_config(curve_idx),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
@@ -256,6 +256,13 @@ fn ts_split_config(i: usize) -> CurveDisplayConfig {
         },
         _ => default_config(),
     }
+}
+
+/// Curve config for Future module. Stub — populated as Print-Through (Task 3) and
+/// Pre-Echo (Task 4) kernels land. All five curves currently fall through to
+/// default_config() until physical-unit display ranges are decided.
+fn future_config(_curve_idx: usize) -> CurveDisplayConfig {
+    default_config()
 }
 
 fn default_config() -> CurveDisplayConfig {
