@@ -1,4 +1,5 @@
 pub mod amp_modes;
+pub mod bin_physics;
 pub mod guard;
 pub mod modules;
 pub mod pipeline;
