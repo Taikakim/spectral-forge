@@ -25,6 +25,29 @@ pub struct FxMatrix {
     /// Scratch buffer for amp transforms (so we apply amp to a copy of each source,
     /// not the slot's own output buffer).
     amp_scratch: Vec<Complex<f32>>,
+
+    /// Per-slot output BinPhysics — slot_phys[s] = the state after slot s's process().
+    /// Sized MAX_SLOTS so slot_phys[8] = Master output. Reset to default at FFT-size change.
+    pub slot_phys: Vec<crate::dsp::bin_physics::BinPhysics>,
+
+    /// Workspace BinPhysics — assembled from upstream slot_phys[u] mixes for the current
+    /// slot's input. Reused across slots within a hop (zeroed via reset_active after
+    /// being copied into slot_phys[s] at end of each slot's iteration).
+    mix_phys: crate::dsp::bin_physics::BinPhysics,
+
+    /// Per-slot previous-frame |mix_buf[k]| magnitudes for auto-velocity. SoA:
+    /// `prev_mags[slot * MAX_NUM_BINS + k]`. Zeroed at reset.
+    prev_mags: Vec<f32>,
+
+    /// Slot iteration order for the main 0..8 loop: writers (writes_bin_physics=true)
+    /// first, then non-writers, both in numerical sub-order. Always size 8 (slots 0..7).
+    /// Recomputed only at sync_slot_types — never per block. When bin_physics_in_use is
+    /// false, equals (0..8).collect() (current numerical order, no semantic change).
+    phys_order: Vec<usize>,
+
+    /// True if any slot in 0..8 (or Master) opts in via spec.writes_bin_physics. When
+    /// false, the BinPhysics assembly + velocity loops are skipped entirely.
+    bin_physics_in_use: bool,
 }
 
 impl FxMatrix {
@@ -40,7 +63,7 @@ impl FxMatrix {
         ).collect();
         // Internal buffers sized to MAX_NUM_BINS so variable-FFT changes never need to
         // reallocate; process_hop and reset() just slice into [..num_bins].
-        Self {
+        let mut this = Self {
             slots,
             slot_out:    (0..MAX_SLOTS).map(|_| vec![Complex::new(0.0, 0.0); MAX_NUM_BINS]).collect(),
             slot_supp:   (0..MAX_SLOTS).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect(),
@@ -49,7 +72,14 @@ impl FxMatrix {
             mix_buf: vec![Complex::new(0.0, 0.0); MAX_NUM_BINS],
             amp_state: [mk_amp_grid(), mk_amp_grid()],
             amp_scratch: vec![Complex::new(0.0, 0.0); MAX_NUM_BINS],
-        }
+            slot_phys:   (0..MAX_SLOTS).map(|_| crate::dsp::bin_physics::BinPhysics::new()).collect(),
+            mix_phys:    crate::dsp::bin_physics::BinPhysics::new(),
+            prev_mags:   vec![0.0; MAX_SLOTS * MAX_NUM_BINS],
+            phys_order:  (0..8usize).collect(),
+            bin_physics_in_use: false,
+        };
+        this.recompute_phys_topology();
+        this
     }
 
     pub fn reset(&mut self, sample_rate: f32, fft_size: usize) {
@@ -62,6 +92,12 @@ impl FxMatrix {
         self.mix_buf.fill(Complex::new(0.0, 0.0));
         self.amp_scratch.fill(Complex::new(0.0, 0.0));
         self.clear_amp_state();
+        let num_bins = fft_size / 2 + 1;
+        for p in &mut self.slot_phys {
+            p.reset_active(num_bins, sample_rate, fft_size);
+        }
+        self.mix_phys.reset_active(num_bins, sample_rate, fft_size);
+        self.prev_mags.fill(0.0);
     }
 
     /// Sync per-cell amp state to match the requested amp_modes in `rm`.
@@ -128,10 +164,12 @@ impl FxMatrix {
     /// - Slot getting a new type: creates a module via permit_alloc (intentional
     ///   one-time allocation on user action; not per-sample).
     pub fn sync_slot_types(&mut self, types: &[ModuleType; 9], sample_rate: f32, fft_size: usize) {
+        let mut any_changed = false;
         for s in 0..MAX_SLOTS {
             let current = self.slots[s].as_ref().map(|m| m.module_type())
                 .unwrap_or(ModuleType::Empty);
             if current == types[s] { continue; }
+            any_changed = true;
             if types[s] == ModuleType::Empty {
                 nih_plug::util::permit_alloc(|| { self.slots[s] = None; });
             } else {
@@ -140,6 +178,36 @@ impl FxMatrix {
                 });
             }
         }
+        if any_changed {
+            nih_plug::util::permit_alloc(|| { self.recompute_phys_topology(); });
+        }
+    }
+
+    /// Recompute phys_order (writers first, then non-writers) and bin_physics_in_use.
+    /// Called from sync_slot_types whenever a slot's module changes.
+    fn recompute_phys_topology(&mut self) {
+        use crate::dsp::modules::module_spec;
+        self.phys_order.clear();
+        let mut readers: Vec<usize> = Vec::new();
+        let mut any_writer = false;
+        for s in 0..8 {
+            let ty = self.slots[s].as_ref().map(|m| m.module_type())
+                .unwrap_or(ModuleType::Empty);
+            let spec = module_spec(ty);
+            if spec.writes_bin_physics {
+                self.phys_order.push(s);
+                any_writer = true;
+            } else {
+                readers.push(s);
+            }
+        }
+        self.phys_order.extend(readers);
+        // Master (slot 8) is always last, never in phys_order — but if Master ever opts in
+        // it can still flip bin_physics_in_use:
+        let master_ty = self.slots[8].as_ref().map(|m| m.module_type())
+            .unwrap_or(ModuleType::Empty);
+        if module_spec(master_ty).writes_bin_physics { any_writer = true; }
+        self.bin_physics_in_use = any_writer;
     }
 
     /// Propagate per-slot GainMode from params to GainModule instances.
@@ -249,7 +317,8 @@ impl FxMatrix {
             self.virtual_out[v][..num_bins].fill(Complex::new(0.0, 0.0));
         }
 
-        for s in 0..8 {  // 0..8, not 0..MAX_SLOTS; Master (slot 8) is handled separately below
+        for i in 0..self.phys_order.len() {  // writers first, then non-writers; Master (slot 8) is handled separately below
+            let s = self.phys_order[i];
             // Build this slot's input from the route matrix.
             // Slot 0 always receives the plugin's main audio input.
             // All slots additionally receive weighted sums of previous-slot outputs.
@@ -287,9 +356,42 @@ impl FxMatrix {
                 }
             }
 
+            // BinPhysics assembly: mix upstream slot_phys[u] into mix_phys per route weight,
+            // then compute auto-velocity from the magnitude delta of mix_buf vs prev frame.
+            if self.bin_physics_in_use {
+                // mix_phys was reset_active at end of previous slot (or in reset() for first hop).
+                // Mix upstream physics outputs into mix_phys per the same route weights as audio.
+                // s == 0: no upstream physics; mix_phys stays at zero/default.
+                for u in 0..s {
+                    let send = route_matrix.send[u][s];
+                    if send < 0.001 { continue; }
+                    // Rust split-field borrow: slot_phys[u] (shared) and mix_phys (exclusive)
+                    // are distinct fields of Self, so this compiles without unsafe.
+                    let src = &self.slot_phys[u] as *const crate::dsp::bin_physics::BinPhysics;
+                    // SAFETY: slot_phys[u] (u < s ≤ 7) and mix_phys are non-overlapping fields.
+                    self.mix_phys.mix_from(unsafe { &*src }, send, num_bins);
+                }
+
+                // Auto-velocity: |curr_mag[k] - prev_mag[k]| written into mix_phys.velocity.
+                let prev_off = s * MAX_NUM_BINS;
+                for k in 0..num_bins {
+                    let curr_mag = self.mix_buf[k].norm();
+                    self.mix_phys.velocity[k] = (curr_mag - self.prev_mags[prev_off + k]).abs();
+                    self.prev_mags[prev_off + k] = curr_mag;
+                }
+            }
+
             let mut module = match self.slots[s].take() {
                 Some(m) => m,
                 None => {
+                    // No module: pass-through audio, zero suppression.
+                    // Still need to snapshot/reset mix_phys for physics continuity.
+                    if self.bin_physics_in_use {
+                        let src = &self.mix_phys as *const crate::dsp::bin_physics::BinPhysics;
+                        // SAFETY: mix_phys and slot_phys[s] are non-overlapping fields.
+                        self.slot_phys[s].copy_from(unsafe { &*src }, num_bins);
+                        self.mix_phys.reset_active(num_bins, ctx.sample_rate, ctx.fft_size);
+                    }
                     self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
                     self.slot_supp[s][..num_bins].fill(0.0);
                     continue;
@@ -327,14 +429,27 @@ impl FxMatrix {
                     }
                 }
             } else {
+                // Pass physics arg: Some(&mut mix_phys) when bin_physics_in_use, else None.
+                // slot_supp[s] and mix_phys are disjoint fields of Self; Rust split-field
+                // borrows don't reach this here because `module` already took slots[s],
+                // so `self` only needs to lend mix_buf, slot_supp[s], and mix_phys.
+                let physics_arg: Option<&mut crate::dsp::bin_physics::BinPhysics> =
+                    if self.bin_physics_in_use { Some(&mut self.mix_phys) } else { None };
                 module.process(
                     channel, stereo_link, slot_targets[s],
                     &mut self.mix_buf[..num_bins],
                     sc_args[s], curves,
                     &mut self.slot_supp[s][..num_bins],
-                    None,  // physics: wired in Phase 3.5
+                    physics_arg,
                     ctx,
                 );
+                // Snapshot mix_phys → slot_phys[s] and reset the workspace for the next slot.
+                if self.bin_physics_in_use {
+                    let src = &self.mix_phys as *const crate::dsp::bin_physics::BinPhysics;
+                    // SAFETY: mix_phys and slot_phys[s] are non-overlapping fields.
+                    self.slot_phys[s].copy_from(unsafe { &*src }, num_bins);
+                    self.mix_phys.reset_active(num_bins, ctx.sample_rate, ctx.fft_size);
+                }
                 self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
 
                 // Populate virtual row buffers from split modules.
@@ -372,17 +487,45 @@ impl FxMatrix {
                 self.mix_buf[k] += self.amp_scratch[k] * send;
             }
         }
+
+        // BinPhysics for Master input: weighted mix of slot_phys[0..8] per send to Master.
+        if self.bin_physics_in_use {
+            for u in 0..8 {
+                let send = route_matrix.send[u][8];
+                if send < 0.001 { continue; }
+                let src = &self.slot_phys[u] as *const crate::dsp::bin_physics::BinPhysics;
+                // SAFETY: slot_phys[u] (u in 0..8) and mix_phys are non-overlapping fields.
+                self.mix_phys.mix_from(unsafe { &*src }, send, num_bins);
+            }
+            // Auto-velocity for Master input.
+            let prev_off = 8 * MAX_NUM_BINS;
+            for k in 0..num_bins {
+                let curr_mag = self.mix_buf[k].norm();
+                self.mix_phys.velocity[k] = (curr_mag - self.prev_mags[prev_off + k]).abs();
+                self.prev_mags[prev_off + k] = curr_mag;
+            }
+        }
+
         // Pass through Master module (slot 8) then write to complex_buf.
         if let Some(ref mut master_mod) = self.slots[8] {
             let curves_empty: &[&[f32]] = &[];
+            let physics_arg: Option<&mut crate::dsp::bin_physics::BinPhysics> =
+                if self.bin_physics_in_use { Some(&mut self.mix_phys) } else { None };
             master_mod.process(
                 channel, stereo_link, slot_targets[8],
                 &mut self.mix_buf[..num_bins],
                 sc_args[8], curves_empty,
                 &mut self.slot_supp[8][..num_bins],
-                None,  // physics: wired in Phase 3.5
+                physics_arg,
                 ctx,
             );
+        }
+        // Snapshot mix_phys → slot_phys[8] and reset workspace.
+        if self.bin_physics_in_use {
+            let src = &self.mix_phys as *const crate::dsp::bin_physics::BinPhysics;
+            // SAFETY: mix_phys and slot_phys[8] are non-overlapping fields.
+            self.slot_phys[8].copy_from(unsafe { &*src }, num_bins);
+            self.mix_phys.reset_active(num_bins, ctx.sample_rate, ctx.fft_size);
         }
         complex_buf[..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
 
