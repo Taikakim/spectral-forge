@@ -455,3 +455,26 @@ fn module_context_optional_fields_default_to_none() {
     assert_eq!(ctx.bpm, 0.0);
     assert_eq!(ctx.beat_position, 0.0);
 }
+
+#[test]
+fn module_context_has_bin_physics_slot_default_none() {
+    use spectral_forge::dsp::modules::ModuleContext;
+    let ctx = ModuleContext::new(48_000.0, 2048, 1025, 10.0, 100.0, 1.0, 0.5, false, false);
+    assert!(ctx.bin_physics.is_none());
+}
+
+#[test]
+fn module_spec_writes_bin_physics_defaults_false_for_all_modules() {
+    use spectral_forge::dsp::modules::{ModuleType, module_spec};
+    for ty in [
+        ModuleType::Dynamics, ModuleType::Freeze, ModuleType::PhaseSmear,
+        ModuleType::Contrast, ModuleType::Gain, ModuleType::MidSide,
+        ModuleType::TransientSustainedSplit, ModuleType::Harmonic,
+        ModuleType::Future, ModuleType::Punch, ModuleType::Rhythm,
+        ModuleType::Geometry, ModuleType::Modulate, ModuleType::Circuit,
+        ModuleType::Master, ModuleType::Empty,
+    ] {
+        assert!(!module_spec(ty).writes_bin_physics,
+            "{:?}: writes_bin_physics must default to false in Phase 3", ty);
+    }
+}

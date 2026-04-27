@@ -109,6 +109,7 @@ pub struct ModuleContext<'block> {
     pub bpm:                  f32,                         // live from host transport (0.0 if unavailable)
     pub beat_position:        f64,                         // live from host transport (0.0 if unavailable)
     pub sidechain_derivative: Option<&'block [f32]>,      // Phase 5b/Modulate Slew Lag
+    pub bin_physics:          Option<&'block crate::dsp::bin_physics::BinPhysics>, // Phase 3.2
 }
 
 impl<'block> ModuleContext<'block> {
@@ -128,6 +129,7 @@ impl<'block> ModuleContext<'block> {
             bpm: 0.0,
             beat_position: 0.0,
             sidechain_derivative: None,
+            bin_physics: None,
         }
     }
 }
@@ -269,6 +271,11 @@ pub struct ModuleSpec {
     /// Optional per-module panel callback drawn below the curve editor.
     /// `None` means no panel (most modules). See Task 5 for signature.
     pub panel_widget:       Option<PanelWidgetFn>,
+
+    /// True if this module writes BinPhysics state. The pipeline uses this to
+    /// schedule writers before readers within a hop, and to skip the BinPhysics
+    /// assembly step entirely when no slot needs it.
+    pub writes_bin_physics: bool,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -283,6 +290,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: true,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -293,6 +301,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: true,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -303,6 +312,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: true,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -313,6 +323,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -323,6 +334,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: true,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -333,6 +345,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -343,6 +356,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -353,6 +367,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -363,6 +378,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static PUNCH: ModuleSpec = ModuleSpec {
         display_name: "Punch",
@@ -375,6 +391,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // Punch slot prompts the host to assign an aux input.
         wants_sidechain: true,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static RHY: ModuleSpec = ModuleSpec {
         display_name: "Rhythm",
@@ -385,6 +402,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain:    false,
         panel_widget: Some(crate::editor::rhythm_panel::render),
+        writes_bin_physics: false,
     };
     static GEO: ModuleSpec = ModuleSpec {
         display_name: "Geometry",
@@ -395,6 +413,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static MODULATE: ModuleSpec = ModuleSpec {
         display_name: "Modulate",
@@ -405,6 +424,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: true,
         wants_sidechain: true,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
@@ -415,6 +435,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -425,6 +446,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -435,6 +457,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        writes_bin_physics: false,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,
