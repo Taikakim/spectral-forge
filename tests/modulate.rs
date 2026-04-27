@@ -515,3 +515,28 @@ fn modulate_ground_loop_silent_input_no_injection() {
         assert!(diff < 1e-6, "bin {} drifted by {} despite silent input", k, diff);
     }
 }
+
+#[test]
+fn modulate_mode_dispatch_via_trait_setter() {
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    // Construct as Box<dyn SpectralModule> to exercise the trait-method path.
+    let mut module: Box<dyn SpectralModule> = Box::new(ModulateModule::new());
+    module.reset(48_000.0, 2048);
+
+    // Default after reset is PhasePhaser.
+    module.set_modulate_mode(ModulateMode::DiodeRm);
+    // Reset after set_mode preserves mode.
+    module.reset(48_000.0, 4096);
+
+    // Re-construct concrete and verify default-vs-set semantics still hold.
+    let mut concrete = ModulateModule::new();
+    concrete.reset(48_000.0, 2048);
+    assert_eq!(concrete.current_mode(), ModulateMode::PhasePhaser);
+    concrete.set_modulate_mode(ModulateMode::GroundLoop);
+    assert_eq!(concrete.current_mode(), ModulateMode::GroundLoop);
+    // Reset preserves mode.
+    concrete.reset(48_000.0, 4096);
+    assert_eq!(concrete.current_mode(), ModulateMode::GroundLoop);
+}
