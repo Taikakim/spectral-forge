@@ -246,6 +246,89 @@ fn geometry_helmholtz_absorbs_and_overflows() {
     }
 }
 
+/// End-to-end finite/bounded regression guard: 200 hops × 2 channels × 2 modes.
+/// Hammers both Chladni and Helmholtz with a non-trivial complex spectrum and
+/// verifies every output bin is finite and below the runaway threshold (1e6),
+/// and every suppression entry is finite and non-negative.
+#[test]
+fn geometry_finite_bounded_dual_channel_multi_hop() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let num_bins = 1025;
+
+    for mode in [GeometryMode::Chladni, GeometryMode::Helmholtz] {
+        let mut module = GeometryModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_mode(mode);
+
+        // Non-trivial complex spectrum derived from sin/cos to exercise both
+        // real and imaginary parts, with magnitude varying across bins.
+        let mut bins_l: Vec<Complex<f32>> = (0..num_bins)
+            .map(|k| {
+                let phase = (k as f32 * 0.13).sin();
+                Complex::new(
+                    ((k as f32 * 0.07).sin().abs() + 0.1) * phase.cos(),
+                    ((k as f32 * 0.07).sin().abs() + 0.1) * phase.sin(),
+                )
+            })
+            .collect();
+        // Right channel is slightly quieter, so left != right.
+        let mut bins_r: Vec<Complex<f32>> = bins_l.iter().map(|b| b * 0.7).collect();
+
+        // AMOUNT=1.5 pushes the kernels noticeably without being pathological.
+        // All other curves at nominal, MIX=1.0 (full wet).
+        let amount = vec![1.5_f32; num_bins];
+        let mid    = vec![1.0_f32; num_bins];
+        let mix    = vec![1.0_f32; num_bins];
+        // curves: [AMOUNT, MODE_CAP, DAMP_REL, THRESH, MIX]
+        let curves: Vec<&[f32]> = vec![&amount, &mid, &mid, &mid, &mix];
+
+        let mut suppression = vec![0.0_f32; num_bins];
+        let ctx = ModuleContext::new(
+            48_000.0, 2048, num_bins,
+            10.0, 100.0, 1.0,
+            0.5, false, false,
+        );
+
+        for hop in 0..200 {
+            for ch in 0..2_usize {
+                let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
+                module.process(
+                    ch,
+                    StereoLink::Independent,
+                    FxChannelTarget::All,
+                    bins,
+                    None,
+                    &curves,
+                    &mut suppression,
+                    &ctx,
+                );
+                for (i, b) in bins.iter().enumerate() {
+                    assert!(
+                        b.norm().is_finite(),
+                        "NaN/Inf: mode={:?} hop={} ch={} bin={} norm={}",
+                        mode, hop, ch, i, b.norm()
+                    );
+                    assert!(
+                        b.norm() < 1e6,
+                        "runaway: mode={:?} hop={} ch={} bin={} norm={}",
+                        mode, hop, ch, i, b.norm()
+                    );
+                }
+                for s in &suppression {
+                    assert!(
+                        s.is_finite() && *s >= 0.0,
+                        "bad suppression: mode={:?} hop={} ch={} val={}",
+                        mode, hop, ch, s
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Test that `set_geometry_mode` on the trait dispatches to the underlying
 /// GeometryModule and produces different spectral output for Chladni vs Helmholtz
 /// when given identical non-trivial input.

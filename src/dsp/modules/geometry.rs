@@ -172,6 +172,9 @@ fn apply_helmholtz(
         let threshold = (threshold_c[center] * 0.5).clamp(0.1, 1.5);
         let mix       = (mix_c[center].clamp(0.0, 2.0)) * 0.5;
 
+        // Compute trigger early so it's available for the fill_level cap below.
+        let trigger = threshold * capacity;
+
         // Bandwidth window.
         let lo = center.saturating_sub(half_bw);
         let hi = (center + half_bw).min(num_bins - 1);
@@ -184,6 +187,10 @@ fn apply_helmholtz(
 
         // Absorb a fraction into fill_level.
         fill_level[k] += amount * input_energy;
+        // Fix 1: Hard cap fill_level at 2*trigger — a real Helmholtz resonator has
+        // bounded capacity. Prevents unbounded accumulation under sustained input,
+        // which would compound multi-hop overtone accumulation at orphan bins.
+        fill_level[k] = fill_level[k].min(2.0 * trigger);
 
         // Soft notch: attenuate band by (1 - amount * mix).
         let attenuate = 1.0 - amount * mix;
@@ -199,7 +206,6 @@ fn apply_helmholtz(
         // which lies inside the absorption band and would just get re-absorbed).
         // If the target bin is near-zero, inject additively as a real component
         // (phase is undefined at zero magnitude, so pure-real is as valid as any choice).
-        let trigger = threshold * capacity;
         if fill_level[k] > trigger {
             let overflow   = fill_level[k] - trigger;
             let inject_amt = overflow * release;
@@ -212,6 +218,15 @@ fn apply_helmholtz(
                 bins[overtone] = Complex::new(inject_amt, 0.0);
             }
             fill_level[k] -= inject_amt;
+            // Fix 2: Clamp overtone bin magnitude to prevent multi-hop accumulation
+            // when the overtone falls outside any other trap's absorption band.
+            // 1000.0 is 100x the realistic operating range — generous headroom while
+            // still preventing runaway at orphan bins (e.g. bin 98 = 2*49, trap 4).
+            let overtone_norm = bins[overtone].norm();
+            if overtone_norm > 1000.0 {
+                let scale = 1000.0 / overtone_norm;
+                bins[overtone] *= scale;
+            }
         } else {
             // Drain when below threshold.
             fill_level[k] *= 1.0 - release;
