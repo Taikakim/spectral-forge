@@ -87,6 +87,41 @@ fn apply_bbd(
     }
 }
 
+// ── Schmitt helpers ────────────────────────────────────────────────────────
+
+/// Per-bin hysteresis latch (Schmitt trigger).
+/// Curves: `[AMOUNT, THRESH, RELEASE, MIX]`.
+fn apply_schmitt(
+    bins: &mut [Complex<f32>],
+    latched: &mut [u8],
+    curves: &[&[f32]],
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let release_c = curves[2];
+    let mix_c = curves[3];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        let attenuation = amount_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1 attenuation when OFF
+        let high = thresh_c[k].clamp(0.01, 4.0);
+        let gap = (release_c[k].clamp(0.0, 2.0) * 0.5).clamp(0.05, 0.95);
+        let low = high * (1.0 - gap);
+        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let mag = bins[k].norm();
+        let was_latched = latched[k] != 0;
+        let now_latched = if was_latched { mag > low } else { mag > high };
+        latched[k] = if now_latched { 1 } else { 0 };
+
+        let attenuate = if now_latched { 1.0 } else { 1.0 - attenuation };
+        let dry = bins[k];
+        let wet = dry * attenuate;
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,7 +205,11 @@ impl SpectralModule for CircuitModule {
                 let rng = &mut self.rng_state[channel];
                 apply_bbd(bins, bbd, rng, curves);
             }
-            _ => {} // SpectralSchmitt + CrossoverDistortion land in Tasks 4/5
+            CircuitMode::SpectralSchmitt => {
+                let latched = &mut self.schmitt_latched[channel];
+                apply_schmitt(bins, latched, curves);
+            }
+            _ => {} // CrossoverDistortion lands in Task 5
         }
 
         for s in suppression_out.iter_mut() {

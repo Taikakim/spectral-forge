@@ -113,3 +113,50 @@ fn circuit_bbd_delays_and_lowpasses() {
         assert!(b.norm().is_finite() && b.norm() < 100.0);
     }
 }
+
+#[test]
+fn circuit_schmitt_hysteresis_latches_above_threshold() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(CircuitMode::SpectralSchmitt);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0); // above on-threshold (high = 1.0)
+    bins[101] = Complex::new(0.05, 0.0); // far below off-threshold
+
+    // AMOUNT=2 (full attenuation when OFF), THRESHOLD=1 (high=1.0),
+    // RELEASE=1 (gap=0.5 → low=0.5), MIX=2 (full wet).
+    let amount = vec![2.0_f32; num_bins];
+    let thresh = vec![1.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+
+    assert!((bins[100].norm() - 2.0).abs() < 0.1, "bin 100 should latch ON (got {})", bins[100].norm());
+    assert!(bins[101].norm() < 0.04, "bin 101 should latch OFF (got {})", bins[101].norm());
+
+    // Drop bin 100 to 0.6 — inside hysteresis band [0.5, 1.0]. Should hold ON.
+    bins[100] = Complex::new(0.6, 0.0);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    assert!(bins[100].norm() > 0.5, "bin 100 should hold ON in hysteresis band (got {})", bins[100].norm());
+
+    // Drop bin 100 to 0.3 — below low (0.5). Should latch OFF.
+    bins[100] = Complex::new(0.3, 0.0);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    assert!(bins[100].norm() < 0.1, "bin 100 should latch OFF after falling below low (got {})", bins[100].norm());
+}
