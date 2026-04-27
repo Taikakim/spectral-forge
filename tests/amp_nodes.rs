@@ -257,3 +257,43 @@ fn fft_size_change_clears_amp_state() {
         panic!("amp state should still be Vactrol after reset");
     }
 }
+
+#[test]
+fn process_hop_every_amp_mode_is_finite_and_bounded() {
+    use AmpMode::*;
+    for mode in [Linear, Vactrol, Schmitt, Slew, Stiction] {
+        let types = [ModuleType::Empty; 9];
+        let mut fxm = FxMatrix::new(48000.0, 1024, &types);
+        let mut rm = RouteMatrix::default();
+        rm.amp_mode[0][1] = mode;
+        rm.amp_params[0][1].amount    = 1.0;
+        rm.amp_params[0][1].threshold = 0.3;
+
+        let num_bins = 513;
+        let curves = vec![vec![vec![1.0f32; num_bins]; 7]; 9];
+        let sc_args: [Option<&[f32]>; 9] = [None; 9];
+        let targets = [FxChannelTarget::All; 9];
+        let mut supp = vec![0.0f32; num_bins];
+        let ctx = ModuleContext::new(48000.0, 1024, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+        fxm.sync_amp_modes(&rm, num_bins);
+
+        for h in 0..50 {
+            let mag = 0.1 + 0.9 * (h as f32 / 50.0);
+            let mut buf = vec![Complex::new(mag, 0.0); num_bins];
+            fxm.process_hop(
+                0, StereoLink::Linked, &mut buf, &sc_args, &targets,
+                &curves, &rm, &ctx, &mut supp, num_bins, true,
+            );
+            for c in &buf {
+                assert!(
+                    c.re.is_finite() && c.im.is_finite(),
+                    "{:?} produced non-finite at hop {}", mode, h,
+                );
+                assert!(
+                    c.norm() <= 4.0,
+                    "{:?} runaway at hop {}: |c|={}", mode, h, c.norm(),
+                );
+            }
+        }
+    }
+}
