@@ -1,6 +1,6 @@
 use num_complex::Complex;
 use crate::dsp::modules::{
-    ModuleContext, ModuleType, RouteMatrix, GainMode, SpectralModule,
+    ModuleContext, ModuleType, RouteMatrix, GainMode, FutureMode, SpectralModule,
     create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
 };
 use crate::dsp::amp_modes::AmpNodeState;
@@ -149,7 +149,7 @@ impl FxMatrix {
 
     /// Propagate per-slot FutureMode from params to FutureModule instances.
     /// Called once per audio block (before process_hop).
-    pub fn set_future_modes(&mut self, modes: &[crate::dsp::modules::future::FutureMode; 9]) {
+    pub fn set_future_modes(&mut self, modes: &[FutureMode; 9]) {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_future_mode(modes[s]);

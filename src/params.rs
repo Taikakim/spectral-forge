@@ -135,7 +135,8 @@ pub struct SpectralForgeParams {
     /// GainMode per slot (only meaningful for Gain module slots).
     pub slot_gain_mode: Arc<Mutex<[GainMode; 9]>>,
 
-    /// FutureMode per slot (only meaningful for Future module slots).
+    /// Per-slot Print-Through ↔ Pre-Echo selector for `FutureModule`. Single mutex over
+    /// the array (matches `slot_gain_mode`) so audio thread takes one lock per block.
     pub slot_future_mode: Arc<Mutex<[FutureMode; 9]>>,
 
     /// Per-slot SC input gain in dB. Range [-90.0, 18.0]; values <= -90.0 treated as "-∞" (SC disabled for slot).
