@@ -165,3 +165,83 @@ fn chladni_passthrough_when_amount_zero() {
             "AMOUNT=0 + MIX=0 must be fully dry");
     }
 }
+
+#[test]
+fn geometry_helmholtz_absorbs_and_overflows() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = GeometryModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(GeometryMode::Helmholtz);
+
+    let num_bins = 1025;
+    // Tone at bin 117 with magnitude 4.0 (well above any reasonable trap threshold).
+    // Bin 117 is the log-spaced center of trap 5 for num_bins=1025, fft_size=2048.
+    // (Bin 100 from the plan template does not fall within any trap's bandwidth window.)
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[117] = Complex::new(4.0, 0.0);
+
+    // AMOUNT=2 (max), CAPACITY=2 (high), RELEASE=2 (fast drain), THRESHOLD=0.5 (low → overflow on first hop), MIX=2 (full wet).
+    let amount   = vec![2.0_f32; num_bins];
+    let capacity = vec![2.0_f32; num_bins];
+    let release  = vec![2.0_f32; num_bins];
+    let thresh   = vec![0.5_f32; num_bins];
+    let mix      = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &capacity, &release, &thresh, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+
+    // Run 19 fill+re-inject hops to let traps fill and overflow,
+    // then one final process() without re-injection so the assertion
+    // checks the post-process output directly.
+    for _ in 0..19 {
+        module.process(
+            0,
+            StereoLink::Linked,
+            FxChannelTarget::All,
+            &mut bins,
+            None,
+            &curves,
+            &mut suppression,
+            &ctx,
+        );
+        // Re-inject input each hop.
+        bins[117] += Complex::new(4.0, 0.0);
+    }
+    // Final hop: process without re-injection so the assertion sees the attenuated output.
+    module.process(
+        0,
+        StereoLink::Linked,
+        FxChannelTarget::All,
+        &mut bins,
+        None,
+        &curves,
+        &mut suppression,
+        &ctx,
+    );
+
+    // Bin 117 must be suppressed below the original injection magnitude (trap absorbed it).
+    assert!(
+        bins[117].norm() < 4.0,
+        "trap did not absorb energy at bin 117 (norm={})",
+        bins[117].norm()
+    );
+
+    // At least one other bin must have grown (overflow injection at trap centers/overtones).
+    let total_other: f32 = (0..num_bins).filter(|&k| k != 117).map(|k| bins[k].norm()).sum();
+    assert!(total_other > 0.1, "no overflow detected (total off-bin energy = {})", total_other);
+
+    for b in &bins {
+        assert!(b.norm().is_finite());
+    }
+    for s in &suppression {
+        assert!(s.is_finite() && *s >= 0.0);
+    }
+}

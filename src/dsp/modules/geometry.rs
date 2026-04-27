@@ -134,6 +134,87 @@ fn apply_chladni(
     }
 }
 
+fn apply_helmholtz(
+    bins: &mut [Complex<f32>],
+    fill_level: &mut [f32; N_TRAPS],
+    trap_centers: &[usize; N_TRAPS],
+    trap_bw: usize,
+    curves: &[&[f32]],
+) {
+    let amount_c    = curves[0];
+    let capacity_c  = curves[1];
+    let release_c   = curves[2];
+    let threshold_c = curves[3];
+    let mix_c       = curves[4];
+
+    let num_bins = bins.len();
+    let half_bw  = trap_bw / 2;
+
+    for k in 0..N_TRAPS {
+        let center = trap_centers[k];
+        if center == 0 || center >= num_bins {
+            continue;
+        }
+
+        let amount = (amount_c[center] * 0.5).clamp(0.0, 1.0);
+        if amount < 0.01 {
+            // Trap inactive: drain residual fill so it doesn't leak across reactivations.
+            fill_level[k] *= 0.95;
+            continue;
+        }
+
+        let capacity  = capacity_c[center].clamp(0.1, 4.0);
+        let release   = (release_c[center] * 0.2).clamp(0.0, 0.5);
+        let threshold = (threshold_c[center] * 0.5).clamp(0.1, 1.5);
+        let mix       = (mix_c[center].clamp(0.0, 2.0)) * 0.5;
+
+        // Bandwidth window.
+        let lo = center.saturating_sub(half_bw);
+        let hi = (center + half_bw).min(num_bins - 1);
+
+        // Sum input energy in band.
+        let mut input_energy = 0.0_f32;
+        for b in lo..=hi {
+            input_energy += bins[b].norm();
+        }
+
+        // Absorb a fraction into fill_level.
+        fill_level[k] += amount * input_energy;
+
+        // Soft notch: attenuate band by (1 - amount * mix).
+        let attenuate = 1.0 - amount * mix;
+        for b in lo..=hi {
+            let mag     = bins[b].norm();
+            let new_mag = mag * attenuate;
+            let scale   = new_mag / mag.max(1e-9);
+            bins[b] *= scale;
+        }
+
+        // Overflow check: phase-preserving magnitude scaling at overtone.
+        // The resonant cavity re-radiates at the 2nd-harmonic overtone (not the center,
+        // which lies inside the absorption band and would just get re-absorbed).
+        // If the target bin is near-zero, inject additively as a real component
+        // (phase is undefined at zero magnitude, so pure-real is as valid as any choice).
+        let trigger = threshold * capacity;
+        if fill_level[k] > trigger {
+            let overflow   = fill_level[k] - trigger;
+            let inject_amt = overflow * release;
+            // 2nd-harmonic overtone: phase-preserving magnitude injection.
+            let overtone = (center * 2).min(num_bins - 1);
+            let cur_o    = bins[overtone].norm();
+            if cur_o > 1e-9 {
+                bins[overtone] *= (cur_o + inject_amt) / cur_o;
+            } else {
+                bins[overtone] = Complex::new(inject_amt, 0.0);
+            }
+            fill_level[k] -= inject_amt;
+        } else {
+            // Drain when below threshold.
+            fill_level[k] *= 1.0 - release;
+        }
+    }
+}
+
 impl SpectralModule for GeometryModule {
     fn process(
         &mut self,
@@ -156,7 +237,14 @@ impl SpectralModule for GeometryModule {
                 apply_chladni(bins, plate_phase, GEO_GRID_W, GEO_GRID_H, curves);
             }
             GeometryMode::Helmholtz => {
-                // Filled in Task 2e.4.
+                let fill_level = &mut self.fill_level[channel];
+                apply_helmholtz(
+                    bins,
+                    fill_level,
+                    &self.trap_centers,
+                    self.trap_bw,
+                    curves,
+                );
             }
         }
 
