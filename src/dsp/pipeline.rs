@@ -140,6 +140,37 @@ impl Pipeline {
         }
     }
 
+    /// Zero out DSP runtime state without touching FFT infrastructure.
+    ///
+    /// This is the **audio-thread path** for the GUI Reset button. It must not
+    /// call `Pipeline::reset()` or any module `reset()` impl because those
+    /// heap-allocate (RealFftPlanner, vec!, StftHelper::new, etc.).
+    ///
+    /// What this does:
+    /// - Zeros every stateful f32/complex pre-allocated buffer in Pipeline and FxMatrix.
+    /// - Resets the dry-delay write head to 0.
+    /// - Does NOT reset StftHelper overlap-add ring buffers — those are private to
+    ///   nih-plug and cannot be zeroed here. The result is a brief one-hop click, which
+    ///   is acceptable for a user-initiated hard reset.
+    /// - Does NOT call module.reset() — module envelope/state will be stale for one
+    ///   FFT window then naturally overwritten by process(). This matches the behaviour
+    ///   of any other parameter change.
+    ///
+    /// RT-safe: no allocation, no locking, no I/O.
+    pub fn clear_state(&mut self) {
+        self.dry_delay.fill(0.0);
+        self.dry_delay_write = 0;
+        for sc in &mut self.sc_envelopes  { sc.fill(0.0); }
+        for sc in &mut self.sc_env_states { sc.fill(0.0); }
+        for ch in &mut self.slot_sc_input {
+            for slot_buf in ch.iter_mut() { slot_buf.fill(0.0); }
+        }
+        for ch_bufs in &mut self.sc_complex_bufs {
+            ch_bufs.fill(Complex::new(0.0, 0.0));
+        }
+        self.fx_matrix.clear_output_buffers();
+    }
+
     pub fn reset(&mut self, sample_rate: f32, num_channels: usize) {
         let fft_size = self.fft_size;
         let num_bins = fft_size / 2 + 1;
@@ -186,11 +217,10 @@ impl Pipeline {
         use crate::editor::curve_config::curve_display_config;
 
         // Drain the GUI-side reset request flag. The swap is lock-free.
-        // Pipeline::reset() is already called by the host's reset() callback,
-        // so it is RT-safe here — it only zeroes pre-allocated buffers and
-        // rebuilds FFT plans (which re-use internal Arc'd plan objects).
+        // clear_state() zeros pre-allocated buffers only — no FFT planner, no
+        // StftHelper construction, no module reset() calls that heap-allocate.
         if shared.reset_requested.swap(false, std::sync::atomic::Ordering::AcqRel) {
-            self.reset(self.sample_rate, self.num_channels);
+            self.clear_state();
         }
 
         let fft_size = self.fft_size;
