@@ -43,3 +43,40 @@ fn punch_module_no_sidechain_is_passthrough() {
             "no-sidechain Punch should be transparent, got {:?} vs {:?}", a, b);
     }
 }
+
+#[test]
+fn detect_peaks_finds_local_maxima_above_threshold() {
+    use spectral_forge::dsp::modules::punch::detect_peaks;
+
+    let mut sc = vec![0.0f32; 64];
+    sc[10] = 0.9;
+    sc[20] = 0.5;
+    sc[30] = 0.95;
+    sc[40] = 0.1; // below threshold
+    let mut peaks = [0u32; 32];
+    let count = detect_peaks(&sc, &mut peaks, 0.3, 8);
+
+    assert!(count >= 3, "expected ≥3 peaks, got {}", count);
+    let bins: std::collections::HashSet<u32> = peaks[..count].iter().copied().collect();
+    assert!(bins.contains(&10));
+    assert!(bins.contains(&20));
+    assert!(bins.contains(&30));
+    assert!(!bins.contains(&40));
+}
+
+#[test]
+fn detect_peaks_enforces_minimum_distance() {
+    use spectral_forge::dsp::modules::punch::detect_peaks;
+
+    let mut sc = vec![0.0f32; 64];
+    sc[10] = 0.5;
+    sc[12] = 0.6; // higher and within min_dist of 10 → wins; 10 is suppressed
+    sc[30] = 0.7;
+    let mut peaks = [0u32; 32];
+    let count = detect_peaks(&sc, &mut peaks, 0.3, 8);
+
+    let bins: std::collections::HashSet<u32> = peaks[..count].iter().copied().collect();
+    assert!(bins.contains(&12));
+    assert!(!bins.contains(&10), "bin 10 should be suppressed by bin 12 (within min_dist=8)");
+    assert!(bins.contains(&30));
+}

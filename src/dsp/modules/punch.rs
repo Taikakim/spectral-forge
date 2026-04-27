@@ -106,3 +106,65 @@ impl SpectralModule for PunchModule {
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }
+
+/// Detect up to `out.len()` local maxima in `mag`, above `threshold`, separated by
+/// at least `min_dist` bins. Returns the number of peaks written.
+///
+/// Greedy: for each local max above threshold, sort by magnitude desc and skip any
+/// that fall within `min_dist` of an already-accepted higher peak.
+///
+/// Audio-thread safe: uses fixed-size on-stack scratch (`[_; 256]`) — silently caps
+/// at 256 candidates, far above any realistic local-max density.
+pub fn detect_peaks(mag: &[f32], out: &mut [u32], threshold: f32, min_dist: usize) -> usize {
+    let n = mag.len();
+    if n < 3 || out.is_empty() { return 0; }
+
+    // Pass 1: collect candidates (local maxima above threshold) into fixed-size scratch.
+    let mut cand_count = 0usize;
+    let mut cand_mag: [f32; 256] = [0.0; 256];
+    let mut cand_bin: [u32; 256] = [0; 256];
+    for k in 1..n - 1 {
+        let m = mag[k];
+        if m < threshold { continue; }
+        if m > mag[k - 1] && m >= mag[k + 1] {
+            if cand_count < cand_mag.len() {
+                cand_mag[cand_count] = m;
+                cand_bin[cand_count] = k as u32;
+                cand_count += 1;
+            }
+        }
+    }
+
+    // Pass 2: insertion sort candidates by descending magnitude (in-place).
+    for i in 1..cand_count {
+        let mi = cand_mag[i];
+        let bi = cand_bin[i];
+        let mut j = i;
+        while j > 0 && cand_mag[j - 1] < mi {
+            cand_mag[j] = cand_mag[j - 1];
+            cand_bin[j] = cand_bin[j - 1];
+            j -= 1;
+        }
+        cand_mag[j] = mi;
+        cand_bin[j] = bi;
+    }
+
+    // Pass 3: greedy write into `out`, enforcing min_dist between accepted peaks.
+    let mut written = 0usize;
+    for i in 0..cand_count {
+        if written >= out.len() { break; }
+        let b = cand_bin[i];
+        let mut ok = true;
+        for j in 0..written {
+            if (out[j] as i64 - b as i64).unsigned_abs() < min_dist as u64 {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            out[written] = b;
+            written += 1;
+        }
+    }
+    written
+}
