@@ -19,6 +19,49 @@ use crate::dsp::modules::{
 };
 use crate::params::StereoLink;
 
+// ── Phase Phaser kernel ────────────────────────────────────────────────────
+
+fn apply_phase_phaser(
+    bins: &mut [Complex<f32>],
+    hop_count: u64,
+    curves: &[&[f32]],
+) {
+    use std::f32::consts::PI;
+
+    let amount_c  = curves[0];
+    let rate_c    = curves[2];
+    let thresh_c  = curves[3];
+    let ampgate_c = curves[4];
+    let mix_c     = curves[5];
+
+    let num_bins = bins.len();
+    let hop_phase_base = hop_count as f32 * 0.01;
+
+    for k in 0..num_bins {
+        let amount       = amount_c[k].clamp(0.0, 2.0);
+        let rate         = rate_c[k].clamp(0.0, 4.0);
+        let thresh       = thresh_c[k].clamp(0.01, 4.0);
+        let gate_strength = ampgate_c[k].clamp(0.0, 2.0);
+        let mix          = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let mag = bins[k].norm();
+        let gate_factor = if gate_strength > 0.001 {
+            (mag / thresh).min(1.0) * gate_strength.min(1.0)
+        } else {
+            1.0
+        };
+        let rotation = amount * PI * (hop_phase_base * rate + k as f32 * 0.001).sin() * gate_factor;
+        let cos_r = rotation.cos();
+        let sin_r = rotation.sin();
+        let dry = bins[k];
+        let wet = Complex::new(
+            dry.re * cos_r - dry.im * sin_r,
+            dry.re * sin_r + dry.im * cos_r,
+        );
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,16 +129,28 @@ impl ModulateModule {
 impl SpectralModule for ModulateModule {
     fn process(
         &mut self,
-        _channel: usize,
+        channel: usize,
         _stereo_link: StereoLink,
         _target: FxChannelTarget,
-        _bins: &mut [Complex<f32>],
-        _sidechain: Option<&[f32]>,
-        _curves: &[&[f32]],
+        bins: &mut [Complex<f32>],
+        sidechain: Option<&[f32]>,
+        curves: &[&[f32]],
         suppression_out: &mut [f32],
         _ctx: &ModuleContext<'_>,
     ) {
-        // Stub: audio passes through unmodified. Kernels added in Tasks 3–7.
+        debug_assert!(channel < 2);
+        let _ = sidechain; // Used by RM modes — silence warnings until Task 5.
+
+        match self.mode {
+            ModulateMode::PhasePhaser => {
+                apply_phase_phaser(bins, self.hop_count[channel], curves);
+                self.hop_count[channel] = self.hop_count[channel].wrapping_add(1);
+            }
+            _ => {
+                // Other modes filled in subsequent tasks.
+            }
+        }
+
         for s in suppression_out.iter_mut() { *s = 0.0; }
 
         #[cfg(any(test, feature = "probe"))]

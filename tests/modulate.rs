@@ -66,3 +66,83 @@ fn modulate_set_mode_round_trip() {
     m.set_mode(ModulateMode::DiodeRm);
     assert_eq!(m.current_mode(), ModulateMode::DiodeRm);
 }
+
+#[test]
+fn modulate_phase_phaser_rotates_phase_and_preserves_magnitude() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::PhasePhaser);
+
+    let num_bins = 1025;
+    // Pure cosines (phase = 0) at unit magnitude.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+    // AMOUNT=2 (max rotation), RATE=1, THRESH=1, AMPGATE=0 (gate disabled), MIX=2 (full wet).
+    let amount  = vec![2.0_f32; num_bins];
+    let reach   = vec![1.0_f32; num_bins];
+    let rate    = vec![1.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let ampgate = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &rate, &thresh, &ampgate, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    // Run a couple of hops so the animator advances away from hop_count=0
+    // (where every rotation goes through 0).
+    for _ in 0..3 {
+        // Re-seed bins each hop so we test rotation, not accumulated drift.
+        for b in bins.iter_mut() { *b = Complex::new(1.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves, &mut suppression, &ctx);
+    }
+
+    // Magnitudes preserved (rotation is unit-modulus).
+    for k in 0..num_bins {
+        let mag = bins[k].norm();
+        assert!((mag - 1.0).abs() < 1e-3, "bin {} magnitude drifted to {}", k, mag);
+    }
+    // At least some phases must have rotated away from 0.
+    let max_im: f32 = bins.iter().map(|b| b.im.abs()).fold(0.0_f32, f32::max);
+    assert!(max_im > 0.1, "Phase Phaser did not rotate phase (max im = {})", max_im);
+}
+
+#[test]
+fn modulate_phase_phaser_amount_zero_passthrough() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::PhasePhaser);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> =
+        (0..num_bins).map(|k| Complex::new((k as f32 * 0.03).cos(), (k as f32 * 0.03).sin())).collect();
+    let dry = bins.clone();
+
+    // AMOUNT=0 → zero rotation regardless of MIX.
+    let zeros = vec![0.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&zeros, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, &ctx);
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-5, "bin {} drifted by {} with AMOUNT=0", k, diff);
+    }
+}
