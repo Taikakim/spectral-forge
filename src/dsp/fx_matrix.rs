@@ -75,7 +75,7 @@ impl FxMatrix {
             slot_phys:   (0..MAX_SLOTS).map(|_| crate::dsp::bin_physics::BinPhysics::new()).collect(),
             mix_phys:    crate::dsp::bin_physics::BinPhysics::new(),
             prev_mags:   vec![0.0; MAX_SLOTS * MAX_NUM_BINS],
-            phys_order:  (0..8usize).collect(),
+            phys_order:  { let mut v = Vec::with_capacity(8); v.extend(0..8usize); v },
             bin_physics_in_use: false,
         };
         this.recompute_phys_topology();
@@ -185,28 +185,37 @@ impl FxMatrix {
 
     /// Recompute phys_order (writers first, then non-writers) and bin_physics_in_use.
     /// Called from sync_slot_types whenever a slot's module changes.
+    /// Alloc-free: uses stack-allocated [usize; 8] scratch arrays; phys_order.clear()
+    /// retains capacity 8 (allocated in new()), so push never reallocates.
     fn recompute_phys_topology(&mut self) {
         use crate::dsp::modules::module_spec;
-        self.phys_order.clear();
-        let mut readers: Vec<usize> = Vec::new();
+        let mut writers: [usize; 8] = [0; 8];
+        let mut readers: [usize; 8] = [0; 8];
+        let mut nw = 0usize;
+        let mut nr = 0usize;
         let mut any_writer = false;
+
         for s in 0..8 {
             let ty = self.slots[s].as_ref().map(|m| m.module_type())
                 .unwrap_or(ModuleType::Empty);
             let spec = module_spec(ty);
             if spec.writes_bin_physics {
-                self.phys_order.push(s);
+                writers[nw] = s; nw += 1;
                 any_writer = true;
             } else {
-                readers.push(s);
+                readers[nr] = s; nr += 1;
             }
         }
-        self.phys_order.extend(readers);
+
         // Master (slot 8) is always last, never in phys_order — but if Master ever opts in
         // it can still flip bin_physics_in_use:
         let master_ty = self.slots[8].as_ref().map(|m| m.module_type())
             .unwrap_or(ModuleType::Empty);
         if module_spec(master_ty).writes_bin_physics { any_writer = true; }
+
+        self.phys_order.clear();
+        for i in 0..nw { self.phys_order.push(writers[i]); }
+        for i in 0..nr { self.phys_order.push(readers[i]); }
         self.bin_physics_in_use = any_writer;
     }
 
@@ -301,6 +310,17 @@ impl FxMatrix {
         enable_heavy_modules: bool,
     ) {
         debug_assert!(self.amp_scratch.len() >= num_bins);
+        // Guard against the stale-audio defect that arises when bin_physics_in_use=true
+        // and phys_order reorders slots: audio assembly (for src in 0..s) reads slot_out
+        // in numerical order, which would contain stale (previous-hop) data for any writer
+        // slot moved earlier in phys_order. Phase 5 must resolve topology before opting in
+        // via writes_bin_physics=true. Today this is inert (no module opts in).
+        debug_assert!(
+            !self.bin_physics_in_use
+                || self.phys_order.iter().enumerate().all(|(i, &s)| s == i),
+            "BinPhysics writer reordering is active but audio assembly still uses \
+             numerical order — would read stale slot_out. Phase 5 must resolve."
+        );
 
         // hop_dt: wall-clock time elapsed per hop in seconds.
         // OVERLAP=4, so hop = fft_size / 4 samples.
@@ -365,11 +385,8 @@ impl FxMatrix {
                 for u in 0..s {
                     let send = route_matrix.send[u][s];
                     if send < 0.001 { continue; }
-                    // Rust split-field borrow: slot_phys[u] (shared) and mix_phys (exclusive)
-                    // are distinct fields of Self, so this compiles without unsafe.
-                    let src = &self.slot_phys[u] as *const crate::dsp::bin_physics::BinPhysics;
-                    // SAFETY: slot_phys[u] (u < s ≤ 7) and mix_phys are non-overlapping fields.
-                    self.mix_phys.mix_from(unsafe { &*src }, send, num_bins);
+                    // slot_phys[u] and mix_phys are disjoint struct fields — safe split borrow.
+                    self.mix_phys.mix_from(&self.slot_phys[u], send, num_bins);
                 }
 
                 // Auto-velocity: |curr_mag[k] - prev_mag[k]| written into mix_phys.velocity.
@@ -387,9 +404,10 @@ impl FxMatrix {
                     // No module: pass-through audio, zero suppression.
                     // Still need to snapshot/reset mix_phys for physics continuity.
                     if self.bin_physics_in_use {
-                        let src = &self.mix_phys as *const crate::dsp::bin_physics::BinPhysics;
-                        // SAFETY: mix_phys and slot_phys[s] are non-overlapping fields.
-                        self.slot_phys[s].copy_from(unsafe { &*src }, num_bins);
+                        // mix_phys and slot_phys[s] are disjoint struct fields — safe split borrow.
+                        // Copy via a temporary to avoid double-borrow: read out then write.
+                        let (mix_phys, slot_phys) = (&self.mix_phys, &mut self.slot_phys[s]);
+                        slot_phys.copy_from(mix_phys, num_bins);
                         self.mix_phys.reset_active(num_bins, ctx.sample_rate, ctx.fft_size);
                     }
                     self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
@@ -445,9 +463,9 @@ impl FxMatrix {
                 );
                 // Snapshot mix_phys → slot_phys[s] and reset the workspace for the next slot.
                 if self.bin_physics_in_use {
-                    let src = &self.mix_phys as *const crate::dsp::bin_physics::BinPhysics;
-                    // SAFETY: mix_phys and slot_phys[s] are non-overlapping fields.
-                    self.slot_phys[s].copy_from(unsafe { &*src }, num_bins);
+                    // mix_phys and slot_phys[s] are disjoint struct fields — safe split borrow.
+                    let (mix_phys, slot_phys) = (&self.mix_phys, &mut self.slot_phys[s]);
+                    slot_phys.copy_from(mix_phys, num_bins);
                     self.mix_phys.reset_active(num_bins, ctx.sample_rate, ctx.fft_size);
                 }
                 self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
@@ -493,9 +511,8 @@ impl FxMatrix {
             for u in 0..8 {
                 let send = route_matrix.send[u][8];
                 if send < 0.001 { continue; }
-                let src = &self.slot_phys[u] as *const crate::dsp::bin_physics::BinPhysics;
-                // SAFETY: slot_phys[u] (u in 0..8) and mix_phys are non-overlapping fields.
-                self.mix_phys.mix_from(unsafe { &*src }, send, num_bins);
+                // slot_phys[u] and mix_phys are disjoint struct fields — safe split borrow.
+                self.mix_phys.mix_from(&self.slot_phys[u], send, num_bins);
             }
             // Auto-velocity for Master input.
             let prev_off = 8 * MAX_NUM_BINS;
@@ -522,9 +539,9 @@ impl FxMatrix {
         }
         // Snapshot mix_phys → slot_phys[8] and reset workspace.
         if self.bin_physics_in_use {
-            let src = &self.mix_phys as *const crate::dsp::bin_physics::BinPhysics;
-            // SAFETY: mix_phys and slot_phys[8] are non-overlapping fields.
-            self.slot_phys[8].copy_from(unsafe { &*src }, num_bins);
+            // mix_phys and slot_phys[8] are disjoint struct fields — safe split borrow.
+            let (mix_phys, slot_phys) = (&self.mix_phys, &mut self.slot_phys[8]);
+            slot_phys.copy_from(mix_phys, num_bins);
             self.mix_phys.reset_active(num_bins, ctx.sample_rate, ctx.fft_size);
         }
         complex_buf[..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
