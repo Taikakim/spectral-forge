@@ -60,8 +60,9 @@ pub(crate) fn default_amp_modes() -> [[AmpMode; MAX_SLOTS]; MAX_MATRIX_ROWS] {
 }
 
 pub(crate) fn default_amp_params() -> [[AmpCellParams; MAX_SLOTS]; MAX_MATRIX_ROWS] {
-    [[AmpCellParams { amount: 1.0, threshold: 0.5, release_ms: 100.0, slew_db_per_s: 60.0 };
-      MAX_SLOTS]; MAX_MATRIX_ROWS]
+    // Source the neutral values from `AmpCellParams::default()` so any change there
+    // (new field, retuned default) automatically flows into matrix-cell defaults.
+    [[AmpCellParams::default(); MAX_SLOTS]; MAX_MATRIX_ROWS]
 }
 
 impl Default for RouteMatrix {
