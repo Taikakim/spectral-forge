@@ -105,7 +105,8 @@ fn stiction_dead_zone() {
     for c in &buf { assert!(c.norm() > 0.4, "over threshold should release"); }
 }
 
-use spectral_forge::dsp::modules::{RouteMatrix, MAX_SLOTS, MAX_MATRIX_ROWS};
+use spectral_forge::dsp::modules::{RouteMatrix, MAX_SLOTS, MAX_MATRIX_ROWS, ModuleContext};
+use spectral_forge::params::{FxChannelTarget, StereoLink};
 
 #[test]
 fn route_matrix_default_is_all_linear() {
@@ -170,4 +171,53 @@ fn fx_matrix_sync_amp_modes_replaces_state_on_mode_change() {
     rm.amp_mode[1][2] = AmpMode::Linear;
     fxm.sync_amp_modes(&rm, 513);
     assert!(matches!(fxm.amp_state[0][1][2], AmpNodeState::Linear));
+}
+
+#[test]
+fn process_hop_routes_unchanged_through_linear_amp() {
+    let types = [ModuleType::Empty; 9];
+    let mut fxm = FxMatrix::new(48000.0, 1024, &types);
+    let rm = RouteMatrix::default();
+    let num_bins = 513;
+    let mut buf: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new((k as f32) / num_bins as f32, 0.0))
+        .collect();
+    let original = buf.clone();
+    let curves = vec![vec![vec![1.0f32; num_bins]; 7]; 9];
+    let sc_args: [Option<&[f32]>; 9] = [None; 9];
+    let targets = [FxChannelTarget::All; 9];
+    let mut supp = vec![0.0f32; num_bins];
+    let ctx = ModuleContext::new(48000.0, 1024, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+    fxm.sync_amp_modes(&rm, num_bins);
+    fxm.process_hop(
+        0, StereoLink::Linked, &mut buf, &sc_args, &targets,
+        &curves, &rm, &ctx, &mut supp, num_bins, true,
+    );
+    for (a, b) in buf.iter().zip(original.iter()) {
+        assert!((a.re - b.re).abs() < 1e-4, "linear amp must be transparent");
+    }
+}
+
+#[test]
+fn process_hop_amp_attenuates_send() {
+    let types = [ModuleType::Empty; 9];
+    let mut fxm = FxMatrix::new(48000.0, 1024, &types);
+    let mut rm = RouteMatrix::default();
+    rm.amp_mode[0][1] = AmpMode::Linear;
+    rm.amp_params[0][1].amount = 0.0;
+    let num_bins = 513;
+    let mut buf: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); num_bins];
+    let curves = vec![vec![vec![1.0f32; num_bins]; 7]; 9];
+    let sc_args: [Option<&[f32]>; 9] = [None; 9];
+    let targets = [FxChannelTarget::All; 9];
+    let mut supp = vec![0.0f32; num_bins];
+    let ctx = ModuleContext::new(48000.0, 1024, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+    fxm.sync_amp_modes(&rm, num_bins);
+    fxm.process_hop(
+        0, StereoLink::Linked, &mut buf, &sc_args, &targets,
+        &curves, &rm, &ctx, &mut supp, num_bins, true,
+    );
+    for c in &buf {
+        assert!(c.norm() < 1e-4, "amount=0 amp must mute the send, got {}", c.norm());
+    }
 }

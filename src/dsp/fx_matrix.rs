@@ -163,6 +163,18 @@ impl FxMatrix {
         num_bins:             usize,
         enable_heavy_modules: bool,
     ) {
+        debug_assert!(self.amp_scratch.len() >= num_bins);
+
+        // hop_dt: wall-clock time elapsed per hop in seconds.
+        // OVERLAP=4, so hop = fft_size / 4 samples.
+        let hop_dt = ctx.fft_size as f32 / ctx.sample_rate / 4.0;
+
+        // amp_ch: which amp_state channel to use. Linked always reads channel 0.
+        let amp_ch = match stereo_link {
+            crate::params::StereoLink::Linked => 0,
+            _ => channel.min(1),
+        };
+
         // Clear virtual row output buffers for this hop.
         for v in 0..MAX_SPLIT_VIRTUAL_ROWS {
             self.virtual_out[v][..num_bins].fill(Complex::new(0.0, 0.0));
@@ -179,8 +191,13 @@ impl FxMatrix {
             for src in 0..s {
                 let send = route_matrix.send[src][s];
                 if send < 0.001 { continue; }
+                // Copy source into scratch, apply amp, then accumulate.
+                self.amp_scratch[..num_bins].copy_from_slice(&self.slot_out[src][..num_bins]);
+                let amp_params_cell = &route_matrix.amp_params[src][s];
+                let amp_state_cell  = &mut self.amp_state[amp_ch][src][s];
+                amp_state_cell.apply(amp_params_cell, &mut self.amp_scratch[..num_bins], hop_dt);
                 for k in 0..num_bins {
-                    self.mix_buf[k] += self.slot_out[src][k] * send;
+                    self.mix_buf[k] += self.amp_scratch[k] * send;
                 }
             }
             // Accumulate from virtual rows (T/S Split transient/sustained outputs).
@@ -189,8 +206,13 @@ impl FxMatrix {
                     if (src_slot as usize) < s {
                         let send = route_matrix.send[MAX_SLOTS + v][s];
                         if send < 0.001 { continue; }
+                        // Copy virtual-row source into scratch, apply amp, then accumulate.
+                        self.amp_scratch[..num_bins].copy_from_slice(&self.virtual_out[v][..num_bins]);
+                        let amp_params_cell = &route_matrix.amp_params[MAX_SLOTS + v][s];
+                        let amp_state_cell  = &mut self.amp_state[amp_ch][MAX_SLOTS + v][s];
+                        amp_state_cell.apply(amp_params_cell, &mut self.amp_scratch[..num_bins], hop_dt);
                         for k in 0..num_bins {
-                            self.mix_buf[k] += self.virtual_out[v][k] * send;
+                            self.mix_buf[k] += self.amp_scratch[k] * send;
                         }
                     }
                 }
@@ -271,8 +293,13 @@ impl FxMatrix {
         for src in 0..8 {
             let send = route_matrix.send[src][8];
             if send < 0.001 { continue; }
+            // Copy source into scratch, apply amp, then accumulate.
+            self.amp_scratch[..num_bins].copy_from_slice(&self.slot_out[src][..num_bins]);
+            let amp_params_cell = &route_matrix.amp_params[src][8];
+            let amp_state_cell  = &mut self.amp_state[amp_ch][src][8];
+            amp_state_cell.apply(amp_params_cell, &mut self.amp_scratch[..num_bins], hop_dt);
             for k in 0..num_bins {
-                self.mix_buf[k] += self.slot_out[src][k] * send;
+                self.mix_buf[k] += self.amp_scratch[k] * send;
             }
         }
         // Pass through Master module (slot 8) then write to complex_buf.

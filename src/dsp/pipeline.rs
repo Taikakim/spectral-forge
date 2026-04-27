@@ -491,6 +491,10 @@ impl Pipeline {
             }
         }
 
+        // Sync amp state to the route matrix once per audio block, before any hop.
+        // permit_alloc: sync_amp_modes may allocate if mode changed (user action).
+        self.fx_matrix.sync_amp_modes(&route_matrix_snap, num_bins);
+
         // Reborrow fields as locals so the closure can capture them without
         // conflicting with the &mut self.stft borrow inside process_overlap_add.
         let fft_plan  = self.fft_plan.clone();
