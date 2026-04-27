@@ -1,3 +1,5 @@
+> **Status (2026-04-27): IMPLEMENTED.** All 12 tasks merged on `feature/next-gen-modules-plans`. AmpMode + AmpCellParams + per-mode kernels (Vactrol/Schmitt/Slew/Stiction); RouteMatrix amp_mode + amp_params with serde-default for preset compat; FxMatrix lazy-alloc amp_state via `permit_alloc`; per-cell apply at all three accumulation sites in `process_hop`; theme dot constants + popup + matrix-cell indicator/right-click; calibration probe gated behind `feature = "probe"`; e2e finite/bounded test across every mode. Pipeline now snapshots amp_mode/amp_params from the params mutex per block, and FxMatrix internal buffers are MAX_NUM_BINS so reset on FFT-size change is purely a clear. The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 # Phase 2a — Matrix Amp Nodes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

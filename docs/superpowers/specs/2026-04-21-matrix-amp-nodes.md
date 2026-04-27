@@ -1,9 +1,9 @@
-> **Status (2026-04-24): DEFERRED.** Not yet implemented. Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-04-27): IMPLEMENTED** by Phase 2a plan `docs/superpowers/plans/2026-04-27-phase-2a-matrix-amp-nodes.md`. Source of truth: this spec + `src/dsp/amp_modes.rs`.
 
 # Matrix Amp Nodes — Design Spec
 
-**Status:** Planned  
-**Plan:** (to be written — Plan 2)
+**Status:** Implemented (Phase 2a, 2026-04-27)
+**Plan:** [`docs/superpowers/plans/2026-04-27-phase-2a-matrix-amp-nodes.md`](../plans/2026-04-27-phase-2a-matrix-amp-nodes.md)
 
 ## What it is
 

@@ -39,6 +39,7 @@ but if the two disagree, this index wins.
 | 2026-04-24-calibration-audit.md | IMPLEMENTED | All 11 tasks merged: per-module ProbeSnapshot + calibration round-trip tests, Dynamics/Freeze DSP clamp fixes, 10 kHz curve cutoff fix, hover-tooltip flip, Freeze row layout fix, UI spec addenda §2.3/§3.4/§4.4. |
 | 2026-04-24-ui-spec-cleanup.md | IMPLEMENTED | Closed the 2026-04-24 spec-deviation review. |
 | 2026-04-27-phase-1-foundation-infra.md | IMPLEMENTED | All 8 PRs landed. ModuleContext borrowed, ModuleSpec hints (`wants_sidechain`, `panel_widget`, `heavy_cpu_for_mode`), `enable_heavy_modules` toggle, Reset-to-default button + `clear_state` plumbing, modulation-ring scaffold (toggles disabled until BPM sync). Unblocks every Phase 2+ sub-plan. |
+| 2026-04-27-phase-2a-matrix-amp-nodes.md | IMPLEMENTED | All 12 tasks merged: AmpMode/AmpCellParams + per-mode kernels (Vactrol/Schmitt/Slew/Stiction), RouteMatrix amp_mode + amp_params with serde-default, lazy-allocated FxMatrix amp_state, per-cell apply at all three accumulation sites in process_hop, theme dot constants + popup + matrix-cell indicator/right-click, calibration probe behind `feature = "probe"`, finite/bounded e2e test. |
 
 ## Design specs (`docs/superpowers/specs/`)
 
@@ -53,7 +54,7 @@ but if the two disagree, this index wins.
 | 2026-04-21-harmony-module.md | DEFERRED | Depends on BinPhysics + instantaneous-frequency infra. |
 | 2026-04-21-kinetics-module.md | DEFERRED | Depends on BinPhysics. |
 | 2026-04-21-life-module.md | DEFERRED | Depends on BinPhysics. |
-| 2026-04-21-matrix-amp-nodes.md | DEFERRED | |
+| 2026-04-21-matrix-amp-nodes.md | IMPLEMENTED | Implemented by Phase 2a plan `2026-04-27-phase-2a-matrix-amp-nodes.md`. |
 | 2026-04-21-modulate-module.md | DEFERRED | Depends on BinPhysics + instantaneous-frequency infra. |
 | 2026-04-21-past-module.md | DEFERRED | Depends on BinPhysics + history-buffer infra. |
 | 2026-04-21-rhythm-module.md | DEFERRED | Depends on BinPhysics + host-BPM-sync infra. |
