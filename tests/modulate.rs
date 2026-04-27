@@ -217,3 +217,117 @@ fn modulate_bin_swapper_amount_zero_passthrough() {
         assert!(diff < 1e-5, "bin {} drifted by {} with MIX=0", k, diff);
     }
 }
+
+#[test]
+fn modulate_rm_fm_matrix_amplifies_at_sidechain_spike() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::RmFmMatrix);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); num_bins];
+    let dry: Vec<Complex<f32>> = bins.clone();
+
+    // Sidechain: spike at bin 200, magnitude 4.
+    let mut sc = vec![0.0_f32; num_bins];
+    sc[200] = 4.0;
+
+    // AMOUNT=0 (pure RM), REACH=2, RATE=1, THRESH=0, MIX=2 (full wet).
+    let amount = vec![0.0_f32; num_bins];
+    let reach  = vec![2.0_f32; num_bins];
+    let rate   = vec![1.0_f32; num_bins];
+    let thresh = vec![0.0_f32; num_bins];
+    let zeros  = vec![0.0_f32; num_bins];
+    let mix    = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &rate, &thresh, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, Some(&sc), &curves, &mut suppression, &ctx);
+
+    // Bin 200: RM = dry × sc × reach = 1 × 4 × 2 = 8. With THRESH=0 and MIX=1.
+    assert!(bins[200].norm() > 6.0, "bin 200 = {} (expected ≈ 8 from RM)", bins[200].norm());
+
+    // Bin 50: sc[50] = 0 → THRESH guard skips. With MIX > 0, bin should remain near dry.
+    let dist = (bins[50] - dry[50]).norm();
+    assert!(dist < 0.1, "bin 50 drifted by {} (sidechain was 0)", dist);
+}
+
+#[test]
+fn modulate_rm_fm_pure_fm_preserves_magnitude() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::RmFmMatrix);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); num_bins];
+
+    // Sidechain at all bins, magnitude 0.5.
+    let sc = vec![0.5_f32; num_bins];
+
+    // AMOUNT=2 (pure FM), REACH=1, THRESH=0, MIX=2.
+    let amount = vec![2.0_f32; num_bins];
+    let reach  = vec![1.0_f32; num_bins];
+    let rate   = vec![1.0_f32; num_bins];
+    let thresh = vec![0.0_f32; num_bins];
+    let zeros  = vec![0.0_f32; num_bins];
+    let mix    = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &rate, &thresh, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, Some(&sc), &curves, &mut suppression, &ctx);
+
+    // Pure FM rotates phase but magnitude must remain ≈ 0.5.
+    for k in 0..num_bins {
+        let mag = bins[k].norm();
+        assert!((mag - 0.5).abs() < 0.05, "bin {} magnitude {} drifted from 0.5 in pure FM", k, mag);
+    }
+}
+
+#[test]
+fn modulate_rm_fm_no_sidechain_passes_through() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::RmFmMatrix);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> =
+        (0..num_bins).map(|k| Complex::new((k as f32 * 0.01).sin(), 0.2)).collect();
+    let dry = bins.clone();
+
+    let amount = vec![1.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, &ctx);
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-6, "bin {} drifted by {} with no sidechain", k, diff);
+    }
+}

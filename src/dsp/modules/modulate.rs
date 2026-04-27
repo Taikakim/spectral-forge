@@ -100,6 +100,57 @@ fn apply_bin_swapper(
     }
 }
 
+// ── RM/FM Matrix kernel ────────────────────────────────────────────────────
+
+fn apply_rm_fm_matrix(
+    bins: &mut [Complex<f32>],
+    sidechain: &[f32],
+    curves: &[&[f32]],
+) {
+    use std::f32::consts::PI;
+
+    let amount_c = curves[0];
+    let reach_c  = curves[1];
+    let thresh_c = curves[3];
+    let mix_c    = curves[5];
+
+    let num_bins = bins.len().min(sidechain.len());
+
+    for k in 0..num_bins {
+        let fm_blend = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0=pure RM, 1=pure FM
+        let reach    = reach_c[k].clamp(0.0, 4.0);
+        let thresh   = thresh_c[k].clamp(0.0, 4.0) * 0.1;
+        let mix      = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let sc = sidechain[k].max(0.0);
+        if sc <= thresh {
+            // At or below threshold: leave bin untouched (passthrough).
+            continue;
+        }
+
+        let dry = bins[k];
+
+        // Ring-mod output: complex scale by real sidechain magnitude.
+        let rm_out = dry * sc * reach;
+
+        // FM output: phase rotation by sc·π radians, magnitude-preserving.
+        // The plan body computes  (rotate dry) * dry.norm()  which gives
+        // magnitude = dry.norm()² — wrong.  The corrected form is simply
+        // rotate dry by the phase angle; since rotation is unitary the
+        // magnitude stays exactly dry.norm().
+        let phase = sc * PI;
+        let cos_p = phase.cos();
+        let sin_p = phase.sin();
+        let fm_out = Complex::new(
+            dry.re * cos_p - dry.im * sin_p,
+            dry.re * sin_p + dry.im * cos_p,
+        ); // magnitude = dry.norm() (no extra scaling needed)
+
+        let wet = rm_out * (1.0 - fm_blend) + fm_out * fm_blend;
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,7 +228,6 @@ impl SpectralModule for ModulateModule {
         _ctx: &ModuleContext<'_>,
     ) {
         debug_assert!(channel < 2);
-        let _ = sidechain; // Used by RM modes — silence warnings until Task 5.
 
         match self.mode {
             ModulateMode::PhasePhaser => {
@@ -188,8 +238,14 @@ impl SpectralModule for ModulateModule {
                 let scratch = &mut self.swap_scratch[channel];
                 apply_bin_swapper(bins, scratch, curves);
             }
+            ModulateMode::RmFmMatrix => {
+                if let Some(sc) = sidechain {
+                    apply_rm_fm_matrix(bins, sc, curves);
+                }
+                // No sidechain → passthrough (bins unchanged).
+            }
             _ => {
-                // Other modes filled in subsequent tasks.
+                // DiodeRm and GroundLoop filled in subsequent tasks.
             }
         }
 
