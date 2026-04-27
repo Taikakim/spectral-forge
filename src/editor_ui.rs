@@ -511,6 +511,13 @@ pub fn create_editor(
                                 }
                             }
                         }
+
+                        // Per-module non-curve UI panel (Phase 1 hook; defaults to no-op for
+                        // every shipped module). See `dsp/modules/mod.rs::PanelWidgetFn`.
+                        if let Some(panel_fn) = crate::dsp::modules::module_spec(editing_type).panel_widget {
+                            ui.separator();
+                            panel_fn(ui, editing_slot);
+                        }
                     }
 
                     // Graph header: "Editing: {module_name} — {channel_target}"
