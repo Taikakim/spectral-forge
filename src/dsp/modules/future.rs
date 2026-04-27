@@ -28,6 +28,8 @@ pub struct FutureModule {
     /// Ring buffer of write-ahead frames per channel. `[channel][frame_idx][bin]`.
     ring:        [Vec<Vec<Complex<f32>>>; 2],
     write_pos:   [usize; 2],
+    #[cfg(any(test, feature = "probe"))]
+    last_probe: crate::dsp::modules::ProbeSnapshot,
 }
 
 impl FutureModule {
@@ -38,6 +40,8 @@ impl FutureModule {
             sample_rate: 44100.0,
             ring:        [Vec::new(), Vec::new()],
             write_pos:   [0; 2],
+            #[cfg(any(test, feature = "probe"))]
+            last_probe: Default::default(),
         }
     }
 
@@ -64,18 +68,115 @@ impl SpectralModule for FutureModule {
 
     fn process(
         &mut self,
-        _channel: usize,
+        channel: usize,
         _stereo_link: StereoLink,
         _target: FxChannelTarget,
         bins: &mut [Complex<f32>],
         _sidechain: Option<&[f32]>,
-        _curves: &[&[f32]],
+        curves: &[&[f32]],
         suppression_out: &mut [f32],
         _ctx: &ModuleContext<'_>,
     ) {
-        // Stub. Tasks 3 + 4 implement Print-Through and Pre-Echo kernels.
+        let ch = channel.min(1);
+        let n  = bins.len();
+        debug_assert_eq!(self.ring[ch][0].len(), n,
+            "FutureModule: bins/ring size mismatch — call reset() before process()");
+
+        let probe_k = n / 2;
+        let amount_curve = curves.get(0).copied().unwrap_or(&[][..]);
+        let time_curve   = curves.get(1).copied().unwrap_or(&[][..]);
+        let _thresh      = curves.get(2).copied().unwrap_or(&[][..]); // PrintThrough ignores THRESHOLD
+        let spread_curve = curves.get(3).copied().unwrap_or(&[][..]);
+        let mix_curve    = curves.get(4).copied().unwrap_or(&[][..]);
+
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_amount_pct = 0.0f32;
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_time_hops  = 0u32;
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_mix_pct    = 0.0f32;
+
+        match self.mode {
+            FutureMode::PrintThrough => {
+                // Slot-wide TIME (read once at probe_k).
+                let time_gain  = time_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                let delay_hops = ((time_gain * 8.0).round() as usize).clamp(1, MAX_ECHO_FRAMES - 1);
+                let read_pos   = (self.write_pos[ch] + MAX_ECHO_FRAMES - delay_hops) % MAX_ECHO_FRAMES;
+
+                // Pass 1: mix wet→bins; write centre leaked values; stash leaked_mag*spread_pct
+                // into suppression_out (we'll zero it after pass 2 — it's pre-allocated, n floats).
+                for k in 0..n {
+                    let amount_gain = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 4.0);
+                    let leak_pct    = (amount_gain * 0.05).clamp(0.0, 0.20);
+                    let spread_gain = spread_curve.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+                    let spread_pct  = (spread_gain * 0.20).clamp(0.0, 0.50);
+                    let mix_gain    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let mix         = (mix_gain * 0.5).clamp(0.0, 1.0);
+
+                    let dry = bins[k];
+                    let wet = self.ring[ch][read_pos][k];
+                    bins[k] = Complex::new(
+                        dry.re * (1.0 - mix) + wet.re * mix,
+                        dry.im * (1.0 - mix) + wet.im * mix,
+                    );
+
+                    #[cfg(any(test, feature = "probe"))]
+                    if k == probe_k {
+                        probe_amount_pct = leak_pct * 100.0;
+                        probe_time_hops  = delay_hops as u32;
+                        probe_mix_pct    = mix * 100.0;
+                    }
+
+                    let dry_norm   = dry.norm();
+                    let leaked_mag = dry_norm * leak_pct;
+                    let phase_unit = if dry_norm > 1e-12 { dry / dry_norm } else { Complex::new(1.0, 0.0) };
+                    // Write centre into ring (ring slot was pre-cleared at end of last hop).
+                    self.ring[ch][self.write_pos[ch]][k] = phase_unit * (leaked_mag * (1.0 - 2.0 * spread_pct));
+                    // Stash the side magnitude into suppression_out for pass 2.
+                    // suppression_out[k] temporarily holds |side| (real, non-negative).
+                    suppression_out[k] = leaked_mag * spread_pct;
+                }
+                // Pass 2: accumulate side bleeds into neighbours (all centres are now written).
+                for k in 0..n {
+                    let side_mag = suppression_out[k];
+                    if side_mag < 1e-24 { continue; }
+                    // Recover phase from the centre we just wrote.
+                    let centre = self.ring[ch][self.write_pos[ch]][k];
+                    let centre_norm = centre.norm();
+                    let phase_unit = if centre_norm > 1e-24 { centre / centre_norm } else { Complex::new(1.0, 0.0) };
+                    let side = phase_unit * side_mag;
+                    if k > 0     { self.ring[ch][self.write_pos[ch]][k - 1] += side; }
+                    if k + 1 < n { self.ring[ch][self.write_pos[ch]][k + 1] += side; }
+                }
+            }
+            FutureMode::PreEcho => {
+                // Task 4 implements the Pre-Echo kernel.
+                // Stub: copy dry into ring (no echo until kernel lands).
+                for k in 0..n {
+                    self.ring[ch][self.write_pos[ch]][k] = bins[k];
+                }
+            }
+        }
+
+        // Advance write_pos.
+        self.write_pos[ch] = (self.write_pos[ch] + 1) % MAX_ECHO_FRAMES;
+        // Pre-clear the next slot so the += spread accumulators on the next hop start from zero.
+        let next_pos = self.write_pos[ch];
+        for k in 0..n { self.ring[ch][next_pos][k] = Complex::new(0.0, 0.0); }
+
         suppression_out.fill(0.0);
-        let _ = bins;
+
+        #[cfg(any(test, feature = "probe"))]
+        {
+            let hop_size = (self.fft_size as f32) / 4.0;
+            let length_ms = (probe_time_hops as f32) * hop_size / self.sample_rate * 1000.0;
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                amount_pct: Some(probe_amount_pct),
+                length_ms:  Some(length_ms),
+                mix_pct:    Some(probe_mix_pct),
+                ..Default::default()
+            };
+        }
     }
 
     fn clear_state(&mut self) {
@@ -86,6 +187,9 @@ impl SpectralModule for FutureModule {
         }
         self.write_pos = [0; 2];
     }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 
     fn tail_length(&self) -> u32 { (self.fft_size as u32) * (MAX_ECHO_FRAMES as u32) / 4 }
     fn module_type(&self) -> ModuleType { ModuleType::Future }
