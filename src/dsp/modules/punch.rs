@@ -62,6 +62,7 @@ impl PunchModule {
     pub fn mode(&self) -> PunchMode { self.mode }
 
     pub fn drift_accum_slice(&self, ch: usize) -> &[f32] { &self.drift_accum[ch] }
+    pub fn current_carve_depth_slice(&self, ch: usize) -> &[f32] { &self.current_carve_depth[ch] }
 }
 
 impl Default for PunchModule {

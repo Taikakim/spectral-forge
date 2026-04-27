@@ -221,3 +221,53 @@ fn pitch_fill_caps_drift_at_half_bin() {
             "drift at bin {} = {} exceeded 0.5", k, m.drift_accum_slice(0)[k]);
     }
 }
+
+#[test]
+fn healing_follows_chosen_time_constant() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::dsp::modules::punch::{PunchModule, PunchMode};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = PunchModule::new();
+    m.set_mode(PunchMode::Direct);
+    m.reset(48000.0, 1024);
+
+    let amount = vec![2.0f32; 513];
+    let width  = vec![1.0f32; 513];
+    let fillm  = vec![1.0f32; 513];
+    let ampfl  = vec![1.0f32; 513];
+    let heal   = vec![1.0f32; 513];   // neutral = 150 ms
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &width, &fillm, &ampfl, &heal, &mix];
+    let ctx = ModuleContext::new(
+        48000.0, 1024, 513,
+        10.0, 100.0, 0.5,
+        1.0, false, false,
+    );
+
+    // Phase 1: drive with a strong sidechain for 30 hops to engage carve.
+    let mut sc = vec![0.0f32; 513]; sc[100] = 0.9;
+    let mut supp = vec![0.0f32; 513];
+    for _ in 0..30 {
+        let mut bins = vec![Complex::new(1.0, 0.0); 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, Some(&sc), &curves, &mut supp, &ctx);
+    }
+    let depth_engaged = m.current_carve_depth_slice(0)[100];
+    assert!(depth_engaged > 0.3, "carve should be engaged; got {}", depth_engaged);
+
+    // Phase 2: silence the sidechain and run for ~150 ms (one HEAL τ at neutral HEAL=1.0).
+    // hop_dt = 1024 / 48000 / 4 ≈ 5.333 ms, so 150 ms / 5.333 ms ≈ 28 hops.
+    let sc_silent = vec![0.0f32; 513];
+    let hops_per_150ms = (0.150 / (1024.0_f32 / 48000.0 / 4.0)) as usize; // ≈ 28
+    for _ in 0..hops_per_150ms {
+        let mut bins = vec![Complex::new(1.0, 0.0); 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, Some(&sc_silent), &curves, &mut supp, &ctx);
+    }
+    let depth_decayed = m.current_carve_depth_slice(0)[100];
+    let ratio = depth_decayed / depth_engaged;
+    assert!(ratio < 0.5,
+        "after one τ the depth should be < 0.5× initial; got ratio {}", ratio);
+}
