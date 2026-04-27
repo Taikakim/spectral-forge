@@ -228,6 +228,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Modulate modules. Default no-op for all other types.
     fn set_modulate_mode(&mut self, _: crate::dsp::modules::modulate::ModulateMode) {}
 
+    /// Update the operating mode for Circuit modules. Default no-op for all other types.
+    fn set_circuit_mode(&mut self, _: crate::dsp::modules::circuit::CircuitMode) {}
+
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 

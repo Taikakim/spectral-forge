@@ -51,6 +51,22 @@ fn circuit_module_constructs_and_passes_through() {
 }
 
 #[test]
+fn circuit_mode_dispatch_via_trait_setter() {
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let mut m = CircuitModule::new();
+    assert_eq!(m.current_mode(), CircuitMode::CrossoverDistortion);
+
+    // Trait setter must update the operating mode.
+    m.set_circuit_mode(CircuitMode::BbdBins);
+    assert_eq!(m.current_mode(), CircuitMode::BbdBins);
+
+    m.set_circuit_mode(CircuitMode::SpectralSchmitt);
+    assert_eq!(m.current_mode(), CircuitMode::SpectralSchmitt);
+}
+
+#[test]
 fn circuit_mode_default_is_crossover_distortion() {
     use spectral_forge::dsp::modules::circuit::CircuitMode;
     assert_eq!(CircuitMode::default(), CircuitMode::CrossoverDistortion);

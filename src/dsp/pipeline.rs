@@ -491,6 +491,11 @@ impl Pipeline {
             self.fx_matrix.set_modulate_modes(&*modes);
         }
 
+        // Propagate circuit modes each block (try_lock is non-blocking; skipped if GUI holds lock).
+        if let Some(modes) = params.slot_circuit_mode.try_lock() {
+            self.fx_matrix.set_circuit_modes(&*modes);
+        }
+
         // Propagate rhythm modes + grids each block (try_lock is non-blocking; skipped if GUI holds lock).
         // The two locks are independent — if either is held by GUI, skip dispatch this block;
         // the next block will pick up the GUI-side write.

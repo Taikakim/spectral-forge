@@ -271,6 +271,10 @@ impl SpectralModule for CircuitModule {
         ModuleType::Circuit
     }
 
+    fn set_circuit_mode(&mut self, mode: CircuitMode) {
+        self.set_mode(mode);
+    }
+
     fn num_curves(&self) -> usize {
         4
     }

@@ -8,6 +8,7 @@ use crate::editor::curve::CurveNode;
 use crate::dsp::modules::{GainMode, ModuleType, RouteMatrix};
 use crate::dsp::modules::future::FutureMode;
 use crate::dsp::modules::geometry::GeometryMode;
+use crate::dsp::modules::circuit::CircuitMode;
 use crate::dsp::modules::modulate::ModulateMode;
 use crate::dsp::modules::punch::PunchMode;
 use crate::dsp::modules::rhythm::{ArpGrid, RhythmMode};
@@ -158,6 +159,10 @@ pub struct SpectralForgeParams {
     /// Per-slot PhasePhaser / BinSwapper / RmFmMatrix / DiodeRm / GroundLoop selector
     /// for `ModulateModule`. Single mutex over the array so audio thread takes one lock per block.
     pub slot_modulate_mode: Arc<Mutex<[ModulateMode; 9]>>,
+
+    /// Per-slot BbdBins / SpectralSchmitt / CrossoverDistortion selector for `CircuitModule`.
+    /// Single mutex over the array (matches `slot_modulate_mode`) so audio thread takes one lock per block.
+    pub slot_circuit_mode: Arc<Mutex<[CircuitMode; 9]>>,
 
     /// Per-slot 8-voice × 8-step grid for `RhythmModule`'s Arpeggiator mode. One mutex over the
     /// array; UI panel writes, audio thread reads each block.
@@ -330,6 +335,7 @@ impl Default for SpectralForgeParams {
             slot_rhythm_mode: Arc::new(Mutex::new([RhythmMode::default(); 9])),
             slot_geometry_mode: Arc::new(Mutex::new([GeometryMode::default(); 9])),
             slot_modulate_mode: Arc::new(Mutex::new([ModulateMode::default(); 9])),
+            slot_circuit_mode: Arc::new(Mutex::new([CircuitMode::default(); 9])),
             slot_arp_grid:    Arc::new(Mutex::new([ArpGrid::default();    9])),
             slot_sc_gain_db: Arc::new(Mutex::new([0.0f32; 9])),
             slot_sc_channel: Arc::new(Mutex::new([ScChannel::Follow; 9])),
@@ -779,6 +785,7 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_rhythm_mode",   slot_rhythm_mode);
         persist_out!("slot_geometry_mode", slot_geometry_mode);
         persist_out!("slot_modulate_mode", slot_modulate_mode);
+        persist_out!("slot_circuit_mode",  slot_circuit_mode);
         persist_out!("slot_arp_grid",      slot_arp_grid);
         persist_out!("slot_curve_nodes",   slot_curve_nodes);
         persist_out!("editing_curve",      editing_curve);
@@ -833,6 +840,7 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_rhythm_mode"    => persist_in!("slot_rhythm_mode",    slot_rhythm_mode,    data),
                 "slot_geometry_mode"  => persist_in!("slot_geometry_mode",  slot_geometry_mode,  data),
                 "slot_modulate_mode"  => persist_in!("slot_modulate_mode",  slot_modulate_mode,  data),
+                "slot_circuit_mode"   => persist_in!("slot_circuit_mode",   slot_circuit_mode,   data),
                 "slot_arp_grid"       => persist_in!("slot_arp_grid",       slot_arp_grid,       data),
                 "slot_curve_nodes"    => persist_in!("slot_curve_nodes",   slot_curve_nodes,   data),
                 "editing_curve"       => persist_in!("editing_curve",      editing_curve,      data),
