@@ -788,6 +788,12 @@ fn punch_inverse_amount_max_probes_100_pct() {
 
 /// Like `run_case` but sets `ctx.bpm = 120.0` so the module doesn't passthrough.
 /// Without a positive bpm, Rhythm returns immediately and the probe stays at 0.
+///
+/// `beat_position = 0.0` puts the module at `step_idx = 0` for all three modes.
+/// At default DIVISION (1.0 → 8 steps), Bjorklund E(4,8) and E(8,8) both pulse
+/// at step 0, so the Euclidean tests fire the gate regardless of AMOUNT value.
+/// The probe captures the curve-derived value (e.g. PhaseReset `strength`),
+/// not the gated output (`strength * reset_env`).
 fn run_rhythm_case(
     module: &mut Box<dyn SpectralModule>,
     num_curves: usize,
