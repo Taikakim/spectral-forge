@@ -87,6 +87,8 @@ pub const MODULE_COLOR_LIT: Color32 = Color32::from_rgb(0x50, 0xc0, 0xc4);
 pub const MODULE_COLOR_DIM: Color32 = Color32::from_rgb(0x20, 0x40, 0x41);
 /// Geometry module dot color (teal/green, matches ModuleSpec color_lit).
 pub const GEOMETRY_DOT_COLOR: Color32 = Color32::from_rgb(0x50, 0xb4, 0xa0);
+/// Modulate module dot color (purple-magenta, matches ModuleSpec color_lit).
+pub const MODULATE_DOT_COLOR: Color32 = Color32::from_rgb(180, 100, 200);
 
 // ─── Freeze curve colours (4 equidistant, 30°, 120°, 210°, 300°) ─────────────
 

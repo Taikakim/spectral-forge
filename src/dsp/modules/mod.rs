@@ -28,6 +28,7 @@ pub enum ModuleType {
     Punch,
     Rhythm,
     Geometry,
+    Modulate,
     Master,
 }
 
@@ -388,6 +389,16 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
     };
+    static MODULATE: ModuleSpec = ModuleSpec {
+        display_name: "Modulate",
+        color_lit: crate::editor::theme::MODULATE_DOT_COLOR,
+        color_dim: Color32::from_rgb(0x36, 0x1e, 0x3c),
+        num_curves: 6,
+        curve_labels: &["AMOUNT", "REACH", "RATE", "THRESH", "AMPGATE", "MIX"],
+        supports_sidechain: true,
+        wants_sidechain: true,
+        panel_widget: None,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -421,6 +432,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Punch                  => &PUNCH,
         ModuleType::Rhythm                 => &RHY,
         ModuleType::Geometry               => &GEO,
+        ModuleType::Modulate               => &MODULATE,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -520,6 +532,7 @@ pub fn create_module(
         ModuleType::Rhythm                 => Box::new(rhythm::RhythmModule::new()),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
+        ModuleType::Modulate               => unimplemented!("Task 2 wires ModulateModule"),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };

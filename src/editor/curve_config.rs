@@ -52,6 +52,8 @@ pub fn curve_display_config(
         ModuleType::Rhythm   => rhythm_config(curve_idx),
         // TODO(2e.3): replace with geometry_config(curve_idx) when that task is implemented
         ModuleType::Geometry => default_config(),
+        // TODO(2f.3-2f.7): replace with modulate_config(curve_idx) when kernels land
+        ModuleType::Modulate => modulate_config(curve_idx),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
@@ -280,6 +282,13 @@ fn punch_config(_curve_idx: usize) -> CurveDisplayConfig {
 /// Tasks 2d.2-2d.9. All five curves currently fall through to default_config()
 /// until physical-unit display ranges are decided.
 fn rhythm_config(_curve_idx: usize) -> CurveDisplayConfig {
+    default_config()
+}
+
+/// Curve config for Modulate module. Stub — populated as the Modulate DSP lands
+/// in Tasks 2f.3-2f.7. All six curves currently fall through to default_config()
+/// until physical-unit display ranges are decided.
+fn modulate_config(_curve_idx: usize) -> CurveDisplayConfig {
     default_config()
 }
 
