@@ -83,8 +83,8 @@ pub struct ModuleContext<'block> {
     pub instantaneous_freq:   Option<&'block [f32]>,      // Phase 6.1
     pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
     pub midi_notes:           Option<&'block [bool; 128]>, // Phase 6.3
-    pub bpm:                  f32,                         // Phase 1 stub (0.0 until Phase 2 plumbs transport)
-    pub beat_position:        f64,                         // Phase 1 stub
+    pub bpm:                  f32,                         // live from host transport (0.0 if unavailable)
+    pub beat_position:        f64,                         // live from host transport (0.0 if unavailable)
     pub sidechain_derivative: Option<&'block [f32]>,      // Phase 5b/Modulate Slew Lag
 }
 
