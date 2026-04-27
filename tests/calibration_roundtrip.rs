@@ -51,6 +51,7 @@ fn run_case(
         None,
         &curves_refs,
         &mut suppression,
+        None,
         &ctx,
     );
     module.last_probe()
@@ -823,6 +824,7 @@ fn run_rhythm_case(
         None,
         &curves_refs,
         &mut suppression,
+        None,
         &ctx,
     );
     module.last_probe()

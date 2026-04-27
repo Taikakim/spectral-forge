@@ -89,7 +89,7 @@ fn freeze_threshold_default_is_minus_20_db() {
     );
     // Process once to capture initial frame.
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, None, &curves_ref, &mut supp, &ctx);
+              &mut bins, None, &curves_ref, &mut supp, None, &ctx);
 
     // Now craft bins at the expected threshold level (-20 dBFS) scaled by norm_factor.
     // norm_factor = fft_size / 4 = 512.
@@ -101,7 +101,7 @@ fn freeze_threshold_default_is_minus_20_db() {
     bins[100] = Complex::new(just_above, 0.0);
     bins[200] = Complex::new(just_below, 0.0);
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, None, &curves_ref, &mut supp, &ctx);
+              &mut bins, None, &curves_ref, &mut supp, None, &ctx);
     // Assert the calibration formula: curve=1.0 → -20 dBFS (matches y_natural from curve_config).
     let actual = spectral_forge::dsp::modules::freeze::curve_to_threshold_db(1.0);
     assert!(
@@ -138,7 +138,7 @@ fn gain_pull_peak_hold_decays_with_curve() {
         10.0, 80.0, 0.5, 0.0, false, false,
     );
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, Some(&sc_impulse), &curves_ref, &mut supp, &ctx);
+              &mut bins, Some(&sc_impulse), &curves_ref, &mut supp, None, &ctx);
     let env_after_hop1 = m.peak_env_at(100);
     assert!(env_after_hop1 > 4.0, "peak-hold envelope should capture impulse magnitude, got {}", env_after_hop1);
 
@@ -146,7 +146,7 @@ fn gain_pull_peak_hold_decays_with_curve() {
     for _ in 0..20 {
         let mut b = vec![Complex::new(1.0, 0.0); num_bins];
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-                  &mut b, Some(&sc_silent), &curves_ref, &mut supp, &ctx);
+                  &mut b, Some(&sc_silent), &curves_ref, &mut supp, None, &ctx);
     }
     let env_after_decay = m.peak_env_at(100);
     assert!(env_after_decay < env_after_hop1,
@@ -179,7 +179,7 @@ fn gain_add_mode_does_not_use_peak_hold() {
     );
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, Some(&sc), &curves_ref, &mut supp, &ctx);
+              &mut bins, Some(&sc), &curves_ref, &mut supp, None, &ctx);
 
     for k in 0..num_bins {
         assert_eq!(m.peak_env_at(k), 0.0, "Add mode must not touch peak-hold state at k={}", k);
@@ -228,7 +228,7 @@ fn gain_match_preserves_harmonics_but_tilts_broadband() {
     for i in 0..20 {
         bins = fresh_bins.clone();
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-                  &mut bins, Some(&sc), &curves_ref, &mut supp, &ctx);
+                  &mut bins, Some(&sc), &curves_ref, &mut supp, None, &ctx);
         let _ = i;
     }
 
@@ -285,9 +285,9 @@ fn phase_smear_sc_modulates_amount() {
     );
 
     a.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins_a, Some(&sc_hot),  &curves_ref, &mut supp_a, &ctx);
+              &mut bins_a, Some(&sc_hot),  &curves_ref, &mut supp_a, None, &ctx);
     b.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins_b, Some(&sc_cold), &curves_ref, &mut supp_b, &ctx);
+              &mut bins_b, Some(&sc_cold), &curves_ref, &mut supp_b, None, &ctx);
 
     let diff_a: f32 = bins_a.iter().skip(1).take(num_bins - 2)
         .map(|c| (c.arg()).abs()).sum();

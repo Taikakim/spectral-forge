@@ -468,18 +468,18 @@ fn mid_side_module_compiles_and_passes_through_at_neutral() {
     );
 
     // Mid channel — neutral balance (1.0) → mid_scale = sqrt(1.0) = 1.0 → bins unchanged
-    m.process(0, StereoLink::MidSide, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
+    m.process(0, StereoLink::MidSide, FxChannelTarget::All, &mut bins, None, curves, &mut supp, None, &ctx);
     let mid_out = bins[10].norm();
     assert!(mid_out > 0.5, "mid signal should survive neutral M/S processing, got {}", mid_out);
 
     // Side channel — neutral: bal=1 → side_scale=1, exp=1 → no change
     let mut side_bins = vec![Complex::new(0.5f32, 0.0); n];
-    m.process(1, StereoLink::MidSide, FxChannelTarget::All, &mut side_bins, None, curves, &mut supp, &ctx);
+    m.process(1, StereoLink::MidSide, FxChannelTarget::All, &mut side_bins, None, curves, &mut supp, None, &ctx);
     assert!(side_bins[10].norm() > 0.1, "side signal should survive neutral M/S processing");
 
     // When NOT in MidSide mode — neutral balance (1.0) → mid_scale = sqrt(1.0) = 1.0 → bins unchanged
     let mut bypass_bins = vec![Complex::new(1.0f32, 0.0); n];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bypass_bins, None, curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bypass_bins, None, curves, &mut supp, None, &ctx);
     assert!((bypass_bins[10].re - 1.0).abs() < 1e-5, "MidSide module with neutral balance should pass through in Linked mode, got {}", bypass_bins[10].re);
 }
 
@@ -576,12 +576,12 @@ fn contrast_module_neutral_curve_passes_flat_spectrum() {
     // Converge the contrast envelope with a flat spectrum
     for _ in 0..500 {
         let mut bins = vec![Complex::new(input_mag, 0.0f32); n];
-        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, None, &ctx);
     }
 
     // Final measurement hop
     let mut final_bins = vec![Complex::new(input_mag, 0.0f32); n];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut final_bins, None, curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut final_bins, None, curves, &mut supp, None, &ctx);
 
     // With a flat spectrum and ratio=1.0, all bins should pass through within 1%
     for (k, b) in final_bins.iter().enumerate() {
@@ -616,7 +616,7 @@ fn ts_split_virtual_outputs_populated_after_process() {
         44100.0, 2048, n,
         10.0, 100.0, 0.0, 0.0, false, false,
     );
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, None, &ctx);
 
     let vouts = m.virtual_outputs().unwrap();
     // After first process: transient + sustained together must sum to roughly the input energy
@@ -715,7 +715,7 @@ fn mid_side_module_processes_in_linked_mode() {
     );
 
     // Channel 0 in Linked mode: balance=0.5 → mid_scale = sqrt(0.5) ≈ 0.707 → bins reduced
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, None, &ctx);
     let out_mag = bins[10].norm();
     assert!(
         out_mag < 0.95,
@@ -754,7 +754,7 @@ fn mid_side_side_channel_preserves_real_dc_and_nyquist() {
         10.0, 100.0, 0.0, 0.0, false, false,
     );
 
-    m.process(1, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
+    m.process(1, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, None, &ctx);
 
     assert_eq!(bins[0].im, 0.0, "DC bin imaginary part must be zero after M/S side processing");
     assert_eq!(bins[n - 1].im, 0.0, "Nyquist bin imaginary part must be zero after M/S side processing");

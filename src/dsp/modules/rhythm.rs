@@ -139,6 +139,7 @@ impl SpectralModule for RhythmModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
+        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         ctx: &ModuleContext<'_>,
     ) {
         suppression_out.fill(0.0);

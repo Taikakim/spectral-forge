@@ -39,7 +39,7 @@ fn circuit_module_constructs_and_passes_through() {
     );
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     for k in 0..num_bins {
         let diff = (bins[k] - dry[k]).norm();
@@ -113,14 +113,14 @@ fn circuit_bbd_delays_and_lowpasses() {
     );
 
     // Hop 1: input enters stage 0; output (stage 3) is still small.
-    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
     let after_hop_1 = bins[100].norm();
     assert!(after_hop_1 < 4.0, "BBD must delay (bin 100 still at {} after hop 1)", after_hop_1);
 
     // Drive zero-input hops so the previously-injected energy propagates through stages.
     for _ in 0..4 {
         for b in bins.iter_mut() { *b = Complex::new(0.0, 0.0); }
-        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
     }
     let final_mag = bins[100].norm();
     assert!(final_mag > 0.05, "BBD did not propagate signal through stages (final={})", final_mag);
@@ -161,19 +161,19 @@ fn circuit_schmitt_hysteresis_latches_above_threshold() {
         0.5, false, false,
     );
 
-    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     assert!((bins[100].norm() - 2.0).abs() < 0.1, "bin 100 should latch ON (got {})", bins[100].norm());
     assert!(bins[101].norm() < 0.04, "bin 101 should latch OFF (got {})", bins[101].norm());
 
     // Drop bin 100 to 0.6 — inside hysteresis band [0.5, 1.0]. Should hold ON.
     bins[100] = Complex::new(0.6, 0.0);
-    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
     assert!(bins[100].norm() > 0.5, "bin 100 should hold ON in hysteresis band (got {})", bins[100].norm());
 
     // Drop bin 100 to 0.3 — below low (0.5). Should latch OFF.
     bins[100] = Complex::new(0.3, 0.0);
-    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
     assert!(bins[100].norm() < 0.1, "bin 100 should latch OFF after falling below low (got {})", bins[100].norm());
 }
 
@@ -208,7 +208,7 @@ fn circuit_crossover_smooth_deadzone() {
         0.5, false, false,
     );
 
-    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     assert!(bins[10].norm() < 0.005, "bin 10 should be deadzoned (got {})", bins[10].norm());
     assert!(bins[50].norm() > 0.0 && bins[50].norm() < 0.1,
@@ -266,7 +266,7 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
             for ch in 0..2 {
                 let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
                 module.process(ch, StereoLink::Independent, FxChannelTarget::All,
-                               bins, None, &curves, &mut suppression, &ctx);
+                               bins, None, &curves, &mut suppression, None, &ctx);
                 for (i, b) in bins.iter().enumerate() {
                     assert!(b.norm().is_finite(),
                         "mode={:?} hop={} ch={} bin={} norm={}",

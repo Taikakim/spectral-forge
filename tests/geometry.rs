@@ -43,7 +43,7 @@ fn geometry_fully_dry_passthrough_zeros_suppression() {
     );
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, None, &curves, &mut supp, &ctx);
+              &mut bins, None, &curves, &mut supp, None, &ctx);
 
     // AMOUNT=0 + MIX=0: bins must be unchanged and suppression_out zeroed.
     for (a, b) in bins.iter().zip(original.iter()) {
@@ -109,7 +109,7 @@ fn chladni_redistributes_energy_with_minimal_loss() {
     );
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, None, &curves, &mut supp, &ctx);
+              &mut bins, None, &curves, &mut supp, None, &ctx);
 
     // Conservation: with no damping, total magnitude should drop by < 5%.
     let wet_total: f32 = bins.iter().map(|b| b.norm()).sum();
@@ -158,7 +158,7 @@ fn chladni_passthrough_when_amount_zero() {
     );
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-              &mut bins, None, &curves, &mut supp, &ctx);
+              &mut bins, None, &curves, &mut supp, None, &ctx);
 
     for (a, b) in bins.iter().zip(original.iter()) {
         assert!((a.re - b.re).abs() < 1e-5 && (a.im - b.im).abs() < 1e-5,
@@ -210,6 +210,7 @@ fn geometry_helmholtz_absorbs_and_overflows() {
             None,
             &curves,
             &mut suppression,
+            None,
             &ctx,
         );
         // Re-inject input each hop.
@@ -224,6 +225,7 @@ fn geometry_helmholtz_absorbs_and_overflows() {
         None,
         &curves,
         &mut suppression,
+        None,
         &ctx,
     );
 
@@ -303,6 +305,7 @@ fn geometry_finite_bounded_dual_channel_multi_hop() {
                     None,
                     &curves,
                     &mut suppression,
+                    None,
                     &ctx,
                 );
                 for (i, b) in bins.iter().enumerate() {
@@ -363,7 +366,7 @@ fn geometry_mode_dispatch_via_trait_setter() {
         .map(|k| Complex::new(1.0 + (k as f32) * 0.001, 0.0))
         .collect();
     m_chladni.process(0, StereoLink::Linked, FxChannelTarget::All,
-                      &mut bins_chladni, None, &curves, &mut supp, &ctx);
+                      &mut bins_chladni, None, &curves, &mut supp, None, &ctx);
 
     // Run Helmholtz variant via the trait setter.
     let mut m_helmholtz = create_module(ModuleType::Geometry, 48_000.0, 2048);
@@ -372,7 +375,7 @@ fn geometry_mode_dispatch_via_trait_setter() {
         .map(|k| Complex::new(1.0 + (k as f32) * 0.001, 0.0))
         .collect();
     m_helmholtz.process(0, StereoLink::Linked, FxChannelTarget::All,
-                        &mut bins_helmholtz, None, &curves, &mut supp, &ctx);
+                        &mut bins_helmholtz, None, &curves, &mut supp, None, &ctx);
 
     // The two modes must produce different outputs (they use completely different kernels).
     let same = bins_chladni.iter().zip(bins_helmholtz.iter())

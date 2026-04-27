@@ -46,7 +46,7 @@ fn rhythm_module_skeleton_is_passthrough() {
     );
     // bpm/beat_position default to 0.0 in ::new; nothing to set for this test.
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     // Skeleton process() is a no-op stub: bins must be unchanged and suppression_out zeroed.
     for (a, b) in bins.iter().zip(original.iter()) {
         assert!((a.re - b.re).abs() < 1e-3 && (a.im - b.im).abs() < 1e-3);
@@ -101,7 +101,7 @@ fn euclidean_gate_silences_off_steps() {
     let mut bins = vec![Complex::new(1.0, 0.0); 513];
     let mut supp = vec![0.0f32; 513];
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     // At step 0, Bresenham Bjorklund(5,8)[0] = true → gate open → bins pass.
     // depth=1.0, mix=1.0, af=0.0 → gain == 1.0 → bins must equal input (1.0, 0.0).
     for (idx, c) in bins.iter().enumerate() {
@@ -144,7 +144,7 @@ fn euclidean_gate_silences_off_step() {
     let mut bins = vec![Complex::new(1.0, 0.0); 513];
     let mut supp = vec![0.0f32; 513];
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
 
     // gate closed, depth=1.0 (most bins), mix=1.0:
     // gain = 1 - 1.0 + 1.0*0.0 = 0.0 → bins ~0.
@@ -211,7 +211,7 @@ fn arpeggiator_advances_at_step_crossing() {
     ctx.bpm = 120.0;
     ctx.beat_position = 0.0;
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     // Voice 0 active at step 0 → its peak bin (50) should pass through.
     // Voice 1 inactive at step 0 → its peak bin (100) should be silenced (with mix=1.0).
     // Non-peak bins should be silenced.
@@ -232,7 +232,7 @@ fn arpeggiator_advances_at_step_crossing() {
     ctx2.bpm = 120.0;
     ctx2.beat_position = 2.0;
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx2);
+        &mut bins, None, &curves, &mut supp, None, &ctx2);
     // Voice 1 active at step 4 → its peak bin (100) should pass through.
     // Voice 0 inactive at step 4 → its peak bin (50) should be silenced.
     assert!(bins[100].norm() > 0.5,
@@ -274,7 +274,7 @@ fn phase_reset_overwrites_phase_at_step_crossing() {
     ctx.beat_position = 0.0; // step boundary: step_pos=0.0 < 0.05 → reset_env=1.0
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
 
     let bin = bins[100];
     let original_mag = (1.0_f32 * 1.0 + 1.0 * 1.0).sqrt(); // sqrt(2) ≈ 1.4142
@@ -328,7 +328,7 @@ fn phase_reset_preserves_dc_and_nyquist_real() {
     ctx.beat_position = 0.0;
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
 
     // DC (k=0) and Nyquist (k=512) MUST stay real (im == 0).
     // Without the guard, sin(π/2) = 1.0 would inject im=1.0 at these bins → realfft panic.

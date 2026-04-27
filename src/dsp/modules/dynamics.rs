@@ -69,6 +69,7 @@ impl SpectralModule for DynamicsModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
+        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         ctx: &ModuleContext<'_>,
     ) {
         // Channel gating: skip if this slot's target doesn't match channel/mode.

@@ -332,6 +332,7 @@ impl FxMatrix {
                     &mut self.mix_buf[..num_bins],
                     sc_args[s], curves,
                     &mut self.slot_supp[s][..num_bins],
+                    None,
                     ctx,
                 );
                 self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
@@ -379,6 +380,7 @@ impl FxMatrix {
                 &mut self.mix_buf[..num_bins],
                 sc_args[8], curves_empty,
                 &mut self.slot_supp[8][..num_bins],
+                None,
                 ctx,
             );
         }

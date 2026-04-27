@@ -8,7 +8,8 @@ impl SpectralModule for MasterModule {
     fn process(
         &mut self, _: usize, _: StereoLink, _: FxChannelTarget,
         _: &mut [Complex<f32>], _: Option<&[f32]>, _: &[&[f32]],
-        suppression_out: &mut [f32], _: &ModuleContext<'_>,
+        suppression_out: &mut [f32], _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+        _: &ModuleContext<'_>,
     ) { suppression_out.fill(0.0); }
     fn module_type(&self) -> ModuleType { ModuleType::Master }
     fn num_curves(&self) -> usize { 0 }
@@ -23,7 +24,8 @@ impl SpectralModule for EmptyModule {
     fn process(
         &mut self, _: usize, _: StereoLink, _: FxChannelTarget,
         _: &mut [Complex<f32>], _: Option<&[f32]>, _: &[&[f32]],
-        suppression_out: &mut [f32], _: &ModuleContext<'_>,
+        suppression_out: &mut [f32], _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+        _: &ModuleContext<'_>,
     ) { suppression_out.fill(0.0); }
     fn module_type(&self) -> ModuleType { ModuleType::Empty }
     fn num_curves(&self) -> usize { 0 }

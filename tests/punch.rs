@@ -37,7 +37,7 @@ fn punch_module_no_sidechain_is_passthrough() {
     );
     // No sidechain → no carve → output ≈ input
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     for (a, b) in bins.iter().zip(original.iter()) {
         assert!((a.re - b.re).abs() < 1e-4 && (a.im - b.im).abs() < 1e-4,
             "no-sidechain Punch should be transparent, got {:?} vs {:?}", a, b);
@@ -116,7 +116,7 @@ fn direct_punch_carves_at_sidechain_peaks() {
     // Run several hops so the attack follower converges (5 ms attack, 8 hops × ~5 ms).
     for _ in 0..8 {
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, Some(&sc), &curves, &mut supp, &ctx);
+            &mut bins, Some(&sc), &curves, &mut supp, None, &ctx);
     }
 
     // Bin 100 should be heavily attenuated by the carve.
@@ -169,7 +169,7 @@ fn inverse_punch_carves_quiet_valleys_not_loud_peaks() {
 
     for _ in 0..8 {
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, Some(&sc), &curves, &mut supp, &ctx);
+            &mut bins, Some(&sc), &curves, &mut supp, None, &ctx);
     }
 
     // Bin 100 (SC loud) should be PRESERVED in Inverse mode.
@@ -213,7 +213,7 @@ fn pitch_fill_caps_drift_at_half_bin() {
     for _ in 0..50 {
         bins = vec![Complex::new(1.0, 0.0); 513];
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, Some(&sc), &curves, &mut supp, &ctx);
+            &mut bins, Some(&sc), &curves, &mut supp, None, &ctx);
     }
     // Inspect the per-channel drift_accum array (test-only public).
     for k in 0..513 {
@@ -252,7 +252,7 @@ fn healing_follows_chosen_time_constant() {
     for _ in 0..30 {
         let mut bins = vec![Complex::new(1.0, 0.0); 513];
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, Some(&sc), &curves, &mut supp, &ctx);
+            &mut bins, Some(&sc), &curves, &mut supp, None, &ctx);
     }
     let depth_engaged = m.current_carve_depth_slice(0)[100];
     assert!(depth_engaged > 0.3, "carve should be engaged; got {}", depth_engaged);
@@ -264,7 +264,7 @@ fn healing_follows_chosen_time_constant() {
     for _ in 0..hops_per_150ms {
         let mut bins = vec![Complex::new(1.0, 0.0); 513];
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, Some(&sc_silent), &curves, &mut supp, &ctx);
+            &mut bins, Some(&sc_silent), &curves, &mut supp, None, &ctx);
     }
     let depth_decayed = m.current_carve_depth_slice(0)[100];
     let ratio = depth_decayed / depth_engaged;

@@ -82,6 +82,7 @@ impl SpectralModule for FutureModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
+        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         _ctx: &ModuleContext<'_>,
     ) {
         let ch = channel.min(1);

@@ -100,6 +100,7 @@ impl SpectralModule for PunchModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
+        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         ctx: &ModuleContext<'_>,
     ) {
         let ch = channel.min(1);

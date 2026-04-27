@@ -32,7 +32,7 @@ fn future_module_starts_silent() {
         10.0, 100.0, 0.5, 1.0, false, false,
     );
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     for c in &bins { assert!(c.re.is_finite() && c.im.is_finite()); }
 }
 
@@ -75,7 +75,7 @@ fn print_through_writes_ahead_then_reads() {
     bins[100] = Complex::new(1.0, 0.0);
     let mut supp = vec![0.0f32; 513];
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     assert!(bins[100].norm() < 0.01,
         "hop 0 wet should be silent (no historical data yet)");
 
@@ -83,13 +83,13 @@ fn print_through_writes_ahead_then_reads() {
     for _ in 1..=7 {
         let mut buf = vec![Complex::new(0.0, 0.0); 513];
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut buf, None, &curves, &mut supp, &ctx);
+            &mut buf, None, &curves, &mut supp, None, &ctx);
     }
 
     // Hop 8: silence in; the impulse written at hop 0 should now read out.
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
-        &mut bins, None, &curves, &mut supp, &ctx);
+        &mut bins, None, &curves, &mut supp, None, &ctx);
     // 5% leak × MIX=1.0 → expect ~0.05 magnitude at bin 100.
     assert!(bins[100].norm() > 0.03 && bins[100].norm() < 0.08,
         "hop 8 should read back the print-through with ~5% leak; got {}",
@@ -121,15 +121,15 @@ fn print_through_spread_bleeds_to_adjacent_bins() {
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
     bins[100] = Complex::new(1.0, 0.0);
     let mut supp = vec![0.0f32; 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
 
     for _ in 1..=7 {
         let mut buf = vec![Complex::new(0.0, 0.0); 513];
-        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, None, &ctx);
     }
 
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
     assert!(bins[99].norm()  > 0.005, "spread should bleed left, got {}",  bins[99].norm());
     assert!(bins[101].norm() > 0.005, "spread should bleed right, got {}", bins[101].norm());
 }
@@ -157,14 +157,14 @@ fn print_through_spread_at_max_preserves_neighbour_phase() {
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
     bins[100] = Complex::new(0.0, 1.0);
     let mut supp = vec![0.0f32; 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
 
     for _ in 1..=7 {
         let mut buf = vec![Complex::new(0.0, 0.0); 513];
-        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, None, &ctx);
     }
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
 
     // At max spread, centre bin 100 should be much smaller than neighbours (secondary echo
     // re-accumulation means it won't be exactly zero, but it should be small). Bin 99 + 101
@@ -201,16 +201,16 @@ fn pre_echo_full_signal_arrives_at_delay() {
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
     bins[100] = Complex::new(1.0, 0.0);
     let mut supp = vec![0.0f32; 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
 
     for _ in 1..=7 {
         let mut buf = vec![Complex::new(0.0, 0.0); 513];
-        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, None, &ctx);
     }
 
     // Hop 8: should hear the full impulse (post-mix).
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
     assert!(bins[100].norm() > 0.4,
         "pre-echo at delay should give near-full magnitude; got {}", bins[100].norm());
 }
@@ -239,13 +239,13 @@ fn pre_echo_feedback_creates_decaying_taps() {
     let mut bins = vec![Complex::new(0.0, 0.0); 513];
     bins[100] = Complex::new(1.0, 0.0);
     let mut supp = vec![0.0f32; 513];
-    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, None, &ctx);
 
     // Run silence for many hops; with high feedback, energy should persist.
     let mut peak_after_long_decay = 0.0f32;
     for h in 1..=24 {
         let mut buf = vec![Complex::new(0.0, 0.0); 513];
-        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, None, &ctx);
         if h >= 16 { peak_after_long_decay = peak_after_long_decay.max(buf[100].norm()); }
         for c in &buf { assert!(c.norm() <= 4.0, "feedback runaway at hop {}: |c|={}", h, c.norm()); }
     }
@@ -283,7 +283,7 @@ fn pre_echo_max_settings_is_bounded() {
         bins[100] = Complex::new(1.0, 0.0);
         let mut supp = vec![0.0f32; 513];
         m.process(0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, None, &curves, &mut supp, &ctx);
+            &mut bins, None, &curves, &mut supp, None, &ctx);
         for c in &bins {
             assert!(c.norm() <= 16.0, "PreEcho diverged at hop {} | bin |c|={}", h, c.norm());
             peak = peak.max(c.norm());

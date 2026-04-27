@@ -32,6 +32,7 @@ impl spectral_forge::dsp::modules::SpectralModule for HeavyZeroModule {
         _sidechain: Option<&[f32]>,
         _curves: &[&[f32]],
         suppression_out: &mut [f32],
+        _physics: Option<&mut spectral_forge::dsp::bin_physics::BinPhysics>,
         _ctx: &spectral_forge::dsp::modules::ModuleContext<'_>,
     ) {
         // Stamp every bin with zero so the caller can detect whether this ran.

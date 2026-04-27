@@ -51,6 +51,7 @@ impl SpectralModule for PhaseSmearModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
+        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         _ctx: &ModuleContext<'_>,
     ) {
         if bins.is_empty() { suppression_out.fill(0.0); return; }

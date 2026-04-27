@@ -39,7 +39,7 @@ fn modulate_module_constructs_and_passes_through() {
     );
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     for k in 0..num_bins {
         let diff = (bins[k] - dry[k]).norm();
@@ -100,7 +100,7 @@ fn modulate_phase_phaser_rotates_phase_and_preserves_magnitude() {
         // Re-seed bins each hop so we test rotation, not accumulated drift.
         for b in bins.iter_mut() { *b = Complex::new(1.0, 0.0); }
         module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                       &mut bins, None, &curves, &mut suppression, &ctx);
+                       &mut bins, None, &curves, &mut suppression, None, &ctx);
     }
 
     // Magnitudes preserved (rotation is unit-modulus).
@@ -139,7 +139,7 @@ fn modulate_phase_phaser_amount_zero_passthrough() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     for k in 0..num_bins {
         let diff = (bins[k] - dry[k]).norm();
@@ -175,7 +175,7 @@ fn modulate_bin_swapper_blends_to_offset_neighbour() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     // Bin 100: AMOUNT=1 means it pulls fully from bin 105 which was 0 → bin 100 should be 0.
     assert!(bins[100].norm() < 1.0, "bin 100 still hot ({}) — swap did not pull silence in", bins[100].norm());
@@ -210,7 +210,7 @@ fn modulate_bin_swapper_amount_zero_passthrough() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     for k in 0..num_bins {
         let diff = (bins[k] - dry[k]).norm();
@@ -250,7 +250,7 @@ fn modulate_rm_fm_matrix_amplifies_at_sidechain_spike() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, Some(&sc), &curves, &mut suppression, &ctx);
+                   &mut bins, Some(&sc), &curves, &mut suppression, None, &ctx);
 
     // Bin 200: RM = dry × sc × reach = 1 × 4 × 2 = 8. With THRESH=0 and MIX=1.
     assert!(bins[200].norm() > 6.0, "bin 200 = {} (expected ≈ 8 from RM)", bins[200].norm());
@@ -290,7 +290,7 @@ fn modulate_rm_fm_pure_fm_preserves_magnitude() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, Some(&sc), &curves, &mut suppression, &ctx);
+                   &mut bins, Some(&sc), &curves, &mut suppression, None, &ctx);
 
     // Pure FM rotates phase but magnitude must remain ≈ 0.5.
     for k in 0..num_bins {
@@ -324,7 +324,7 @@ fn modulate_rm_fm_no_sidechain_passes_through() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     for k in 0..num_bins {
         let diff = (bins[k] - dry[k]).norm();
@@ -374,9 +374,9 @@ fn modulate_diode_rm_leaks_carrier_when_input_quiet() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module_quiet.process(0, StereoLink::Linked, FxChannelTarget::All,
-                         &mut bins_quiet, Some(&sc), &curves, &mut suppression, &ctx);
+                         &mut bins_quiet, Some(&sc), &curves, &mut suppression, None, &ctx);
     module_loud.process(0, StereoLink::Linked, FxChannelTarget::All,
-                        &mut bins_loud, Some(&sc), &curves, &mut suppression, &ctx);
+                        &mut bins_loud, Some(&sc), &curves, &mut suppression, None, &ctx);
 
     let quiet_out = bins_quiet[300].norm();
     let loud_out  = bins_loud[300].norm();
@@ -416,7 +416,7 @@ fn modulate_diode_rm_no_sidechain_passes_through() {
     let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
 
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     for k in 0..num_bins {
         let diff = (bins[k] - dry[k]).norm();
@@ -454,14 +454,14 @@ fn modulate_ground_loop_injects_mains_harmonics() {
     // Run several hops to fill RMS history and let injection accumulate.
     for _ in 0..20 {
         module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                       &mut bins, None, &curves, &mut suppression, &ctx);
+                       &mut bins, None, &curves, &mut suppression, None, &ctx);
         // Re-seed bins each hop to keep RMS high.
         for b in bins.iter_mut() { *b = Complex::new(0.5, 0.0); }
     }
 
     // One more process with no re-seed so we can read the injected magnitudes.
     module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, &ctx);
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
 
     let mains_bin = ((50.0_f32 * 2048.0 / 48_000.0).round() as usize).max(1);
     assert_eq!(mains_bin, 2, "mains_bin should be 2 at 48kHz/2048 for 50Hz");
@@ -507,7 +507,7 @@ fn modulate_ground_loop_silent_input_no_injection() {
 
     for _ in 0..10 {
         module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                       &mut bins, None, &curves, &mut suppression, &ctx);
+                       &mut bins, None, &curves, &mut suppression, None, &ctx);
     }
 
     for k in 0..num_bins {
@@ -605,6 +605,7 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
                     Some(&sc),
                     &curves,
                     &mut suppression,
+                    None,
                     &ctx,
                 );
                 for (i, b) in bins.iter().enumerate() {
