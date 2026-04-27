@@ -1,3 +1,4 @@
+pub mod amp_modes;
 pub mod guard;
 pub mod modules;
 pub mod pipeline;
