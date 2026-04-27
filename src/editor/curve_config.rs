@@ -49,6 +49,7 @@ pub fn curve_display_config(
         ModuleType::TransientSustainedSplit => ts_split_config(curve_idx),
         ModuleType::Future   => future_config(curve_idx),
         ModuleType::Punch    => punch_config(curve_idx),
+        ModuleType::Rhythm   => rhythm_config(curve_idx),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
@@ -270,6 +271,13 @@ fn future_config(_curve_idx: usize) -> CurveDisplayConfig {
 /// Tasks 2c.2-2c.6. All six curves currently fall through to default_config()
 /// until physical-unit display ranges are decided.
 fn punch_config(_curve_idx: usize) -> CurveDisplayConfig {
+    default_config()
+}
+
+/// Curve config for Rhythm module. Stub — populated as the Rhythm DSP lands in
+/// Tasks 2d.2-2d.9. All five curves currently fall through to default_config()
+/// until physical-unit display ranges are decided.
+fn rhythm_config(_curve_idx: usize) -> CurveDisplayConfig {
     default_config()
 }
 

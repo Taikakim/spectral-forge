@@ -26,6 +26,7 @@ pub enum ModuleType {
     Harmonic,
     Future,
     Punch,
+    Rhythm,
     Master,
 }
 
@@ -358,6 +359,16 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: true,
         panel_widget: None,
     };
+    static RHY: ModuleSpec = ModuleSpec {
+        display_name: "Rhythm",
+        color_lit: Color32::from_rgb(0xc8, 0xb0, 0x60),
+        color_dim: Color32::from_rgb(0x42, 0x38, 0x20),
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "DIVISION", "ATTACK_FADE", "TARGET_PHASE", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain:    false,
+        panel_widget: None, // Task 7 will flip this to Some(crate::editor::rhythm_panel::render)
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -389,6 +400,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Harmonic               => &HARM,
         ModuleType::Future                 => &FUT,
         ModuleType::Punch                  => &PUNCH,
+        ModuleType::Rhythm                 => &RHY,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -485,6 +497,7 @@ pub fn create_module(
         ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
         ModuleType::Future                 => Box::new(future::FutureModule::new()),
         ModuleType::Punch                  => Box::new(punch::PunchModule::new()),
+        ModuleType::Rhythm                 => Box::new(master::EmptyModule), // stub; Task 3 replaces
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),

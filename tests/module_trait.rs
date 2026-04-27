@@ -11,6 +11,7 @@ fn supports_sidechain_flag_matches_spec() {
     assert!(!module_spec(ModuleType::TransientSustainedSplit).supports_sidechain);
     assert!(!module_spec(ModuleType::Harmonic).supports_sidechain);
     assert!(!module_spec(ModuleType::Future).supports_sidechain);
+    assert!(!module_spec(ModuleType::Rhythm).supports_sidechain);
     assert!(!module_spec(ModuleType::Master).supports_sidechain);
     assert!(!module_spec(ModuleType::Empty).supports_sidechain);
 }
