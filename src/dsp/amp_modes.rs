@@ -210,3 +210,37 @@ fn apply_stiction(p: &AmpCellParams, buf: &mut [Complex<f32>], accumulator: &mut
         *c = phase_unit * out_mag;
     }
 }
+
+/// Calibration probe: snapshot of an amp cell's per-bin state at a single bin.
+/// Lets tests and the (probe-feature-gated) UI inspect what the kernel is doing
+/// without exposing the inner Vecs directly.
+#[cfg(any(test, feature = "probe"))]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AmpProbe {
+    pub amount_pct: Option<f32>,
+    pub state_at_k: Option<f32>,
+    pub release_ms: Option<f32>,
+}
+
+#[cfg(any(test, feature = "probe"))]
+pub fn probe_amp_state(state: &AmpNodeState, k: usize) -> AmpProbe {
+    match state {
+        AmpNodeState::Linear => AmpProbe::default(),
+        AmpNodeState::Vactrol  { cap } => AmpProbe {
+            state_at_k: cap.get(k).copied(),
+            ..Default::default()
+        },
+        AmpNodeState::Schmitt  { latch } => AmpProbe {
+            state_at_k: latch.get(k).map(|&b| if b { 1.0 } else { 0.0 }),
+            ..Default::default()
+        },
+        AmpNodeState::Slew     { current_db } => AmpProbe {
+            state_at_k: current_db.get(k).copied(),
+            ..Default::default()
+        },
+        AmpNodeState::Stiction { last_out, .. } => AmpProbe {
+            state_at_k: last_out.get(k).copied(),
+            ..Default::default()
+        },
+    }
+}

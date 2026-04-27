@@ -222,6 +222,20 @@ fn process_hop_amp_attenuates_send() {
     }
 }
 
+#[cfg(feature = "probe")]
+#[test]
+fn vactrol_probe_records_state_at_test_bin() {
+    use spectral_forge::dsp::amp_modes::probe_amp_state;
+    let mut state = AmpNodeState::Vactrol { cap: vec![0.0; 16] };
+    if let AmpNodeState::Vactrol { cap } = &mut state {
+        cap[5] = 0.42;
+    }
+    let probe = probe_amp_state(&state, 5);
+    assert_eq!(probe.amount_pct, None);
+    assert_eq!(probe.state_at_k, Some(0.42));
+    assert_eq!(probe.release_ms, None);
+}
+
 #[test]
 fn fft_size_change_clears_amp_state() {
     let types = [ModuleType::Empty; 9];
