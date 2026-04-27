@@ -62,6 +62,44 @@ fn apply_phase_phaser(
     }
 }
 
+// ── Bin Swapper kernel ────────────────────────────────────────────────────
+
+fn apply_bin_swapper(
+    bins: &mut [Complex<f32>],
+    scratch: &mut [Complex<f32>],
+    curves: &[&[f32]],
+) {
+    let amount_c = curves[0];
+    let reach_c  = curves[1];
+    let thresh_c = curves[3];
+    let mix_c    = curves[5];
+
+    let num_bins = bins.len();
+
+    // Snapshot current bins into scratch — needed because swap reads other indices.
+    scratch[..num_bins].copy_from_slice(&bins[..num_bins]);
+
+    for k in 0..num_bins {
+        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1 blend
+        let reach  = reach_c[k].clamp(0.0, 4.0);
+        let offset = (reach * 5.0).round() as i32;       // up to 20 bins offset
+        let thresh = thresh_c[k].clamp(0.0, 4.0) * 0.1; // magnitude floor
+        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;    // 0..1
+
+        let cur_mag = scratch[k].norm();
+        if cur_mag < thresh {
+            // Below threshold: leave bin untouched.
+            continue;
+        }
+
+        let target_idx = (k as i32 + offset).clamp(0, num_bins as i32 - 1) as usize;
+        let dry   = scratch[k];
+        let other = scratch[target_idx];
+        let wet   = dry * (1.0 - amount) + other * amount;
+        bins[k]   = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,7 +122,7 @@ pub struct ModulateModule {
     /// Accumulated hop count per channel (used by phase animation kernels).
     hop_count: [u64; 2],
     /// Per-channel scratch buffer for BinSwapper (length = num_bins after reset).
-    swap_scratch: [Vec<f32>; 2],
+    swap_scratch: [Vec<Complex<f32>>; 2],
     /// Per-channel RMS history ring buffers (16 frames each).
     rms_history: [[f32; 16]; 2],
     /// Current write index into rms_history for each channel.
@@ -100,7 +138,7 @@ impl ModulateModule {
         Self {
             mode:         ModulateMode::default(),
             hop_count:    [0; 2],
-            swap_scratch: [Vec::new(), Vec::new()],
+            swap_scratch: [Vec::<Complex<f32>>::new(), Vec::<Complex<f32>>::new()],
             rms_history:  [[0.0; 16]; 2],
             rms_idx:      [0; 2],
             sample_rate:  48_000.0,
@@ -117,7 +155,7 @@ impl ModulateModule {
             self.rms_history  = [[0.0; 16]; 2];
             self.rms_idx      = [0; 2];
             for ch in 0..2 {
-                for v in self.swap_scratch[ch].iter_mut() { *v = 0.0; }
+                for v in self.swap_scratch[ch].iter_mut() { *v = Complex::new(0.0, 0.0); }
             }
             self.mode = mode;
         }
@@ -146,6 +184,10 @@ impl SpectralModule for ModulateModule {
                 apply_phase_phaser(bins, self.hop_count[channel], curves);
                 self.hop_count[channel] = self.hop_count[channel].wrapping_add(1);
             }
+            ModulateMode::BinSwapper => {
+                let scratch = &mut self.swap_scratch[channel];
+                apply_bin_swapper(bins, scratch, curves);
+            }
             _ => {
                 // Other modes filled in subsequent tasks.
             }
@@ -165,7 +207,7 @@ impl SpectralModule for ModulateModule {
         let num_bins = fft_size / 2 + 1;
         for ch in 0..2 {
             self.swap_scratch[ch].clear();
-            self.swap_scratch[ch].resize(num_bins, 0.0);
+            self.swap_scratch[ch].resize(num_bins, Complex::new(0.0, 0.0));
             self.rms_history[ch] = [0.0; 16];
             self.rms_idx[ch]     = 0;
         }

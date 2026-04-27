@@ -146,3 +146,74 @@ fn modulate_phase_phaser_amount_zero_passthrough() {
         assert!(diff < 1e-5, "bin {} drifted by {} with AMOUNT=0", k, diff);
     }
 }
+
+#[test]
+fn modulate_bin_swapper_blends_to_offset_neighbour() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::BinSwapper);
+
+    let num_bins = 1025;
+    // Spike at bin 100, silence elsewhere.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0);
+
+    // AMOUNT=2 (full swap), REACH=1 (offset = 5 bins), THRESH=0 (no floor), MIX=2 (full wet).
+    let amount = vec![2.0_f32; num_bins];
+    let reach  = vec![1.0_f32; num_bins];
+    let zeros  = vec![0.0_f32; num_bins];
+    let thresh = vec![0.0_f32; num_bins];
+    let mix    = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &zeros, &thresh, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, &ctx);
+
+    // Bin 100: AMOUNT=1 means it pulls fully from bin 105 which was 0 → bin 100 should be 0.
+    assert!(bins[100].norm() < 1.0, "bin 100 still hot ({}) — swap did not pull silence in", bins[100].norm());
+    // Bin 95 = bin 95 + offset 5 → reads from bin 100 (which had magnitude 2 in the snapshot) → grows.
+    assert!(bins[95].norm() > 0.5, "bin 95 silent ({}) — swap did not land", bins[95].norm());
+}
+
+#[test]
+fn modulate_bin_swapper_amount_zero_passthrough() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::BinSwapper);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> =
+        (0..num_bins).map(|k| Complex::new((k as f32 * 0.03).cos(), 0.1)).collect();
+    let dry = bins.clone();
+
+    // MIX=0 → wet inactive regardless of AMOUNT.
+    let amount = vec![2.0_f32; num_bins];
+    let reach  = vec![1.0_f32; num_bins];
+    let zeros  = vec![0.0_f32; num_bins];
+    let thresh = vec![0.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &zeros, &thresh, &zeros, &zeros];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, &ctx);
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-5, "bin {} drifted by {} with MIX=0", k, diff);
+    }
+}
