@@ -178,6 +178,12 @@ pub struct ProbeSnapshot {
 // ── SpectralModule trait ───────────────────────────────────────────────────
 
 pub trait SpectralModule: Send {
+    /// Process one FFT hop for one channel.
+    ///
+    /// `physics`: per-hop BinPhysics state. `None` until Phase 3.5 wires the
+    /// real ref via FxMatrix. Writer modules (those that set
+    /// `ModuleSpec.writes_bin_physics = true`) get a `Some(&mut ...)` and
+    /// are scheduled before any reader modules in the same hop.
     fn process(
         &mut self,
         channel: usize,
