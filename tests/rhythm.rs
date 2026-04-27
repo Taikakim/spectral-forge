@@ -280,4 +280,67 @@ fn phase_reset_overwrites_phase_at_step_crossing() {
         "phase-reset should align bin to mag along real axis; got re={}", bin.re);
     assert!(bin.im.abs() < 1e-3,
         "phase-reset should kill imaginary part; got im={}", bin.im);
+
+    // Verify reset applies uniformly across interior bins (not just bin 100).
+    for k in 1..512 {
+        assert!((bins[k].re - original_mag).abs() < 1e-3,
+            "interior bin {} should be reset to (sqrt(2), 0); re={}", k, bins[k].re);
+        assert!(bins[k].im.abs() < 1e-3,
+            "interior bin {} should have zero imaginary; im={}", k, bins[k].im);
+    }
+    // DC and Nyquist must pass through dry (input was Complex(1.0, 1.0)).
+    assert!((bins[0].re - 1.0).abs() < 1e-6 && (bins[0].im - 1.0).abs() < 1e-6,
+        "DC bin should pass through dry; got {:?}", bins[0]);
+    assert!((bins[512].re - 1.0).abs() < 1e-6 && (bins[512].im - 1.0).abs() < 1e-6,
+        "Nyquist bin should pass through dry; got {:?}", bins[512]);
+    // suppression_out must be zeroed (PhaseReset emits no gain reduction).
+    assert!(supp.iter().all(|&x| x == 0.0), "suppression_out must be zeroed");
+}
+
+#[test]
+fn phase_reset_preserves_dc_and_nyquist_real() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::dsp::modules::rhythm::{RhythmModule, RhythmMode};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = RhythmModule::new();
+    m.set_mode(RhythmMode::PhaseReset);
+    m.reset(48000.0, 1024);
+
+    // Non-neutral tphase = 1.5 → target_phase = +π/2. sin(π/2) = 1.0 → would inject im at every bin
+    // including DC/Nyquist if the guard is missing. With the guard, those bins must stay real.
+    let amount = vec![2.0f32; 513];   // full strength
+    let div    = vec![1.0f32; 513];
+    let af     = vec![0.0f32; 513];
+    let tphase = vec![1.5f32; 513];   // → target_phase = π/2
+    let mix    = vec![2.0f32; 513];   // → mix_global = 1.0
+    let curves: Vec<&[f32]> = vec![&amount, &div, &af, &tphase, &mix];
+
+    // Real-only DC/Nyquist input (as a real-IFFT input would have).
+    let mut bins = vec![Complex::new(1.0, 0.0); 513];
+    let mut supp = vec![0.0f32; 513];
+
+    let mut ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    ctx.bpm = 120.0;
+    ctx.beat_position = 0.0;
+
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut supp, &ctx);
+
+    // DC (k=0) and Nyquist (k=512) MUST stay real (im == 0).
+    // Without the guard, sin(π/2) = 1.0 would inject im=1.0 at these bins → realfft panic.
+    assert!(bins[0].im.abs() < 1e-6,
+        "DC bin must stay real to satisfy IFFT; got im={}", bins[0].im);
+    assert!(bins[512].im.abs() < 1e-6,
+        "Nyquist bin must stay real to satisfy IFFT; got im={}", bins[512].im);
+
+    // Interior bins should rotate by π/2: input (1, 0) → mag=1, target_phase=π/2 → target=(0, 1).
+    // With strength=1, reset_env=1, mix=1: bins[k] = target = (0, 1) for k in 1..512.
+    for k in 1..512 {
+        assert!(bins[k].re.abs() < 1e-3,
+            "interior bin {} re should be ~0 after π/2 rotation; got {}", k, bins[k].re);
+        assert!((bins[k].im - 1.0).abs() < 1e-3,
+            "interior bin {} im should be ~1 after π/2 rotation; got {}", k, bins[k].im);
+    }
 }

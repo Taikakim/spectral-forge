@@ -312,8 +312,14 @@ impl SpectralModule for RhythmModule {
                     0.0
                 };
 
+                let last = n - 1;
                 #[allow(clippy::needless_range_loop)] // index `k` is needed for multi-slice per-bin lookup
                 for k in 0..n {
+                    // DC (k=0) and Nyquist (k=last) must stay real for IFFT correctness.
+                    // PhaseReset cannot inject imaginary at these bins without breaking realfft.
+                    if k == 0 || k == last {
+                        continue;
+                    }
                     let amount_g = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
                     let strength = (amount_g * 0.5).clamp(0.0, 1.0);
                     let mix_g    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
