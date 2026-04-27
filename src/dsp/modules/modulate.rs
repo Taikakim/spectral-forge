@@ -151,6 +151,43 @@ fn apply_rm_fm_matrix(
     }
 }
 
+// ── Diode RM kernel ───────────────────────────────────────────────────────
+
+fn apply_diode_rm(
+    bins: &mut [Complex<f32>],
+    sidechain: &[f32],
+    curves: &[&[f32]],
+) {
+    let amount_c = curves[0];
+    let reach_c  = curves[1];
+    let thresh_c = curves[3];
+    let mix_c    = curves[5];
+
+    let num_bins = bins.len().min(sidechain.len());
+
+    for k in 0..num_bins {
+        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1
+        let reach  = reach_c[k].clamp(0.0, 4.0);
+        let thresh = thresh_c[k].clamp(0.01, 4.0) * 0.5; // input level above which diode closes
+        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let sc        = sidechain[k].max(0.0);
+        let dry       = bins[k];
+        let input_amp = dry.norm();
+
+        // Mismatch coefficient: 0 = perfect match (no leak), 1 = max leak.
+        let mismatch = (1.0 - input_amp / thresh).clamp(0.0, 1.0);
+
+        // RM path: scaled product.
+        let rm_path   = dry * sc * reach * amount;
+        // Leak path: carrier passes through with phase preserved (real → real).
+        let leak_path = Complex::new(sc * mismatch, 0.0);
+
+        let wet   = rm_path + leak_path;
+        bins[k]   = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,8 +281,14 @@ impl SpectralModule for ModulateModule {
                 }
                 // No sidechain → passthrough (bins unchanged).
             }
-            _ => {
-                // DiodeRm and GroundLoop filled in subsequent tasks.
+            ModulateMode::DiodeRm => {
+                if let Some(sc) = sidechain {
+                    apply_diode_rm(bins, sc, curves);
+                }
+                // No sidechain → passthrough (bins unchanged).
+            }
+            ModulateMode::GroundLoop => {
+                // GroundLoop filled in Task 7.
             }
         }
 

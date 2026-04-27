@@ -331,3 +331,95 @@ fn modulate_rm_fm_no_sidechain_passes_through() {
         assert!(diff < 1e-6, "bin {} drifted by {} with no sidechain", k, diff);
     }
 }
+
+#[test]
+fn modulate_diode_rm_leaks_carrier_when_input_quiet() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let num_bins = 1025;
+
+    let mut module_quiet = ModulateModule::new();
+    module_quiet.reset(48_000.0, 2048);
+    module_quiet.set_mode(ModulateMode::DiodeRm);
+
+    let mut module_loud = ModulateModule::new();
+    module_loud.reset(48_000.0, 2048);
+    module_loud.set_mode(ModulateMode::DiodeRm);
+
+    // Same sidechain (carrier) for both: spike at bin 300, magnitude 2.
+    let mut sc = vec![0.0_f32; num_bins];
+    sc[300] = 2.0;
+
+    // Quiet input: bin 300 magnitude = 0.05 (well below threshold = 0.5).
+    let mut bins_quiet: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins_quiet[300] = Complex::new(0.05, 0.0);
+
+    // Loud input: bin 300 magnitude = 1.5 (well above threshold).
+    let mut bins_loud: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins_loud[300] = Complex::new(1.5, 0.0);
+
+    // AMOUNT=2 (max RM), REACH=1, RATE=neutral, THRESH=1 (= 0.5 absolute), AMPGATE=0, MIX=2.
+    let amount  = vec![2.0_f32; num_bins];
+    let reach   = vec![1.0_f32; num_bins];
+    let rate    = vec![1.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let ampgate = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &rate, &thresh, &ampgate, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module_quiet.process(0, StereoLink::Linked, FxChannelTarget::All,
+                         &mut bins_quiet, Some(&sc), &curves, &mut suppression, &ctx);
+    module_loud.process(0, StereoLink::Linked, FxChannelTarget::All,
+                        &mut bins_loud, Some(&sc), &curves, &mut suppression, &ctx);
+
+    let quiet_out = bins_quiet[300].norm();
+    let loud_out  = bins_loud[300].norm();
+
+    // Quiet input → diode "open" → carrier leaks through. Output dominated by sc·mismatch.
+    // mismatch ≈ 1 - 0.05/0.5 = 0.9. Leak ≈ 2·0.9 = 1.8. RM = 0.05·2·1·1 = 0.1.
+    // Total ≈ 1.9. Must be > 1.0.
+    assert!(quiet_out > 1.0, "quiet path bin 300 = {} (expected leak-dominant > 1.0)", quiet_out);
+
+    // Loud input → diode "closed" → carrier leak = 0. Output ≈ pure RM = 1.5·2·1·1 = 3.0.
+    // Must be > 2.0 (leak-only would give ~0).
+    assert!(loud_out > 2.0, "loud path bin 300 = {} (expected RM-dominant > 2.0)", loud_out);
+}
+
+#[test]
+fn modulate_diode_rm_no_sidechain_passes_through() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::DiodeRm);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> =
+        (0..num_bins).map(|k| Complex::new((k as f32 * 0.02).cos(), 0.1)).collect();
+    let dry = bins.clone();
+
+    let amount  = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, &ctx);
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-6, "bin {} drifted by {} with no sidechain", k, diff);
+    }
+}
