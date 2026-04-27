@@ -254,3 +254,43 @@ fn pre_echo_feedback_creates_decaying_taps() {
         "high-feedback pre-echo should still have audible energy after 16+ hops; got peak {}",
         peak_after_long_decay);
 }
+
+#[test]
+fn pre_echo_max_settings_is_bounded() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = FutureModule::new();
+    m.set_mode(FutureMode::PreEcho);
+    m.reset(48000.0, 1024);
+
+    // MAX SETTINGS: AMOUNT=4.0 → echo_amp=2.0, THRESHOLD=2.0 → feedback=0.5,
+    // SPREAD=0.0 (no HF damping), MIX=2.0 → mix=1.0 (full wet).
+    // Per-hop closed-loop gain = 2.0 × 0.5 = 1.0 — at stability boundary.
+    let amount = vec![4.0f32; 513];
+    let time   = vec![1.0f32; 513];
+    let thresh = vec![2.0f32; 513];
+    let spread = vec![0.0f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &thresh, &spread, &mix];
+
+    let ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+
+    // Sustained input: each hop has the impulse, not just hop 0.
+    let mut peak = 0.0f32;
+    for h in 0..200 {
+        let mut bins = vec![Complex::new(0.0, 0.0); 513];
+        bins[100] = Complex::new(1.0, 0.0);
+        let mut supp = vec![0.0f32; 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut supp, &ctx);
+        for c in &bins {
+            assert!(c.norm() <= 16.0, "PreEcho diverged at hop {} | bin |c|={}", h, c.norm());
+            peak = peak.max(c.norm());
+        }
+    }
+    // Sanity: at the stability boundary peak should be finite and <= 16.0.
+    assert!(peak.is_finite() && peak <= 16.0,
+        "PreEcho peak should remain finite at boundary settings; got {}", peak);
+}

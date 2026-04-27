@@ -122,10 +122,7 @@ impl SpectralModule for FutureModule {
 
                     let dry = bins[k];
                     let wet = self.ring[ch][read_pos][k];
-                    bins[k] = Complex::new(
-                        dry.re * (1.0 - mix) + wet.re * mix,
-                        dry.im * (1.0 - mix) + wet.im * mix,
-                    );
+                    bins[k] = dry * (1.0 - mix) + wet * mix;
 
                     #[cfg(any(test, feature = "probe"))]
                     if k == probe_k {
@@ -164,7 +161,10 @@ impl SpectralModule for FutureModule {
                     let amount_gain = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 4.0);
                     let echo_amp    = amount_gain.clamp(0.0, 2.0);                          // 1.0 nominal
                     let thresh_gain = thresh_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let feedback    = (thresh_gain * 0.4).clamp(0.0, 0.99);                  // 0.4 nominal, hard cap 0.99
+                    // 0.4 nominal. Cap at 0.4 keeps echo_amp (max 2.0) × feedback ≤ 0.8 < 1.0,
+                    // guaranteeing the ring buffer converges to a bounded steady state
+                    // (r* = dry / (1 − 2×0.4) = 5) even under sustained input.
+                    let feedback    = (thresh_gain * 0.4).clamp(0.0, 0.4);
                     let spread_gain = spread_curve.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
                     let hf_damp     = (spread_gain * 0.20).clamp(0.0, 1.0);                  // 0 nominal, 1.0 = max damping
                     let mix_gain    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
@@ -176,14 +176,11 @@ impl SpectralModule for FutureModule {
 
                     let dry = bins[k];
                     let wet = self.ring[ch][read_pos][k] * echo_amp;
-                    bins[k] = Complex::new(
-                        dry.re * (1.0 - mix) + wet.re * mix,
-                        dry.im * (1.0 - mix) + wet.im * mix,
-                    );
+                    bins[k] = dry * (1.0 - mix) + wet * mix;
 
                     #[cfg(any(test, feature = "probe"))]
                     if k == probe_k {
-                        probe_amount_pct = echo_amp * 100.0;
+                        probe_amount_pct = echo_amp * 50.0;   // 1.0 nominal → 50%, matching MIX convention
                         probe_time_hops  = delay_hops as u32;
                         probe_mix_pct    = mix * 100.0;
                     }
