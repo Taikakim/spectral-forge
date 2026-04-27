@@ -594,3 +594,33 @@ impl FxMatrix {
         }
     }
 }
+
+impl FxMatrix {
+    /// Test-only: force a slot to be treated as a BinPhysics writer.
+    ///
+    /// `recompute_phys_topology` derives `writer_bits` from
+    /// `module_spec(module_type).writes_bin_physics`, which is `false` for all
+    /// real module types today. Mock test modules can't easily declare
+    /// themselves writers via the spec, so this helper directly sets the
+    /// writer bit, flips `bin_physics_in_use`, and promotes the slot to the
+    /// front of `phys_order` (the writer-first iteration order).
+    ///
+    /// Slot 8 (Master) is also valid; it is not in `phys_order` (Master
+    /// always runs last) but its writer_bit still gates the dispatch split.
+    ///
+    /// **Not for production use.** Phase 5 will remove the need for this once
+    /// real writer modules ship and the spec-based path is exercised directly.
+    pub fn test_force_writer(&mut self, slot: usize) {
+        debug_assert!(slot < MAX_SLOTS);
+        self.writer_bits[slot] = true;
+        self.bin_physics_in_use = true;
+        if slot < 8 {
+            if let Some(pos) = self.phys_order.iter().position(|&s| s == slot) {
+                if pos != 0 {
+                    let s_val = self.phys_order.remove(pos);
+                    self.phys_order.insert(0, s_val);
+                }
+            }
+        }
+    }
+}
