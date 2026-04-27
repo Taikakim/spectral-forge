@@ -26,7 +26,7 @@ fn arp_grid_default_is_empty() {
 }
 
 #[test]
-fn rhythm_module_zero_bpm_is_passthrough() {
+fn rhythm_module_skeleton_is_passthrough() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
@@ -46,9 +46,9 @@ fn rhythm_module_zero_bpm_is_passthrough() {
     // bpm/beat_position default to 0.0 in ::new; nothing to set for this test.
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
         &mut bins, None, &curves, &mut supp, &ctx);
-    // BPM=0 → no rhythmic gating → output should equal input under MIX=0.5.
-    // Since MIX=1.0 from neutral curve, and dry == wet at BPM=0, output = wet ≈ original
+    // Skeleton process() is a no-op stub: bins must be unchanged and suppression_out zeroed.
     for (a, b) in bins.iter().zip(original.iter()) {
         assert!((a.re - b.re).abs() < 1e-3 && (a.im - b.im).abs() < 1e-3);
     }
+    assert!(supp.iter().all(|&x| x == 0.0), "suppression_out must be zeroed");
 }

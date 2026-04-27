@@ -23,13 +23,9 @@ impl RhythmMode {
 
 /// Arpeggiator step grid: 8 voices × 8 steps. Each voice's steps are packed in a `u8`
 /// (bit 0 = step 0, bit 7 = step 7). A '1' bit means the voice plays at that step.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct ArpGrid {
     pub steps: [u8; 8],
-}
-
-impl Default for ArpGrid {
-    fn default() -> Self { Self { steps: [0u8; 8] } }
 }
 
 impl ArpGrid {
