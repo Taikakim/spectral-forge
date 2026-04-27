@@ -26,7 +26,7 @@ pub struct FutureModule {
     fft_size:    usize,
     sample_rate: f32,
     /// Ring buffer of write-ahead frames per channel. `[channel][frame_idx][bin]`.
-    pub ring:    [Vec<Vec<Complex<f32>>>; 2],
+    ring:        [Vec<Vec<Complex<f32>>>; 2],
     write_pos:   [usize; 2],
 }
 
@@ -76,6 +76,15 @@ impl SpectralModule for FutureModule {
         // Stub. Tasks 3 + 4 implement Print-Through and Pre-Echo kernels.
         suppression_out.fill(0.0);
         let _ = bins;
+    }
+
+    fn clear_state(&mut self) {
+        for ch in 0..2 {
+            for frame in self.ring[ch].iter_mut() {
+                frame.fill(Complex::new(0.0, 0.0));
+            }
+        }
+        self.write_pos = [0; 2];
     }
 
     fn tail_length(&self) -> u32 { (self.fft_size as u32) * (MAX_ECHO_FRAMES as u32) / 4 }

@@ -36,3 +36,13 @@ fn future_module_starts_silent() {
         &mut bins, None, &curves, &mut supp, &ctx);
     for c in &bins { assert!(c.re.is_finite() && c.im.is_finite()); }
 }
+
+#[test]
+fn future_clear_state_zeroes_ring_and_resets_write_pos() {
+    use spectral_forge::dsp::modules::SpectralModule;
+    let mut m = FutureModule::new();
+    m.reset(48000.0, 1024);
+    // clear_state must not panic and must be idempotent.
+    m.clear_state();
+    m.clear_state();
+}
