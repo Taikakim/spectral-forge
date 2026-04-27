@@ -1,4 +1,5 @@
-use spectral_forge::dsp::modules::{ModuleType, module_spec};
+use spectral_forge::dsp::modules::{ModuleType, module_spec, SpectralModule};
+use spectral_forge::dsp::modules::future::{FutureModule, FutureMode};
 
 #[test]
 fn future_module_spec_has_5_curves() {
@@ -8,8 +9,6 @@ fn future_module_spec_has_5_curves() {
     assert!(!spec.supports_sidechain);
     assert_eq!(spec.display_name, "Future");
 }
-
-use spectral_forge::dsp::modules::future::{FutureModule, FutureMode};
 
 #[test]
 fn future_mode_default_is_print_through() {
@@ -293,4 +292,12 @@ fn pre_echo_max_settings_is_bounded() {
     // Sanity: at the stability boundary peak should be finite and <= 16.0.
     assert!(peak.is_finite() && peak <= 16.0,
         "PreEcho peak should remain finite at boundary settings; got {}", peak);
+}
+
+#[test]
+fn future_set_future_mode_via_trait_changes_mode() {
+    let mut m = FutureModule::new();
+    assert_eq!(m.mode(), FutureMode::PrintThrough);
+    SpectralModule::set_future_mode(&mut m, FutureMode::PreEcho);
+    assert_eq!(m.mode(), FutureMode::PreEcho);
 }

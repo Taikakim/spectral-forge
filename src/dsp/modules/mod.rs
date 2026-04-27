@@ -208,6 +208,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Gain modules. Default no-op for all other types.
     fn set_gain_mode(&mut self, _: GainMode) {}
 
+    /// Update the operating mode for Future modules. Default no-op for all other types.
+    fn set_future_mode(&mut self, _: crate::dsp::modules::future::FutureMode) {}
+
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.
     /// MUST NOT allocate, lock, or do I/O.

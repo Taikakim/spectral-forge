@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use crate::editor::curve::CurveNode;
 use crate::dsp::modules::{GainMode, ModuleType, RouteMatrix};
+use crate::dsp::modules::future::FutureMode;
 
 // Pulls in `pub struct GeneratedParams { ... }` (1404 FloatParam fields),
 // its `Default` impl, and `impl GeneratedParams { fn extend_param_map(...) }`
@@ -133,6 +134,9 @@ pub struct SpectralForgeParams {
 
     /// GainMode per slot (only meaningful for Gain module slots).
     pub slot_gain_mode: Arc<Mutex<[GainMode; 9]>>,
+
+    /// FutureMode per slot (only meaningful for Future module slots).
+    pub slot_future_mode: Arc<Mutex<[FutureMode; 9]>>,
 
     /// Per-slot SC input gain in dB. Range [-90.0, 18.0]; values <= -90.0 treated as "-∞" (SC disabled for slot).
     pub slot_sc_gain_db: Arc<Mutex<[f32; 9]>>,
@@ -296,6 +300,7 @@ impl Default for SpectralForgeParams {
             })),
             slot_targets:   Arc::new(Mutex::new([FxChannelTarget::All; 9])),
             slot_gain_mode: Arc::new(Mutex::new([GainMode::Add; 9])),
+            slot_future_mode: Arc::new(Mutex::new([FutureMode::PrintThrough; 9])),
             slot_sc_gain_db: Arc::new(Mutex::new([0.0f32; 9])),
             slot_sc_channel: Arc::new(Mutex::new([ScChannel::Follow; 9])),
             slot_curve_nodes: Arc::new(Mutex::new(
@@ -739,6 +744,7 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_names",         slot_names);
         persist_out!("slot_targets",       slot_targets);
         persist_out!("slot_gain_mode",     slot_gain_mode);
+        persist_out!("slot_future_mode",   slot_future_mode);
         persist_out!("slot_curve_nodes",   slot_curve_nodes);
         persist_out!("editing_curve",      editing_curve);
         persist_out!("route_matrix",       route_matrix);
@@ -787,6 +793,7 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_names"          => persist_in!("slot_names",         slot_names,         data),
                 "slot_targets"        => persist_in!("slot_targets",       slot_targets,       data),
                 "slot_gain_mode"      => persist_in!("slot_gain_mode",     slot_gain_mode,     data),
+                "slot_future_mode"    => persist_in!("slot_future_mode",   slot_future_mode,   data),
                 "slot_curve_nodes"    => persist_in!("slot_curve_nodes",   slot_curve_nodes,   data),
                 "editing_curve"       => persist_in!("editing_curve",      editing_curve,      data),
                 "route_matrix"        => persist_in!("route_matrix",       route_matrix,       data),

@@ -226,6 +226,8 @@ impl SpectralModule for FutureModule {
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 
+    fn set_future_mode(&mut self, mode: FutureMode) { self.set_mode(mode); }
+
     fn tail_length(&self) -> u32 { (self.fft_size as u32) * (MAX_ECHO_FRAMES as u32) / 4 }
     fn module_type(&self) -> ModuleType { ModuleType::Future }
     fn num_curves(&self) -> usize { 5 }

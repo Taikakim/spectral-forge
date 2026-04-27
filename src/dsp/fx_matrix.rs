@@ -147,6 +147,16 @@ impl FxMatrix {
         }
     }
 
+    /// Propagate per-slot FutureMode from params to FutureModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_future_modes(&mut self, modes: &[crate::dsp::modules::future::FutureMode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_future_mode(modes[s]);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn process_hop(
         &mut self,
