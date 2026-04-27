@@ -221,3 +221,25 @@ fn process_hop_amp_attenuates_send() {
         assert!(c.norm() < 1e-4, "amount=0 amp must mute the send, got {}", c.norm());
     }
 }
+
+#[test]
+fn fft_size_change_clears_amp_state() {
+    let types = [ModuleType::Empty; 9];
+    let mut fxm = FxMatrix::new(48000.0, 1024, &types);
+    let mut rm = RouteMatrix::default();
+    rm.amp_mode[0][1] = AmpMode::Vactrol;
+    fxm.sync_amp_modes(&rm, 513);
+    if let AmpNodeState::Vactrol { cap } = &mut fxm.amp_state[0][0][1] {
+        cap.fill(0.7);
+    } else {
+        panic!("expected Vactrol after sync");
+    }
+    fxm.reset(48000.0, 2048);
+    if let AmpNodeState::Vactrol { cap } = &fxm.amp_state[0][0][1] {
+        for &v in cap.iter() {
+            assert!(v.abs() < 1e-6, "reset must zero cap, got {v}");
+        }
+    } else {
+        panic!("amp state should still be Vactrol after reset");
+    }
+}

@@ -4,6 +4,7 @@ use crate::dsp::modules::{
     create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
 };
 use crate::dsp::amp_modes::AmpNodeState;
+use crate::dsp::pipeline::MAX_NUM_BINS;
 use crate::params::{FxChannelTarget, StereoLink};
 
 pub struct FxMatrix {
@@ -23,7 +24,6 @@ pub struct FxMatrix {
 
 impl FxMatrix {
     pub fn new(sample_rate: f32, fft_size: usize, slot_types: &[ModuleType; 9]) -> Self {
-        let num_bins = fft_size / 2 + 1;
         let slots: Vec<Option<Box<dyn SpectralModule>>> = (0..MAX_SLOTS).map(|i| {
             match slot_types[i] {
                 ModuleType::Empty => None,
@@ -33,22 +33,21 @@ impl FxMatrix {
         let mk_amp_grid = || (0..MAX_MATRIX_ROWS).map(|_|
             (0..MAX_SLOTS).map(|_| AmpNodeState::Linear).collect()
         ).collect();
+        // Internal buffers sized to MAX_NUM_BINS so variable-FFT changes never need to
+        // reallocate; process_hop and reset() just slice into [..num_bins].
         Self {
             slots,
-            slot_out:    (0..MAX_SLOTS).map(|_| vec![Complex::new(0.0, 0.0); num_bins]).collect(),
-            slot_supp:   (0..MAX_SLOTS).map(|_| vec![0.0f32; num_bins]).collect(),
+            slot_out:    (0..MAX_SLOTS).map(|_| vec![Complex::new(0.0, 0.0); MAX_NUM_BINS]).collect(),
+            slot_supp:   (0..MAX_SLOTS).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect(),
             virtual_out: (0..MAX_SPLIT_VIRTUAL_ROWS)
-                             .map(|_| vec![Complex::new(0.0, 0.0); num_bins]).collect(),
-            mix_buf: vec![Complex::new(0.0, 0.0); num_bins],
+                             .map(|_| vec![Complex::new(0.0, 0.0); MAX_NUM_BINS]).collect(),
+            mix_buf: vec![Complex::new(0.0, 0.0); MAX_NUM_BINS],
             amp_state: [mk_amp_grid(), mk_amp_grid()],
-            amp_scratch: vec![Complex::new(0.0, 0.0); num_bins],
+            amp_scratch: vec![Complex::new(0.0, 0.0); MAX_NUM_BINS],
         }
     }
 
     pub fn reset(&mut self, sample_rate: f32, fft_size: usize) {
-        let num_bins = fft_size / 2 + 1;
-        debug_assert_eq!(self.slot_out[0].len(), num_bins,
-            "FxMatrix::reset() called with different fft_size than new()");
         for slot in self.slots.iter_mut().flatten() {
             slot.reset(sample_rate, fft_size);
         }
@@ -56,7 +55,7 @@ impl FxMatrix {
         for buf in &mut self.slot_supp   { buf.fill(0.0); }
         for buf in &mut self.virtual_out { buf.fill(Complex::new(0.0, 0.0)); }
         self.mix_buf.fill(Complex::new(0.0, 0.0));
-        self.amp_scratch.resize(num_bins, Complex::new(0.0, 0.0));
+        self.amp_scratch.fill(Complex::new(0.0, 0.0));
         self.clear_amp_state();
     }
 

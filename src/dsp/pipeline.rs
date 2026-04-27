@@ -202,6 +202,7 @@ impl Pipeline {
                 slot_buf.fill(0.0);
             }
         }
+        // Reset clears all amp-node state — preset load + FFT-size change both warm up from zero.
         self.fx_matrix.reset(sample_rate, fft_size);
     }
 
