@@ -756,9 +756,10 @@ pub fn create_editor(
                         let slot_type = params.slot_module_types.lock()[edit_slot];
                         let is_future = slot_type == crate::dsp::modules::ModuleType::Future;
                         let is_punch  = slot_type == crate::dsp::modules::ModuleType::Punch;
+                        let is_rhythm = slot_type == crate::dsp::modules::ModuleType::Rhythm;
 
                         let mut mode_builder = egui::UiBuilder::new();
-                        if !is_future && !is_punch { mode_builder = mode_builder.invisible(); }
+                        if !is_future && !is_punch && !is_rhythm { mode_builder = mode_builder.invisible(); }
                         ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
@@ -803,6 +804,27 @@ pub fn create_editor(
                                         let resp = ui.add(btn);
                                         if resp.clicked() {
                                             params.slot_punch_mode.lock()[edit_slot] = mode;
+                                        }
+                                    }
+                                } else if is_rhythm {
+                                    let cur_mode = params.slot_rhythm_mode.lock()[edit_slot];
+                                    use crate::dsp::modules::rhythm::RhythmMode;
+                                    for (label, mode) in [
+                                        ("Euclidean",   RhythmMode::Euclidean),
+                                        ("Arpeggiator", RhythmMode::Arpeggiator),
+                                        ("Phase Reset", RhythmMode::PhaseReset),
+                                    ] {
+                                        let is_active = cur_mode == mode;
+                                        let fill     = if is_active { th::BORDER } else { th::BG };
+                                        let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                        )
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                        let resp = ui.add(btn);
+                                        if resp.clicked() {
+                                            params.slot_rhythm_mode.lock()[edit_slot] = mode;
                                         }
                                     }
                                 }

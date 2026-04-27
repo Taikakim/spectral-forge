@@ -34,6 +34,7 @@ const ASSIGNABLE: &[ModuleType] = &[
     ModuleType::Harmonic,
     ModuleType::Future,
     ModuleType::Punch,
+    ModuleType::Rhythm,
 ];
 
 /// Render the popup if open. Call every frame from the main UI closure.
