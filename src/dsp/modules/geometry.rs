@@ -46,6 +46,8 @@ pub struct GeometryModule {
     trap_bw:      usize,
     sample_rate:  f32,
     fft_size:     usize,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe:   crate::dsp::modules::ProbeSnapshot,
 }
 
 impl GeometryModule {
@@ -58,6 +60,8 @@ impl GeometryModule {
             trap_bw:      1,
             sample_rate:  48_000.0,
             fft_size:     2048,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe:   crate::dsp::modules::ProbeSnapshot::default(),
         }
     }
 
@@ -231,10 +235,25 @@ impl SpectralModule for GeometryModule {
         debug_assert_eq!(bins.len(), ctx.num_bins);
         debug_assert!(curves.len() >= 5, "Geometry needs 5 curves: AMOUNT/MODE_CAP/DAMP_REL/THRESH/MIX");
 
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_amount_pct = 0.0_f32;
+        #[cfg(any(test, feature = "probe"))]
+        let mut probe_mix_pct = 0.0_f32;
+
         match self.mode {
             GeometryMode::Chladni => {
                 let plate_phase = &mut self.plate_phase[channel];
                 apply_chladni(bins, plate_phase, GEO_GRID_W, GEO_GRID_H, curves);
+                #[cfg(any(test, feature = "probe"))]
+                {
+                    let amount_g = curves[0].get(0).copied().unwrap_or(0.0);
+                    let mix_g    = curves[4].get(0).copied().unwrap_or(0.0);
+                    // AMOUNT: (g * 0.025).clamp(0.0, 0.05) → range 0..0.05 → pct = (val/0.05)*100
+                    let amt_val = (amount_g * 0.025).clamp(0.0, 0.05);
+                    let mix_val = mix_g.clamp(0.0, 2.0) * 0.5;
+                    probe_amount_pct = (amt_val / 0.05) * 100.0;
+                    probe_mix_pct    = mix_val * 100.0;
+                }
             }
             GeometryMode::Helmholtz => {
                 let fill_level = &mut self.fill_level[channel];
@@ -245,10 +264,29 @@ impl SpectralModule for GeometryModule {
                     self.trap_bw,
                     curves,
                 );
+                #[cfg(any(test, feature = "probe"))]
+                {
+                    let amount_g = curves[0].get(0).copied().unwrap_or(0.0);
+                    let mix_g    = curves[4].get(0).copied().unwrap_or(0.0);
+                    // AMOUNT: (g * 0.5).clamp(0.0, 1.0) → range 0..1.0 → pct = val * 100
+                    let amt_val = (amount_g * 0.5).clamp(0.0, 1.0);
+                    let mix_val = mix_g.clamp(0.0, 2.0) * 0.5;
+                    probe_amount_pct = amt_val * 100.0;
+                    probe_mix_pct    = mix_val * 100.0;
+                }
             }
         }
 
         for s in suppression_out.iter_mut() { *s = 0.0; }
+
+        #[cfg(any(test, feature = "probe"))]
+        {
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                amount_pct: Some(probe_amount_pct),
+                mix_pct:    Some(probe_mix_pct),
+                ..Default::default()
+            };
+        }
     }
 
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
@@ -277,4 +315,7 @@ impl SpectralModule for GeometryModule {
     fn set_geometry_mode(&mut self, mode: GeometryMode) {
         self.set_mode(mode);
     }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }

@@ -7,6 +7,7 @@ use spectral_forge::dsp::modules::{
     create_module, FutureMode, GainMode, ModuleContext, ModuleType, ProbeSnapshot, SpectralModule,
 };
 use spectral_forge::dsp::modules::rhythm::RhythmMode;
+use spectral_forge::dsp::modules::geometry::GeometryMode;
 use spectral_forge::editor::curve_config::curve_display_config;
 use spectral_forge::params::{FxChannelTarget, StereoLink};
 
@@ -947,5 +948,96 @@ fn rhythm_phase_reset_mix_max_probes_100_pct() {
     assert!(
         (observed - 100.0).abs() < 0.5,
         "PhaseReset MIX=2.0 → mix=(2.0×0.5)=1.0 → mix_pct=100.0, got {}", observed,
+    );
+}
+
+// ── Geometry / Chladni ────────────────────────────────────────────────────────
+
+#[test]
+fn geometry_chladni_amount_default_probes_50_pct() {
+    let mut m = create_module(ModuleType::Geometry, SAMPLE_RATE, FFT_SIZE);
+    m.set_geometry_mode(GeometryMode::Chladni);
+    let nc = m.num_curves();
+    // AMOUNT curve index 0, g=1.0 → amt_val = 1.0*0.025 = 0.025 → pct = (0.025/0.05)*100 = 50.0
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("geometry must probe amount_pct");
+    assert!(
+        (observed - 50.0).abs() < 2.0,
+        "Chladni AMOUNT=1.0 should give amount_pct≈50.0, got {}", observed,
+    );
+}
+
+#[test]
+fn geometry_chladni_amount_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Geometry, SAMPLE_RATE, FFT_SIZE);
+    m.set_geometry_mode(GeometryMode::Chladni);
+    let nc = m.num_curves();
+    // AMOUNT curve index 0, g=2.0 → amt_val = 2.0*0.025 = 0.05 → pct = (0.05/0.05)*100 = 100.0
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("geometry must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 2.0,
+        "Chladni AMOUNT=2.0 should give amount_pct≈100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn geometry_chladni_mix_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Geometry, SAMPLE_RATE, FFT_SIZE);
+    m.set_geometry_mode(GeometryMode::Chladni);
+    let nc = m.num_curves();
+    // MIX curve index 4, g=2.0 → mix_val = 2.0.clamp(0,2)*0.5 = 1.0 → pct = 100.0
+    let probe = run_case(&mut m, nc, 4, 2.0);
+    let observed = probe.mix_pct.expect("geometry must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 2.0,
+        "Chladni MIX=2.0 should give mix_pct≈100.0, got {}", observed,
+    );
+}
+
+// ── Geometry / Helmholtz ──────────────────────────────────────────────────────
+
+#[test]
+fn geometry_helmholtz_amount_default_probes_50_pct() {
+    let mut m = create_module(ModuleType::Geometry, SAMPLE_RATE, FFT_SIZE);
+    m.set_geometry_mode(GeometryMode::Helmholtz);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    // AMOUNT curve index 0, g=1.0 → amt_val = (1.0*0.5).clamp(0,1) = 0.5 → pct = 50.0
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("geometry must probe amount_pct");
+    assert!(
+        (observed - 50.0).abs() < 2.0,
+        "Helmholtz AMOUNT=1.0 should give amount_pct≈50.0, got {}", observed,
+    );
+}
+
+#[test]
+fn geometry_helmholtz_amount_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Geometry, SAMPLE_RATE, FFT_SIZE);
+    m.set_geometry_mode(GeometryMode::Helmholtz);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    // AMOUNT curve index 0, g=2.0 → amt_val = (2.0*0.5).clamp(0,1) = 1.0 → pct = 100.0
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("geometry must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 2.0,
+        "Helmholtz AMOUNT=2.0 should give amount_pct≈100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn geometry_helmholtz_mix_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Geometry, SAMPLE_RATE, FFT_SIZE);
+    m.set_geometry_mode(GeometryMode::Helmholtz);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    // MIX curve index 4, g=2.0 → mix_val = 2.0.clamp(0,2)*0.5 = 1.0 → pct = 100.0
+    let probe = run_case(&mut m, nc, 4, 2.0);
+    let observed = probe.mix_pct.expect("geometry must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 2.0,
+        "Helmholtz MIX=2.0 should give mix_pct≈100.0, got {}", observed,
     );
 }
