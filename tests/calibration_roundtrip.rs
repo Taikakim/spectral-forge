@@ -726,3 +726,59 @@ fn future_pre_echo_amount_max_probes_100_pct() {
         "PreEcho AMOUNT=2.0 should give amount_pct≈100.0 (echo_amp × 50), got {}", observed,
     );
 }
+
+#[test]
+fn punch_direct_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::punch::PunchMode;
+    let mut m = create_module(ModuleType::Punch, SAMPLE_RATE, FFT_SIZE);
+    m.set_punch_mode(PunchMode::Direct);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);  // AMOUNT_gain=1.0 (default)
+    let observed = probe.amount_pct.expect("punch must probe amount_pct");
+    assert!(
+        (observed - 50.0).abs() < 0.5,
+        "AMOUNT=1.0 should give amount_pct≈50.0 (depth × 100), got {}", observed,
+    );
+}
+
+#[test]
+fn punch_direct_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::punch::PunchMode;
+    let mut m = create_module(ModuleType::Punch, SAMPLE_RATE, FFT_SIZE);
+    m.set_punch_mode(PunchMode::Direct);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);  // AMOUNT_gain=2.0 (max)
+    let observed = probe.amount_pct.expect("punch must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "AMOUNT=2.0 should give amount_pct≈100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn punch_direct_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::punch::PunchMode;
+    let mut m = create_module(ModuleType::Punch, SAMPLE_RATE, FFT_SIZE);
+    m.set_punch_mode(PunchMode::Direct);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 5, 2.0);  // MIX_gain=2.0 (max), curve idx 5
+    let observed = probe.mix_pct.expect("punch must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "MIX=2.0 should give mix_pct≈100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn punch_inverse_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::punch::PunchMode;
+    let mut m = create_module(ModuleType::Punch, SAMPLE_RATE, FFT_SIZE);
+    m.set_punch_mode(PunchMode::Inverse);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);  // AMOUNT_gain=2.0 (max)
+    let observed = probe.amount_pct.expect("punch must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "Inverse AMOUNT=2.0 should give amount_pct≈100.0 (mode-agnostic probe), got {}", observed,
+    );
+}
