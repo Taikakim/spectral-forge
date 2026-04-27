@@ -1,4 +1,5 @@
 use nih_plug_egui::egui::{self, Pos2, Rect, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
+use crate::dsp::amp_modes::AmpMode;
 use crate::dsp::modules::{module_spec, ModuleType, RouteMatrix};
 use crate::editor::theme as th;
 
@@ -9,6 +10,8 @@ const LABEL: f32     = 52.0;
 pub struct MatrixInteraction {
     pub left_click_slot:  Option<usize>,
     pub right_click:      Option<(usize, Pos2)>,
+    /// Right-click on a send cell: (matrix_row, col, screen_pos) for the amp popup.
+    pub amp_right_click:  Option<(usize, usize, Pos2)>,
 }
 
 /// Convert a slot_name bytes ([u8; 32]) to a display String.
@@ -66,7 +69,11 @@ pub fn paint_fx_matrix_grid(
         ui.allocate_painter(Vec2::new(total_w, total_h), egui::Sense::hover());
     let origin = outer_resp.rect.min;
 
-    let mut result = MatrixInteraction { left_click_slot: None, right_click: None };
+    let mut result = MatrixInteraction {
+        left_click_slot: None,
+        right_click: None,
+        amp_right_click: None,
+    };
 
     // Column headers
     for col in 0..n {
@@ -221,6 +228,27 @@ pub fn paint_fx_matrix_grid(
                             );
                             crate::editor::delayed_tooltip(ui, &inner.inner,
                                 format!("Slot {} \u{2192} Slot {} send", row + 1, col + 1));
+
+                            // Amp-mode indicator dot (top-right corner) when non-Linear.
+                            let amp_mode = route_matrix.amp_mode[row][col];
+                            if amp_mode != AmpMode::Linear {
+                                let dot_pos = egui::pos2(cell_rect.right() - 4.0, cell_rect.top() + 4.0);
+                                ui.painter().circle_filled(
+                                    dot_pos,
+                                    th::AMP_DOT_RADIUS,
+                                    th::AMP_DOT_COLORS[amp_mode as usize],
+                                );
+                            }
+                            // Right-click anywhere in the cell opens the amp popup.
+                            let amp_resp = ui.interact(
+                                cell_rect,
+                                ui.id().with(("amp_cell", row, col)),
+                                egui::Sense::click(),
+                            );
+                            if amp_resp.secondary_clicked() {
+                                let p = amp_resp.interact_pointer_pos().unwrap_or(cell_rect.center());
+                                result.amp_right_click = Some((row, col, p));
+                            }
                         } else {
                             painter.text(
                                 cell_rect.center(),
@@ -297,6 +325,25 @@ pub fn paint_fx_matrix_grid(
                         );
                         crate::editor::delayed_tooltip(ui, &vinner.inner,
                             format!("{} \u{2192} Slot {} send", vrow_label, col + 1));
+
+                        let amp_mode = route_matrix.amp_mode[*vrow_src][col];
+                        if amp_mode != AmpMode::Linear {
+                            let dot_pos = egui::pos2(cell_rect.right() - 4.0, cell_rect.top() + 3.0);
+                            ui.painter().circle_filled(
+                                dot_pos,
+                                th::AMP_DOT_RADIUS,
+                                th::AMP_DOT_COLORS[amp_mode as usize],
+                            );
+                        }
+                        let amp_resp = ui.interact(
+                            cell_rect,
+                            ui.id().with(("amp_vcell", *vrow_src, col)),
+                            egui::Sense::click(),
+                        );
+                        if amp_resp.secondary_clicked() {
+                            let p = amp_resp.interact_pointer_pos().unwrap_or(cell_rect.center());
+                            result.amp_right_click = Some((*vrow_src, col, p));
+                        }
                     }
                 }
 

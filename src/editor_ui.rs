@@ -973,8 +973,13 @@ pub fn create_editor(
                     if let Some((slot, pos)) = interaction.right_click {
                         crate::editor::module_popup::open_popup(ui, slot, pos);
                     }
-                    // Render popup (egui Area — appears above matrix)
+                    // Handle right-click on a send cell → open amp popup
+                    if let Some((row, col, pos)) = interaction.amp_right_click {
+                        crate::editor::amp_popup::open_at(ui, row, col, pos);
+                    }
+                    // Render popups (egui Area — appears above matrix)
                     let _ = crate::editor::module_popup::show_popup(ui, &params, scale);
+                    let _ = crate::editor::amp_popup::show_popup(ui, &params, scale);
 
                     // Persist preset menu state across frames via egui temp storage.
                     ui.ctx().data_mut(|d| d.insert_temp(preset_key, preset_state.clone()));
