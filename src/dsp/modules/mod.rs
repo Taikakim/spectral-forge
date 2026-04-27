@@ -192,6 +192,13 @@ pub trait SpectralModule: Send {
 
 // ── ModuleSpec ─────────────────────────────────────────────────────────────
 
+/// Per-module panel callback. Receives the egui `Ui`, plus a slot index
+/// so the panel can read/write that slot's parameters. Lives below the
+/// curve editor area in editor_ui.rs. Restricted to non-curve UI (step
+/// grids, mode pickers, etc.) — curves stay in their own canvas.
+/// (Param store is passed via the closure capture set at editor build.)
+pub type PanelWidgetFn = fn(&mut nih_plug_egui::egui::Ui, slot: usize);
+
 pub struct ModuleSpec {
     pub display_name:       &'static str,
     pub color_lit:          Color32,
@@ -199,6 +206,15 @@ pub struct ModuleSpec {
     pub num_curves:         usize,
     pub curve_labels:       &'static [&'static str],
     pub supports_sidechain: bool,
+
+    /// True if a freshly assigned slot of this module should auto-route a
+    /// sidechain input. Editor honours this on first assignment; user can
+    /// override afterwards. False by default for all shipped modules.
+    pub wants_sidechain:    bool,
+
+    /// Optional per-module panel callback drawn below the curve editor.
+    /// `None` means no panel (most modules). See Task 5 for signature.
+    pub panel_widget:       Option<PanelWidgetFn>,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -211,6 +227,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 6,
         curve_labels: &["THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE", "MIX"],
         supports_sidechain: true,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -219,6 +237,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 5,
         curve_labels: &["LENGTH", "THRESHOLD", "PORTAMENTO", "RESISTANCE", "MIX"],
         supports_sidechain: true,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -227,6 +247,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 3,
         curve_labels: &["AMOUNT", "PEAK HOLD", "MIX"],
         supports_sidechain: true,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -235,6 +257,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 1,
         curve_labels: &["AMOUNT"],
         supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -243,6 +267,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 2,
         curve_labels: &["GAIN", "PEAK HOLD"],
         supports_sidechain: true,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -251,6 +277,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 5,
         curve_labels: &["BALANCE", "EXPANSION", "DECORREL", "TRANSIENT", "PAN"],
         supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -259,6 +287,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 1,
         curve_labels: &["SENSITIVITY"],
         supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -267,6 +297,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 0,
         curve_labels: &[],
         supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -275,6 +307,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 0,
         curve_labels: &[],
         supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -283,6 +317,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         num_curves: 0,
         curve_labels: &[],
         supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,
