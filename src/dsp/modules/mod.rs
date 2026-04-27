@@ -24,6 +24,7 @@ pub enum ModuleType {
     MidSide,
     TransientSustainedSplit,
     Harmonic,
+    Future,
     Master,
 }
 
@@ -328,6 +329,16 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
     };
+    static FUT: ModuleSpec = ModuleSpec {
+        display_name: "Future",
+        color_lit: Color32::from_rgb(0x60, 0xa0, 0xc8),
+        color_dim: Color32::from_rgb(0x20, 0x34, 0x42),
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "TIME", "THRESHOLD", "SPREAD", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -357,6 +368,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::MidSide                => &MS,
         ModuleType::TransientSustainedSplit => &TS,
         ModuleType::Harmonic               => &HARM,
+        ModuleType::Future                 => &FUT,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -451,6 +463,7 @@ pub fn create_module(
         ModuleType::Gain                   => Box::new(gain::GainModule::new()),
         ModuleType::TransientSustainedSplit => Box::new(ts_split::TsSplitModule::new()),
         ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
+        ModuleType::Future                 => Box::new(future_stub::FutureStub),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
@@ -462,6 +475,29 @@ pub fn create_module(
         "module_spec and num_curves() disagree for {:?}", ty
     );
     m
+}
+
+// ── FutureStub — temporary placeholder, replaced in Task 2 ────────────────
+
+/// Placeholder so `create_module(Future)` compiles. Task 2 replaces this with
+/// `FutureModule::new()` from `src/dsp/modules/future.rs`.
+mod future_stub {
+    use num_complex::Complex;
+    use crate::params::{FxChannelTarget, StereoLink};
+    use super::{ModuleContext, ModuleType, SpectralModule};
+
+    pub struct FutureStub;
+
+    impl SpectralModule for FutureStub {
+        fn reset(&mut self, _: f32, _: usize) {}
+        fn process(
+            &mut self, _: usize, _: StereoLink, _: FxChannelTarget,
+            _: &mut [Complex<f32>], _: Option<&[f32]>, _: &[&[f32]],
+            suppression_out: &mut [f32], _: &ModuleContext<'_>,
+        ) { suppression_out.fill(0.0); }
+        fn module_type(&self) -> ModuleType { ModuleType::Future }
+        fn num_curves(&self) -> usize { 5 }
+    }
 }
 
 // ── Submodules ─────────────────────────────────────────────────────────────

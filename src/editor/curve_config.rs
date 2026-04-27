@@ -47,6 +47,7 @@ pub fn curve_display_config(
         ModuleType::Gain     => gain_config(curve_idx, gain_mode),
         ModuleType::MidSide  => mid_side_config(curve_idx),
         ModuleType::TransientSustainedSplit => ts_split_config(curve_idx),
+        ModuleType::Future   => default_config(),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
