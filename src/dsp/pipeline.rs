@@ -177,6 +177,7 @@ impl Pipeline {
         aux: &mut nih_plug::prelude::AuxiliaryBuffers,
         shared: &mut SharedState,
         params: &crate::params::SpectralForgeParams,
+        transport: &nih_plug::context::process::Transport,
     ) {
         use crate::dsp::modules::{apply_curve_transform, ModuleContext, TILT_MAX};
         use crate::editor::curve_config::curve_display_config;
@@ -318,7 +319,7 @@ impl Pipeline {
         };
 
         // Build ModuleContext
-        let ctx = ModuleContext::new(
+        let mut ctx = ModuleContext::new(
             self.sample_rate,
             fft_size,
             num_bins,
@@ -329,6 +330,11 @@ impl Pipeline {
             params.auto_makeup.value(),
             delta_monitor,
         );
+        // Phase 1 stub: BPM/beat read from host transport when present.
+        // Modules consuming these don't ship until Phase 2 (Rhythm), so a 0.0
+        // default is currently equivalent to "no BPM info available".
+        ctx.bpm = transport.tempo.unwrap_or(0.0) as f32;
+        ctx.beat_position = transport.pos_beats().unwrap_or(0.0);
 
         // Snapshot of slot targets (needed for SC channel resolution in MidSide mode).
         let slot_targets_snap: [FxChannelTarget; 9] = params.slot_targets.try_lock()

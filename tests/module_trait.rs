@@ -422,3 +422,19 @@ fn module_context_has_block_lifetime_and_is_not_copy() {
     assert_not_copy::<ModuleContext<'static>>();
     // If this compiles after Task 1, the lifetime is in place.
 }
+
+#[test]
+fn module_context_optional_fields_default_to_none() {
+    use spectral_forge::dsp::modules::ModuleContext;
+    let ctx = ModuleContext::new(
+        48000.0, 2048, 1025, 10.0, 100.0, 1.0, 0.5, false, false,
+    );
+    assert!(ctx.unwrapped_phase.is_none());
+    assert!(ctx.peaks.is_none());
+    assert!(ctx.instantaneous_freq.is_none());
+    assert!(ctx.chromagram.is_none());
+    assert!(ctx.midi_notes.is_none());
+    assert!(ctx.sidechain_derivative.is_none());
+    assert_eq!(ctx.bpm, 0.0);
+    assert_eq!(ctx.beat_position, 0.0);
+}

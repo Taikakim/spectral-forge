@@ -227,11 +227,11 @@ impl Plugin for SpectralForge {
         &mut self,
         buffer: &mut Buffer,
         aux: &mut AuxiliaryBuffers,
-        _ctx: &mut impl ProcessContext<Self>,
+        ctx: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         dsp::guard::flush_denormals();
         if let (Some(pipeline), Some(shared)) = (&mut self.pipeline, &mut self.shared) {
-            pipeline.process(buffer, aux, shared, &self.params);
+            pipeline.process(buffer, aux, shared, &self.params, ctx.transport());
         }
         ProcessStatus::Normal
     }

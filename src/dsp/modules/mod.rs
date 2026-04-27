@@ -76,8 +76,16 @@ pub struct ModuleContext<'block> {
     pub suppression_width: f32,
     pub auto_makeup:       bool,
     pub delta_monitor:     bool,
-    // Phantom keeps the lifetime live until later tasks add real `&'block` fields.
-    _phantom: std::marker::PhantomData<&'block ()>,
+
+    // Optional infra fields — populated by later phases. None by default.
+    pub unwrapped_phase:      Option<&'block [f32]>,      // Phase 4.1
+    pub peaks:                Option<&'block [PeakInfo]>, // Phase 4.2
+    pub instantaneous_freq:   Option<&'block [f32]>,      // Phase 6.1
+    pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
+    pub midi_notes:           Option<&'block [bool; 128]>, // Phase 6.3
+    pub bpm:                  f32,                         // Phase 1 stub (0.0 until Phase 2 plumbs transport)
+    pub beat_position:        f64,                         // Phase 1 stub
+    pub sidechain_derivative: Option<&'block [f32]>,      // Phase 5b/Modulate Slew Lag
 }
 
 impl<'block> ModuleContext<'block> {
@@ -89,9 +97,27 @@ impl<'block> ModuleContext<'block> {
         Self {
             sample_rate, fft_size, num_bins, attack_ms, release_ms,
             sensitivity, suppression_width, auto_makeup, delta_monitor,
-            _phantom: std::marker::PhantomData,
+            unwrapped_phase: None,
+            peaks: None,
+            instantaneous_freq: None,
+            chromagram: None,
+            midi_notes: None,
+            bpm: 0.0,
+            beat_position: 0.0,
+            sidechain_derivative: None,
         }
     }
+}
+
+/// One detected spectral peak. Populated by Phase 4.2 (PLPV peak detection).
+/// Bin index `k` plus the magnitude at that bin. Skirt edges (low_k, high_k)
+/// describe the peak's region of influence used by Voronoi assignment.
+#[derive(Clone, Copy, Debug)]
+pub struct PeakInfo {
+    pub k:      u32,
+    pub mag:    f32,
+    pub low_k:  u32,
+    pub high_k: u32,
 }
 
 // ── ProbeSnapshot (test-only) ──────────────────────────────────────────────
