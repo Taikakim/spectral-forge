@@ -304,6 +304,7 @@ impl Pipeline {
 
         // ── Read feature flags and stereo link ──
         let delta_monitor = params.delta_monitor.value();
+        let enable_heavy_modules = params.enable_heavy_modules.value();
         let stereo_link = params.stereo_link.value();
         let is_mid_side = stereo_link == StereoLink::MidSide;
 
@@ -508,6 +509,7 @@ impl Pipeline {
                 &ctx,
                 channel_supp_buf,
                 num_bins,
+                enable_heavy_modules,
             );
             for k in 0..channel_supp_buf.len() {
                 if channel_supp_buf[k] > suppression_buf[k] { suppression_buf[k] = channel_supp_buf[k]; }

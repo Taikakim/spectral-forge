@@ -203,7 +203,7 @@ fn fx_matrix_no_route_to_master_produces_silence() {
         44100.0, 2048, n,
         10.0, 100.0, 0.0, 0.0, false, false,
     );
-    fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
+    fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n, true);
 
     // All bins should be zero when nothing routes to Master
     for (k, b) in bins.iter().enumerate() {
@@ -263,6 +263,7 @@ fn fx_matrix_passthrough_preserves_finite() {
         &ctx,
         &mut supp_out,
         num_bins,
+        true,
     );
 
     for (k, b) in bins.iter().enumerate() {
@@ -386,6 +387,7 @@ fn fx_matrix_dynamics_produces_finite_output() {
         &ctx,
         &mut supp_out,
         num_bins,
+        true,
     );
 
     for (k, b) in bins.iter().enumerate() {
@@ -510,7 +512,7 @@ fn matrix_routing_serial_default_passes_signal() {
         44100.0, 2048, n,
         10.0, 100.0, 0.0, 0.0, false, false,
     );
-    fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
+    fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n, true);
     // Signal should make it through: at least some bins are non-zero.
     assert!(bins.iter().any(|c| c.norm() > 0.01), "signal lost through matrix");
 }
@@ -674,10 +676,10 @@ fn fx_matrix_ts_split_routes_sustained_to_next_slot() {
     // Converge the T/S split avg_mag tracker
     for _ in 0..200 {
         let mut b = bins.clone();
-        fm.process_hop(0, StereoLink::Linked, &mut b, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
+        fm.process_hop(0, StereoLink::Linked, &mut b, &sc, &targets, &curves, &rm, &ctx, &mut supp, n, true);
     }
     let mut final_bins = bins.clone();
-    fm.process_hop(0, StereoLink::Linked, &mut final_bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
+    fm.process_hop(0, StereoLink::Linked, &mut final_bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n, true);
 
     // After routing transient → slot1 → Master, the output must be finite and non-zero
     assert!(final_bins.iter().any(|b| b.norm() > 1e-6),

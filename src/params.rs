@@ -225,6 +225,8 @@ pub struct SpectralForgeParams {
 
     pub delta_monitor: BoolParam,
 
+    pub enable_heavy_modules: BoolParam,
+
     pub effect_mode: EnumParam<EffectMode>,
 
     pub phase_rand_amount: FloatParam,
@@ -423,6 +425,7 @@ impl Default for SpectralForgeParams {
 
             auto_makeup: BoolParam::new("Auto Makeup", false),
             delta_monitor: BoolParam::new("Delta Monitor", false),
+            enable_heavy_modules: BoolParam::new("Enable Heavy Modules", true),
 
             effect_mode: EnumParam::new("Effect Mode", EffectMode::Bypass),
 
@@ -669,6 +672,7 @@ unsafe impl Params for SpectralForgeParams {
 
         params.push(("auto_makeup".to_string(),   self.auto_makeup.as_ptr(),   String::new()));
         params.push(("delta_monitor".to_string(), self.delta_monitor.as_ptr(), String::new()));
+        params.push(("enable_heavy_modules".to_string(), self.enable_heavy_modules.as_ptr(), String::new()));
 
         params.push(("effect_mode".to_string(),          self.effect_mode.as_ptr(),          String::new()));
         params.push(("phase_rand_amount".to_string(),    self.phase_rand_amount.as_ptr(),    String::new()));

@@ -181,6 +181,12 @@ pub trait SpectralModule: Send {
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> ProbeSnapshot { ProbeSnapshot::default() }
 
+    /// Returns true if the module's currently-active mode is CPU-heavy.
+    /// The "low-end-hardware" preset filter short-circuits process() when
+    /// `enable_heavy_modules == false` and this returns true.
+    /// Default: false. Modules with multiple modes return based on active mode.
+    fn heavy_cpu_for_mode(&self) -> bool { false }
+
     /// Update the operating mode for Gain modules. Default no-op for all other types.
     fn set_gain_mode(&mut self, _: GainMode) {}
 

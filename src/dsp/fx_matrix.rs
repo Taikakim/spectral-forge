@@ -78,16 +78,17 @@ impl FxMatrix {
     #[allow(clippy::too_many_arguments)]
     pub fn process_hop(
         &mut self,
-        channel:         usize,
-        stereo_link:     StereoLink,
-        complex_buf:     &mut [Complex<f32>],
-        sc_args:         &[Option<&[f32]>; 9],
-        slot_targets:    &[FxChannelTarget; 9],
-        slot_curves:     &[Vec<Vec<f32>>],   // [slot][curve][bin]
-        route_matrix:    &RouteMatrix,
-        ctx:             &ModuleContext<'_>,
-        suppression_out: &mut [f32],
-        num_bins:        usize,
+        channel:              usize,
+        stereo_link:          StereoLink,
+        complex_buf:          &mut [Complex<f32>],
+        sc_args:              &[Option<&[f32]>; 9],
+        slot_targets:         &[FxChannelTarget; 9],
+        slot_curves:          &[Vec<Vec<f32>>],   // [slot][curve][bin]
+        route_matrix:         &RouteMatrix,
+        ctx:                  &ModuleContext<'_>,
+        suppression_out:      &mut [f32],
+        num_bins:             usize,
+        enable_heavy_modules: bool,
     ) {
         // Clear virtual row output buffers for this hop.
         for v in 0..MAX_SPLIT_VIRTUAL_ROWS {
@@ -142,14 +143,20 @@ impl FxMatrix {
             });
             let curves: &[&[f32]] = &curves_storage[..nc];
 
-            module.process(
-                channel, stereo_link, slot_targets[s],
-                &mut self.mix_buf[..num_bins],
-                sc_args[s], curves,
-                &mut self.slot_supp[s][..num_bins],
-                ctx,
-            );
-            self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
+            if !enable_heavy_modules && module.heavy_cpu_for_mode() {
+                // Short-circuit: copy input to output, leave suppression at 0.
+                self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
+                self.slot_supp[s][..num_bins].fill(0.0);
+            } else {
+                module.process(
+                    channel, stereo_link, slot_targets[s],
+                    &mut self.mix_buf[..num_bins],
+                    sc_args[s], curves,
+                    &mut self.slot_supp[s][..num_bins],
+                    ctx,
+                );
+                self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
+            }
 
             // Populate virtual row buffers from split modules.
             if let Some(vouts) = module.virtual_outputs() {
