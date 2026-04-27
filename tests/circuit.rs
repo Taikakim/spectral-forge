@@ -66,3 +66,50 @@ fn circuit_set_mode_round_trip() {
     m.set_mode(CircuitMode::SpectralSchmitt);
     assert_eq!(m.current_mode(), CircuitMode::SpectralSchmitt);
 }
+
+#[test]
+fn circuit_bbd_delays_and_lowpasses() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(CircuitMode::BbdBins);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(4.0, 0.0); // single-bin impulse
+
+    // AMOUNT=2 (max stage-3 gain), THRESHOLD=1 (mild dither), RELEASE=1 (mid LP), MIX=2 (full wet)
+    let amount = vec![2.0_f32; num_bins];
+    let thresh = vec![1.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+
+    // Hop 1: input enters stage 0; output (stage 3) is still small.
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    let after_hop_1 = bins[100].norm();
+    assert!(after_hop_1 < 4.0, "BBD must delay (bin 100 still at {} after hop 1)", after_hop_1);
+
+    // Drive zero-input hops so the previously-injected energy propagates through stages.
+    for _ in 0..4 {
+        for b in bins.iter_mut() { *b = Complex::new(0.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+    }
+    let final_mag = bins[100].norm();
+    assert!(final_mag > 0.05, "BBD did not propagate signal through stages (final={})", final_mag);
+
+    for b in &bins {
+        assert!(b.norm().is_finite() && b.norm() < 100.0);
+    }
+}

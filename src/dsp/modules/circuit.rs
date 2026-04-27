@@ -9,19 +9,83 @@
 //! provides the enum, struct, and stub `process()` that passes audio through
 //! unmodified and zeroes suppression_out.
 
-#[allow(unused_imports)]
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
 use crate::dsp::modules::{
     FxChannelTarget, ModuleContext, ModuleType, SpectralModule,
 };
-#[allow(unused_imports)]
 use crate::params::StereoLink;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 pub const BBD_STAGES: usize = 4;
+
+// ── BBD helpers ────────────────────────────────────────────────────────────
+
+/// Xorshift32 PRNG step — returns a value in `[-1, 1)`.
+fn xorshift32_step(state: &mut u32) -> f32 {
+    let mut s = *state;
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    *state = s;
+    (s as i32 as f32) / (i32::MAX as f32)
+}
+
+/// 4-stage bucket-brigade delay on per-bin magnitudes.
+/// Curves: `[AMOUNT, THRESH, RELEASE, MIX]`.
+fn apply_bbd(
+    bins: &mut [Complex<f32>],
+    bbd_mag: &mut [Vec<f32>; BBD_STAGES],
+    rng_state: &mut u32,
+    curves: &[&[f32]],
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let release_c = curves[2];
+    let mix_c = curves[3];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1 stage-3 output gain
+        let dither_amt = thresh_c[k].clamp(0.0, 2.0) * 0.005; // very small noise
+        let lp_alpha = (release_c[k].clamp(0.01, 2.0) * 0.4).clamp(0.05, 0.9);
+        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let dry = bins[k];
+        let in_mag = dry.norm();
+
+        // Push input into stage 0 (with LP smoothing toward target).
+        let target_0 = bbd_mag[0][k] + (in_mag - bbd_mag[0][k]) * lp_alpha;
+        let dither_0 = xorshift32_step(rng_state) * dither_amt;
+        bbd_mag[0][k] = (target_0 + dither_0).max(0.0);
+
+        // Cascade: each stage LP-smooths toward the previous stage's value.
+        // Read s0 from the just-written stage 0 (intentional — see plan §note),
+        // then read old stages 1/2/3 before overwriting them.
+        let s0_prev = bbd_mag[0][k]; // intentionally the NEW stage-0 value
+        let s1_prev = bbd_mag[1][k];
+        let s2_prev = bbd_mag[2][k];
+        let s3_prev = bbd_mag[3][k];
+
+        bbd_mag[3][k] = s3_prev + (s2_prev - s3_prev) * lp_alpha + xorshift32_step(rng_state) * dither_amt;
+        bbd_mag[2][k] = s2_prev + (s1_prev - s2_prev) * lp_alpha + xorshift32_step(rng_state) * dither_amt;
+        bbd_mag[1][k] = s1_prev + (s0_prev - s1_prev) * lp_alpha + xorshift32_step(rng_state) * dither_amt;
+
+        // Output: stage 3 (most-delayed) magnitude, scaled by amount.
+        // Phase is preserved when there is a live carrier (in_mag > 1e-9); for silent
+        // input bins we emit the delayed magnitude as real-positive (arbitrary unit phase).
+        let out_mag = bbd_mag[3][k].max(0.0) * amount;
+        let wet = if in_mag > 1e-9 {
+            dry * (out_mag / in_mag)
+        } else {
+            Complex::new(out_mag, 0.0)
+        };
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
 
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
@@ -92,13 +156,23 @@ impl SpectralModule for CircuitModule {
         channel: usize,
         _stereo_link: StereoLink,
         _target: FxChannelTarget,
-        _bins: &mut [Complex<f32>],
+        bins: &mut [Complex<f32>],
         _sidechain: Option<&[f32]>,
-        _curves: &[&[f32]],
+        curves: &[&[f32]],
         suppression_out: &mut [f32],
         _ctx: &ModuleContext,
     ) {
         debug_assert!(channel < 2);
+
+        match self.mode {
+            CircuitMode::BbdBins => {
+                let bbd = &mut self.bbd_mag[channel];
+                let rng = &mut self.rng_state[channel];
+                apply_bbd(bins, bbd, rng, curves);
+            }
+            _ => {} // SpectralSchmitt + CrossoverDistortion land in Tasks 4/5
+        }
+
         for s in suppression_out.iter_mut() {
             *s = 0.0;
         }
