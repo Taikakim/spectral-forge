@@ -28,6 +28,11 @@ pub struct FutureModule {
     /// Ring buffer of write-ahead frames per channel. `[channel][frame_idx][bin]`.
     ring:        [Vec<Vec<Complex<f32>>>; 2],
     write_pos:   [usize; 2],
+    /// Per-channel scratch for the PrintThrough two-pass spread: pass 1 stores
+    /// the complex side-bleed value here so pass 2 can `+=` it to ring neighbours
+    /// without losing dry phase. Allocated in `reset()`, contents are transient
+    /// per `process()` call.
+    spread_scratch: [Vec<Complex<f32>>; 2],
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
 }
@@ -40,6 +45,7 @@ impl FutureModule {
             sample_rate: 44100.0,
             ring:        [Vec::new(), Vec::new()],
             write_pos:   [0; 2],
+            spread_scratch: [Vec::new(), Vec::new()],
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
@@ -63,6 +69,7 @@ impl SpectralModule for FutureModule {
                 .map(|_| vec![Complex::new(0.0, 0.0); n])
                 .collect();
             self.write_pos[ch] = 0;
+            self.spread_scratch[ch] = vec![Complex::new(0.0, 0.0); n];
         }
     }
 
@@ -85,7 +92,6 @@ impl SpectralModule for FutureModule {
         let probe_k = n / 2;
         let amount_curve = curves.get(0).copied().unwrap_or(&[][..]);
         let time_curve   = curves.get(1).copied().unwrap_or(&[][..]);
-        let _thresh      = curves.get(2).copied().unwrap_or(&[][..]); // PrintThrough ignores THRESHOLD
         let spread_curve = curves.get(3).copied().unwrap_or(&[][..]);
         let mix_curve    = curves.get(4).copied().unwrap_or(&[][..]);
 
@@ -103,8 +109,9 @@ impl SpectralModule for FutureModule {
                 let delay_hops = ((time_gain * 8.0).round() as usize).clamp(1, MAX_ECHO_FRAMES - 1);
                 let read_pos   = (self.write_pos[ch] + MAX_ECHO_FRAMES - delay_hops) % MAX_ECHO_FRAMES;
 
-                // Pass 1: mix wet→bins; write centre leaked values; stash leaked_mag*spread_pct
-                // into suppression_out (we'll zero it after pass 2 — it's pre-allocated, n floats).
+                // Pass 1: mix wet→bins; write centre leaked values; store full complex
+                // side-bleed in spread_scratch so pass 2 can accumulate to neighbours
+                // without losing the original dry phase.
                 for k in 0..n {
                     let amount_gain = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 4.0);
                     let leak_pct    = (amount_gain * 0.05).clamp(0.0, 0.20);
@@ -132,19 +139,13 @@ impl SpectralModule for FutureModule {
                     let phase_unit = if dry_norm > 1e-12 { dry / dry_norm } else { Complex::new(1.0, 0.0) };
                     // Write centre into ring (ring slot was pre-cleared at end of last hop).
                     self.ring[ch][self.write_pos[ch]][k] = phase_unit * (leaked_mag * (1.0 - 2.0 * spread_pct));
-                    // Stash the side magnitude into suppression_out for pass 2.
-                    // suppression_out[k] temporarily holds |side| (real, non-negative).
-                    suppression_out[k] = leaked_mag * spread_pct;
+                    // Store full complex side value — preserves dry phase even when centre is zero.
+                    self.spread_scratch[ch][k] = phase_unit * (leaked_mag * spread_pct);
                 }
                 // Pass 2: accumulate side bleeds into neighbours (all centres are now written).
                 for k in 0..n {
-                    let side_mag = suppression_out[k];
-                    if side_mag < 1e-24 { continue; }
-                    // Recover phase from the centre we just wrote.
-                    let centre = self.ring[ch][self.write_pos[ch]][k];
-                    let centre_norm = centre.norm();
-                    let phase_unit = if centre_norm > 1e-24 { centre / centre_norm } else { Complex::new(1.0, 0.0) };
-                    let side = phase_unit * side_mag;
+                    let side = self.spread_scratch[ch][k];
+                    if side.norm_sqr() < 1e-48 { continue; }
                     if k > 0     { self.ring[ch][self.write_pos[ch]][k - 1] += side; }
                     if k + 1 < n { self.ring[ch][self.write_pos[ch]][k + 1] += side; }
                 }
@@ -184,6 +185,7 @@ impl SpectralModule for FutureModule {
             for frame in self.ring[ch].iter_mut() {
                 frame.fill(Complex::new(0.0, 0.0));
             }
+            self.spread_scratch[ch].fill(Complex::new(0.0, 0.0));
         }
         self.write_pos = [0; 2];
     }

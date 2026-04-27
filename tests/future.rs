@@ -134,3 +134,45 @@ fn print_through_spread_bleeds_to_adjacent_bins() {
     assert!(bins[99].norm()  > 0.005, "spread should bleed left, got {}",  bins[99].norm());
     assert!(bins[101].norm() > 0.005, "spread should bleed right, got {}", bins[101].norm());
 }
+
+#[test]
+fn print_through_spread_at_max_preserves_neighbour_phase() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = FutureModule::new();
+    m.set_mode(FutureMode::PrintThrough);
+    m.reset(48000.0, 1024);
+
+    let amount = vec![1.0f32; 513];
+    let time   = vec![1.0f32; 513];
+    let thresh = vec![1.0f32; 513];
+    let spread = vec![2.0f32; 513];   // MAX SPREAD: centre 0%, neighbours 50% each
+    let mix    = vec![2.0f32; 513];
+
+    let ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    let curves: Vec<&[f32]> = vec![&amount, &time, &thresh, &spread, &mix];
+
+    // Hop 0: pure imaginary impulse at bin 100 (phase = +π/2).
+    let mut bins = vec![Complex::new(0.0, 0.0); 513];
+    bins[100] = Complex::new(0.0, 1.0);
+    let mut supp = vec![0.0f32; 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+
+    for _ in 1..=7 {
+        let mut buf = vec![Complex::new(0.0, 0.0); 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+    }
+    let mut bins = vec![Complex::new(0.0, 0.0); 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+
+    // At max spread, centre bin 100 should be much smaller than neighbours (secondary echo
+    // re-accumulation means it won't be exactly zero, but it should be small). Bin 99 + 101
+    // should carry the phase of the original dry signal (imaginary), not the real axis.
+    assert!(bins[100].norm() < 0.02, "centre should be ~zero at max spread, got {}", bins[100].norm());
+    assert!(bins[99].im.abs() > bins[99].re.abs() * 5.0,
+        "bin 99 should carry imaginary phase from original dry, got re={} im={}", bins[99].re, bins[99].im);
+    assert!(bins[101].im.abs() > bins[101].re.abs() * 5.0,
+        "bin 101 should carry imaginary phase from original dry, got re={} im={}", bins[101].re, bins[101].im);
+}
