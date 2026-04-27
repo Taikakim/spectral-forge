@@ -104,3 +104,18 @@ fn stiction_dead_zone() {
     state.apply(&p, &mut buf, 0.01);
     for c in &buf { assert!(c.norm() > 0.4, "over threshold should release"); }
 }
+
+use spectral_forge::dsp::modules::{RouteMatrix, MAX_SLOTS, MAX_MATRIX_ROWS};
+
+#[test]
+fn route_matrix_default_is_all_linear() {
+    let m = RouteMatrix::default();
+    for r in 0..MAX_MATRIX_ROWS {
+        for c in 0..MAX_SLOTS {
+            assert_eq!(m.amp_mode[r][c], AmpMode::Linear,
+                "cell ({}, {}) should default to Linear", r, c);
+            let p = m.amp_params[r][c];
+            assert_eq!(p.amount, 1.0);
+        }
+    }
+}

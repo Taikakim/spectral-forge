@@ -2,6 +2,7 @@ use nih_plug_egui::egui::Color32;
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 use crate::params::{FxChannelTarget, StereoLink};
+use crate::dsp::amp_modes::{AmpMode, AmpCellParams};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -48,6 +49,19 @@ pub enum VirtualRowKind { Transient, Sustained }
 pub struct RouteMatrix {
     pub send: [[f32; MAX_SLOTS]; MAX_MATRIX_ROWS],
     pub virtual_rows: [Option<(u8, VirtualRowKind)>; MAX_SPLIT_VIRTUAL_ROWS],
+    #[serde(default = "default_amp_modes")]
+    pub amp_mode: [[AmpMode; MAX_SLOTS]; MAX_MATRIX_ROWS],
+    #[serde(default = "default_amp_params")]
+    pub amp_params: [[AmpCellParams; MAX_SLOTS]; MAX_MATRIX_ROWS],
+}
+
+pub(crate) fn default_amp_modes() -> [[AmpMode; MAX_SLOTS]; MAX_MATRIX_ROWS] {
+    [[AmpMode::Linear; MAX_SLOTS]; MAX_MATRIX_ROWS]
+}
+
+pub(crate) fn default_amp_params() -> [[AmpCellParams; MAX_SLOTS]; MAX_MATRIX_ROWS] {
+    [[AmpCellParams { amount: 1.0, threshold: 0.5, release_ms: 100.0, slew_db_per_s: 60.0 };
+      MAX_SLOTS]; MAX_MATRIX_ROWS]
 }
 
 impl Default for RouteMatrix {
@@ -55,6 +69,8 @@ impl Default for RouteMatrix {
         let mut m = Self {
             send: [[0.0f32; MAX_SLOTS]; MAX_MATRIX_ROWS],
             virtual_rows: [None; MAX_SPLIT_VIRTUAL_ROWS],
+            amp_mode:   default_amp_modes(),
+            amp_params: default_amp_params(),
         };
         // Serial: slot 0 → slot 1 → slot 2 → Master (slot 8).
         m.send[0][1] = 1.0;

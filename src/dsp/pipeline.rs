@@ -479,6 +479,8 @@ impl Pipeline {
         let mut route_matrix_snap = crate::dsp::modules::RouteMatrix {
             send: [[0.0f32; crate::dsp::modules::MAX_SLOTS]; crate::dsp::modules::MAX_MATRIX_ROWS],
             virtual_rows: virt,
+            amp_mode:   crate::dsp::modules::default_amp_modes(),
+            amp_params: crate::dsp::modules::default_amp_params(),
         };
         for r in 0..crate::param_ids::NUM_MATRIX_ROWS {
             for col in 0..crate::param_ids::NUM_SLOTS {
