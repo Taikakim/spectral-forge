@@ -245,6 +245,9 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
         ).collect();
         let mut bins_r: Vec<Complex<f32>> = bins_l.iter().map(|b| b * 0.6).collect();
 
+        let initial_l = bins_l.clone();
+        let initial_r = bins_r.clone();
+
         let amount = vec![1.5_f32; num_bins];
         let mid = vec![1.0_f32; num_bins];
         let mix = vec![1.0_f32; num_bins];
@@ -258,6 +261,8 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
         );
 
         for hop in 0..200 {
+            bins_l.copy_from_slice(&initial_l);
+            bins_r.copy_from_slice(&initial_r);
             for ch in 0..2 {
                 let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
                 module.process(ch, StereoLink::Independent, FxChannelTarget::All,
@@ -270,8 +275,10 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
                         "runaway: mode={:?} hop={} ch={} bin={} norm={}",
                         mode, hop, ch, i, b.norm());
                 }
-                for s in &suppression {
-                    assert!(s.is_finite() && *s >= 0.0);
+                for (i, s) in suppression.iter().enumerate() {
+                    assert!(s.is_finite() && *s >= 0.0,
+                        "suppression: mode={:?} hop={} ch={} bin={} val={}",
+                        mode, hop, ch, i, s);
                 }
             }
         }
