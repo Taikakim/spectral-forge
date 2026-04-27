@@ -26,7 +26,8 @@ pub fn bjorklund_into(pulses: usize, steps: usize, out: &mut [bool]) {
     }
     let s = n as i64;
     let p64 = p as i64;
-    let mut prev = ((s - 1) * p64) / s;
+    // floor(-p/s) — Euclidean division floors toward negative infinity, unlike i64 `/`.
+    let mut prev = (-p64).div_euclid(s);
     #[allow(clippy::needless_range_loop)] // index `i` is needed for Bresenham math
     for i in 0..n {
         let cur = (i as i64 * p64) / s;
@@ -35,8 +36,10 @@ pub fn bjorklund_into(pulses: usize, steps: usize, out: &mut [bool]) {
     }
 }
 
-/// Convenience wrapper for tests / non-realtime callers. Allocates a `Vec<bool>` of length `steps`.
-/// Do NOT call from `process()` — use `bjorklund_into` with a stack buffer instead.
+/// Convenience Vec wrapper for tests / non-realtime callers. Allocates.
+/// Gated behind cfg(any(test, feature = "probe")) so audio-path callers
+/// physically cannot reach it from a release build.
+#[cfg(any(test, feature = "probe"))]
 pub fn bjorklund(pulses: usize, steps: usize) -> Vec<bool> {
     let mut out = vec![false; steps];
     bjorklund_into(pulses, steps, &mut out);
