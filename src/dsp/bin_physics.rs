@@ -80,8 +80,8 @@ impl BinPhysics {
         let w = weight.clamp(0.0, 1.0);
         match rule {
             MergeRule::WeightedAvg => *dst = *dst * (1.0 - w) + src * w,
-            MergeRule::Max         => *dst = dst.max(src),
-            MergeRule::HeavierWins => if src > *dst { *dst = src; },
+            MergeRule::Max         => { if w > 0.0 { *dst = dst.max(src); } }
+            MergeRule::HeavierWins => { if w > 0.0 && src > *dst { *dst = src; } }
         }
     }
 

@@ -106,3 +106,58 @@ fn copy_from_replicates_active_region() {
         assert!((dst.temperature[k] + k as f32).abs() < 1e-6);
     }
 }
+
+#[test]
+fn reset_active_does_not_touch_inactive_region() {
+    let mut p = BinPhysics::new();
+    let n = 4;
+    // Mark the bin just past the active region with a sentinel.
+    p.mass[n] = 99.0;
+    p.temperature[n] = -7.0;
+    p.lock_target_freq[n] = 12_345.0;
+    p.reset_active(n, 48_000.0, 2048);
+    assert!((p.mass[n] - 99.0).abs() < 1e-6,
+        "mass past active region should be untouched, got {}", p.mass[n]);
+    assert!((p.temperature[n] + 7.0).abs() < 1e-6,
+        "temperature past active region should be untouched");
+    assert!((p.lock_target_freq[n] - 12_345.0).abs() < 1e-6,
+        "lock_target_freq past active region should be untouched");
+}
+
+#[test]
+fn mix_from_does_not_touch_inactive_region() {
+    let mut dst = BinPhysics::new();
+    let mut src = BinPhysics::new();
+    let n = 4;
+    // Sentinels just past the active region in dst.
+    dst.mass[n] = 99.0;
+    dst.temperature[n] = -7.0;
+    // src has different non-default values inside its active region (irrelevant past n).
+    for k in 0..n {
+        src.mass[k] = 5.0;
+        src.temperature[k] = 1.0;
+    }
+    dst.mix_from(&src, 0.5, n);
+    assert!((dst.mass[n] - 99.0).abs() < 1e-6,
+        "mass past num_bins must not be merged, got {}", dst.mass[n]);
+    assert!((dst.temperature[n] + 7.0).abs() < 1e-6,
+        "temperature past num_bins must not be merged");
+}
+
+#[test]
+fn copy_from_does_not_touch_inactive_region() {
+    let mut dst = BinPhysics::new();
+    let mut src = BinPhysics::new();
+    let n = 4;
+    dst.mass[n] = 99.0;
+    dst.temperature[n] = -7.0;
+    for k in 0..n {
+        src.mass[k] = 3.0;
+        src.temperature[k] = 1.0;
+    }
+    dst.copy_from(&src, n);
+    assert!((dst.mass[n] - 99.0).abs() < 1e-6,
+        "mass past num_bins must not be copied, got {}", dst.mass[n]);
+    assert!((dst.temperature[n] + 7.0).abs() < 1e-6,
+        "temperature past num_bins must not be copied");
+}
