@@ -163,5 +163,14 @@ impl SpectralEngine for SpectralContrastEngine {
         }
     }
 
+    fn clear_state(&mut self) {
+        self.contrast_env.fill(0.0);
+        self.gr_db.fill(0.0);
+        self.smooth_buf.fill(0.0);
+        self.auto_makeup_db.fill(0.0);
+        self.mag_prefix.fill(0.0);
+        self.gr_prefix.fill(0.0);
+    }
+
     fn name(&self) -> &'static str { "Spectral Contrast" }
 }

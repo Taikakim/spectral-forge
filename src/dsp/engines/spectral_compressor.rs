@@ -224,5 +224,14 @@ impl SpectralEngine for SpectralCompressorEngine {
         );
     }
 
+    fn clear_state(&mut self) {
+        self.env_db.fill(-96.0);
+        self.gr_db.fill(0.0);
+        self.smooth_buf.fill(0.0);
+        self.spectral_envelope.fill(0.0);
+        self.auto_makeup_db.fill(0.0);
+        self.prefix_buf.fill(0.0);
+    }
+
     fn name(&self) -> &'static str { "Spectral Compressor" }
 }

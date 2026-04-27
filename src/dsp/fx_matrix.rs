@@ -46,13 +46,18 @@ impl FxMatrix {
         self.mix_buf.fill(Complex::new(0.0, 0.0));
     }
 
-    /// Zero only the pre-allocated output and scratch buffers without touching
-    /// module DSP state. Called from Pipeline::clear_state() on the audio thread
-    /// where allocation is forbidden — module reset() impls may heap-allocate so
-    /// they must not be called from the RT path.
+    /// Zero all per-module DSP state and pre-allocated output/scratch buffers.
+    /// Called from Pipeline::clear_state() on the audio thread when the user
+    /// presses Reset — honouring the dialog promise "clear all module state".
+    ///
+    /// Module reset() impls may heap-allocate, so they must not be called here.
+    /// Instead, each module's clear_state() zeroes only pre-allocated buffers.
     ///
     /// RT-safe: no allocation, no locking, no I/O.
-    pub fn clear_output_buffers(&mut self) {
+    pub fn clear_state(&mut self) {
+        for slot in self.slots.iter_mut().flatten() {
+            slot.clear_state();
+        }
         for buf in &mut self.slot_out    { buf.fill(Complex::new(0.0, 0.0)); }
         for buf in &mut self.slot_supp   { buf.fill(0.0); }
         for buf in &mut self.virtual_out { buf.fill(Complex::new(0.0, 0.0)); }

@@ -150,6 +150,18 @@ impl SpectralModule for DynamicsModule {
         }
     }
 
+    fn clear_state(&mut self) {
+        self.engine.clear_state();
+        self.engine_r.clear_state();
+        self.bp_threshold.fill(-20.0);
+        self.bp_ratio.fill(1.0);
+        self.bp_attack.fill(10.0);
+        self.bp_release.fill(100.0);
+        self.bp_knee.fill(6.0);
+        self.bp_makeup.fill(0.0);
+        self.bp_mix.fill(1.0);
+    }
+
     fn module_type(&self) -> ModuleType { ModuleType::Dynamics }
     fn num_curves(&self) -> usize { 6 }
 

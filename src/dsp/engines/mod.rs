@@ -47,6 +47,11 @@ pub trait SpectralEngine: Send {
         fft_size as u32
     }
 
+    /// Zero all per-bin envelope and GR state without allocating.
+    /// Called from SpectralModule::clear_state() on the audio thread.
+    /// MUST NOT allocate, lock, or do I/O. Default is a no-op.
+    fn clear_state(&mut self) {}
+
     fn name(&self) -> &'static str;
 }
 

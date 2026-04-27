@@ -84,6 +84,12 @@ impl SpectralModule for TsSplitModule {
         suppression_out.fill(0.0);
     }
 
+    fn clear_state(&mut self) {
+        self.avg_mag.fill(0.0);
+        for b in self.transient_out.iter_mut() { *b = num_complex::Complex::new(0.0, 0.0); }
+        for b in self.sustained_out.iter_mut()  { *b = num_complex::Complex::new(0.0, 0.0); }
+    }
+
     fn tail_length(&self) -> u32 { self.fft_size as u32 }
     fn module_type(&self) -> ModuleType { ModuleType::TransientSustainedSplit }
     fn num_curves(&self) -> usize { 1 }

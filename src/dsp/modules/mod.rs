@@ -190,6 +190,11 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Gain modules. Default no-op for all other types.
     fn set_gain_mode(&mut self, _: GainMode) {}
 
+    /// Zero per-module DSP state without allocating. Called from the audio thread
+    /// when the user presses Reset. Default is a no-op for stateless modules.
+    /// MUST NOT allocate, lock, or do I/O.
+    fn clear_state(&mut self) {}
+
     /// For split modules (T/S Split), returns virtual output buffers.
     /// Index 0 = Transient, Index 1 = Sustained.
     /// Default: None (no virtual outputs).

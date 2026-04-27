@@ -185,6 +185,18 @@ impl SpectralModule for FreezeModule {
         suppression_out.fill(0.0);
     }
 
+    fn clear_state(&mut self) {
+        // Zero all captured/interpolation state and release any frozen snapshot.
+        // The next process() call will re-capture from live audio, as if the module
+        // was freshly instantiated.
+        for b in self.frozen_bins.iter_mut()  { *b = num_complex::Complex::new(0.0, 0.0); }
+        for b in self.freeze_target.iter_mut() { *b = num_complex::Complex::new(0.0, 0.0); }
+        self.freeze_port_t.fill(1.0);
+        self.freeze_hold_hops.fill(0);
+        self.freeze_accum.fill(0.0);
+        self.freeze_captured = false;
+    }
+
     fn tail_length(&self) -> u32 { self.fft_size as u32 }
     fn module_type(&self) -> ModuleType { ModuleType::Freeze }
     fn num_curves(&self) -> usize { 5 }

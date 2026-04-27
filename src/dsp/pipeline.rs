@@ -168,7 +168,7 @@ impl Pipeline {
         for ch_bufs in &mut self.sc_complex_bufs {
             ch_bufs.fill(Complex::new(0.0, 0.0));
         }
-        self.fx_matrix.clear_output_buffers();
+        self.fx_matrix.clear_state();
     }
 
     pub fn reset(&mut self, sample_rate: f32, num_channels: usize) {
