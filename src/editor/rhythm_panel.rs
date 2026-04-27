@@ -28,6 +28,8 @@ const STEPS:     usize = 8;
 pub fn render(ui: &mut Ui, params: &SpectralForgeParams, slot: usize) {
     if slot >= 9 { return; }
 
+    let scale = *params.ui_scale.lock();
+
     // Snapshot mode label without holding the mutex across the rest of the frame.
     let mode = params.slot_rhythm_mode.lock()[slot];
     ui.label(format!("Mode: {}", mode.label()));
@@ -60,7 +62,7 @@ pub fn render(ui: &mut Ui, params: &SpectralForgeParams, slot: usize) {
 
             let active = grid.voice_active_at(v, s);
             let fill = if active { cell_lit } else { cell_dim };
-            let stroke = Stroke::new(1.0, th::GRID_LINE);
+            let stroke = Stroke::new(th::scaled_stroke(th::STROKE_HAIRLINE, scale), th::GRID_LINE);
             painter.rect(cell_rect, 2.0, fill, stroke, StrokeKind::Outside);
 
             let id = ui.id().with(("rhythm_arp_cell", slot, v, s));

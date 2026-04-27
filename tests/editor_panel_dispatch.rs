@@ -30,5 +30,8 @@ fn all_shipped_modules_have_panel_widget_none() {
 
 #[test]
 fn rhythm_has_panel_widget_some() {
-    assert!(module_spec(ModuleType::Rhythm).panel_widget.is_some());
+    assert!(
+        module_spec(ModuleType::Rhythm).panel_widget.is_some(),
+        "Rhythm should set panel_widget = Some(rhythm_panel::render) after Phase 2d.7",
+    );
 }
