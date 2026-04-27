@@ -298,8 +298,50 @@ impl SpectralModule for RhythmModule {
                 let _ = tphase_curve;
             }
             RhythmMode::PhaseReset => {
-                // Implemented in Task 6.
-                let _ = tphase_curve;
+                let af_g     = af_curve.get(probe_k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+                let edge     = (af_g * 0.5).clamp(0.0, 0.5);
+                let step_pos = step_idx_f.fract();
+
+                // Reset envelope: 1.0 at the start of a step, decaying linearly across `edge`
+                // of the step. The rest of the step has reset_env=0 — Phase Reset is transient.
+                let reset_env = if edge < 1e-6 {
+                    if step_pos < 0.05 { 1.0 } else { 0.0 }
+                } else if step_pos < edge {
+                    1.0 - step_pos / edge
+                } else {
+                    0.0
+                };
+
+                #[allow(clippy::needless_range_loop)] // index `k` is needed for multi-slice per-bin lookup
+                for k in 0..n {
+                    let amount_g = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let strength = (amount_g * 0.5).clamp(0.0, 1.0);
+                    let mix_g    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let mix      = (mix_g * 0.5).clamp(0.0, 1.0);
+                    // TARGET_PHASE curve: gain 1.0 → 0 phase. Range -π..+π mapped from 0..2.
+                    let tphase_g     = tphase_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let target_phase = (tphase_g - 1.0) * std::f32::consts::PI;
+
+                    let dry = bins[k];
+                    let mag = dry.norm();
+                    let target = Complex::new(mag * target_phase.cos(), mag * target_phase.sin());
+                    let blend  = strength * reset_env;
+                    let wet_re = dry.re * (1.0 - blend) + target.re * blend;
+                    let wet_im = dry.im * (1.0 - blend) + target.im * blend;
+                    let wet    = Complex::new(wet_re, wet_im);
+                    bins[k] = Complex::new(
+                        dry.re * (1.0 - mix) + wet.re * mix,
+                        dry.im * (1.0 - mix) + wet.im * mix,
+                    );
+                }
+
+                #[cfg(any(test, feature = "probe"))]
+                {
+                    let amount_g_probe = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let mix_g_probe    = mix_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    probe_amount_pct = (amount_g_probe * 0.5).clamp(0.0, 1.0) * 100.0;
+                    probe_mix_pct    = (mix_g_probe    * 0.5).clamp(0.0, 1.0) * 100.0;
+                }
             }
         }
 

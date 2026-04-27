@@ -242,3 +242,42 @@ fn arpeggiator_advances_at_step_crossing() {
             "bin {} non-finite: {:?}", idx, c);
     }
 }
+
+// ── Task 6 tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn phase_reset_overwrites_phase_at_step_crossing() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = RhythmModule::new();
+    m.set_mode(RhythmMode::PhaseReset);
+    m.reset(48000.0, 1024);
+
+    let amount = vec![2.0f32; 513];   // full reset strength
+    let div    = vec![1.0f32; 513];   // 8 steps (neutral)
+    let af     = vec![0.0f32; 513];   // instant (no fade)
+    let tphase = vec![1.0f32; 513];   // neutral = 0 phase target
+    let mix    = vec![2.0f32; 513];   // full wet
+    let curves: Vec<&[f32]> = vec![&amount, &div, &af, &tphase, &mix];
+
+    // Input: Complex(1,1) = magnitude sqrt(2), phase π/4.
+    // After full reset to phase 0: re = sqrt(2), im = 0.
+    let mut bins = vec![Complex::new(1.0_f32, 1.0_f32); 513];
+    let mut supp = vec![0.0f32; 513];
+
+    let mut ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    ctx.bpm = 120.0;
+    ctx.beat_position = 0.0; // step boundary: step_pos=0.0 < 0.05 → reset_env=1.0
+
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut supp, &ctx);
+
+    let bin = bins[100];
+    let original_mag = (1.0_f32 * 1.0 + 1.0 * 1.0).sqrt(); // sqrt(2) ≈ 1.4142
+    assert!((bin.re - original_mag).abs() < 1e-3,
+        "phase-reset should align bin to mag along real axis; got re={}", bin.re);
+    assert!(bin.im.abs() < 1e-3,
+        "phase-reset should kill imaginary part; got im={}", bin.im);
+}
