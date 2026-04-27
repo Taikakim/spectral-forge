@@ -748,39 +748,62 @@ pub fn create_editor(
                         ui.add_space(2.0);
                     }
 
-                    // ── FutureMode selector — visible only for Future modules, but the
+                    // ── Mode selector — visible only for Future and Punch modules, but the
                     // row is still laid out invisibly for other modules so the knob
                     // row below stays in the same vertical position regardless.
                     {
                         let edit_slot = *params.editing_slot.lock() as usize;
                         let slot_type = params.slot_module_types.lock()[edit_slot];
                         let is_future = slot_type == crate::dsp::modules::ModuleType::Future;
+                        let is_punch  = slot_type == crate::dsp::modules::ModuleType::Punch;
 
                         let mut mode_builder = egui::UiBuilder::new();
-                        if !is_future { mode_builder = mode_builder.invisible(); }
+                        if !is_future && !is_punch { mode_builder = mode_builder.invisible(); }
                         ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
                                 ui.label(egui::RichText::new("Mode").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                                 ui.add_space(2.0);
 
-                                let cur_mode = params.slot_future_mode.lock()[edit_slot];
-                                use crate::dsp::modules::FutureMode;
-                                for (label, mode) in [
-                                    ("Print-Thru", FutureMode::PrintThrough),
-                                    ("Pre-Echo",   FutureMode::PreEcho),
-                                ] {
-                                    let is_active = cur_mode == mode;
-                                    let fill     = if is_active { th::BORDER } else { th::BG };
-                                    let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
-                                    let btn = egui::Button::new(
-                                        egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
-                                    )
-                                    .fill(fill)
-                                    .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                                    let resp = ui.add(btn);
-                                    if is_future && resp.clicked() {
-                                        params.slot_future_mode.lock()[edit_slot] = mode;
+                                if is_future {
+                                    let cur_mode = params.slot_future_mode.lock()[edit_slot];
+                                    use crate::dsp::modules::FutureMode;
+                                    for (label, mode) in [
+                                        ("Print-Thru", FutureMode::PrintThrough),
+                                        ("Pre-Echo",   FutureMode::PreEcho),
+                                    ] {
+                                        let is_active = cur_mode == mode;
+                                        let fill     = if is_active { th::BORDER } else { th::BG };
+                                        let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                        )
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                        let resp = ui.add(btn);
+                                        if resp.clicked() {
+                                            params.slot_future_mode.lock()[edit_slot] = mode;
+                                        }
+                                    }
+                                } else if is_punch {
+                                    let cur_mode = params.slot_punch_mode.lock()[edit_slot];
+                                    use crate::dsp::modules::punch::PunchMode;
+                                    for (label, mode) in [
+                                        ("Direct",  PunchMode::Direct),
+                                        ("Inverse", PunchMode::Inverse),
+                                    ] {
+                                        let is_active = cur_mode == mode;
+                                        let fill     = if is_active { th::BORDER } else { th::BG };
+                                        let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                        )
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                        let resp = ui.add(btn);
+                                        if resp.clicked() {
+                                            params.slot_punch_mode.lock()[edit_slot] = mode;
+                                        }
                                     }
                                 }
                             });
