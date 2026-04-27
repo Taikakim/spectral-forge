@@ -47,7 +47,7 @@ fn persist_roundtrip_all_keys_present() {
         "phase_curve_nodes", "freeze_curve_nodes", "freeze_active_curve",
         "editing_slot", "fx_module_types", "slot_module_types", "slot_names",
         "slot_targets", "slot_gain_mode", "slot_future_mode", "slot_punch_mode",
-        "slot_rhythm_mode", "slot_arp_grid", "slot_curve_nodes",
+        "slot_rhythm_mode", "slot_geometry_mode", "slot_arp_grid", "slot_curve_nodes",
         "editing_curve", "route_matrix", "fx_module_names",
         "fx_module_targets", "fx_route_matrix", "graph_db_min", "graph_db_max",
         "peak_falloff_ms", "ui_scale", "migrated_v1",

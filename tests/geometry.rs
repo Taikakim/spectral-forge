@@ -245,3 +245,58 @@ fn geometry_helmholtz_absorbs_and_overflows() {
         assert!(s.is_finite() && *s >= 0.0);
     }
 }
+
+/// Test that `set_geometry_mode` on the trait dispatches to the underlying
+/// GeometryModule and produces different spectral output for Chladni vs Helmholtz
+/// when given identical non-trivial input.
+#[test]
+fn geometry_mode_dispatch_via_trait_setter() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{create_module, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let num_bins = 1025;
+
+    // Craft curves that produce non-trivial output for both modes.
+    // AMOUNT=2, MODE_CAP=1, DAMP_REL=0, THRESH=0.5, MIX=2
+    let amount   = vec![2.0_f32; num_bins];
+    let mode_c   = vec![1.0_f32; num_bins];
+    let zeros    = vec![0.0_f32; num_bins];
+    let thresh   = vec![0.5_f32; num_bins];
+    let mix      = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &mode_c, &zeros, &thresh, &mix];
+    let mut supp = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+
+    // Run Chladni variant (default) through the trait object.
+    let mut m_chladni = create_module(ModuleType::Geometry, 48_000.0, 2048);
+    // set_geometry_mode defaults to Chladni — leave as-is (verify dispatch works at all).
+    m_chladni.set_geometry_mode(GeometryMode::Chladni);
+    let mut bins_chladni: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(1.0 + (k as f32) * 0.001, 0.0))
+        .collect();
+    m_chladni.process(0, StereoLink::Linked, FxChannelTarget::All,
+                      &mut bins_chladni, None, &curves, &mut supp, &ctx);
+
+    // Run Helmholtz variant via the trait setter.
+    let mut m_helmholtz = create_module(ModuleType::Geometry, 48_000.0, 2048);
+    m_helmholtz.set_geometry_mode(GeometryMode::Helmholtz);
+    let mut bins_helmholtz: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(1.0 + (k as f32) * 0.001, 0.0))
+        .collect();
+    m_helmholtz.process(0, StereoLink::Linked, FxChannelTarget::All,
+                        &mut bins_helmholtz, None, &curves, &mut supp, &ctx);
+
+    // The two modes must produce different outputs (they use completely different kernels).
+    let same = bins_chladni.iter().zip(bins_helmholtz.iter())
+        .all(|(a, b)| (a.re - b.re).abs() < 1e-9 && (a.im - b.im).abs() < 1e-9);
+    assert!(!same, "Chladni and Helmholtz must produce different outputs for the same input");
+
+    // Both outputs must remain finite.
+    for b in &bins_chladni  { assert!(b.norm().is_finite()); }
+    for b in &bins_helmholtz { assert!(b.norm().is_finite()); }
+}

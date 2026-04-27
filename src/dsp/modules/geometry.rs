@@ -273,4 +273,8 @@ impl SpectralModule for GeometryModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Geometry }
     fn num_curves(&self) -> usize { 5 }
+
+    fn set_geometry_mode(&mut self, mode: GeometryMode) {
+        self.set_mode(mode);
+    }
 }

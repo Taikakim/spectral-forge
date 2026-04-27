@@ -220,6 +220,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Rhythm modules. Default no-op for all other types.
     fn set_rhythm_mode(&mut self, _: crate::dsp::modules::rhythm::RhythmMode) {}
 
+    /// Update the operating mode for Geometry modules. Default no-op for all other types.
+    fn set_geometry_mode(&mut self, _: crate::dsp::modules::geometry::GeometryMode) {}
+
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 
