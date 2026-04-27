@@ -50,12 +50,23 @@ fn vactrol_holds_then_releases() {
         let mut zero_buf = vec![Complex::new(0.0, 0.0); NB];
         state.apply(&p, &mut zero_buf, hop_dt);
     }
-    let mut decayed = vec![Complex::new(1.0, 0.0); NB];
-    state.apply(&p, &mut decayed, hop_dt);
-    for c in &decayed {
-        assert!(c.re.is_finite() && c.im.is_finite());
-        assert!(c.norm() <= 2.0);
-    }
+    // Probe decay with a half-magnitude signal: the release branch leaves cap above the
+    // input (0.5), so output = 0.5 * cap.powf(0.6). After silence the cap is lower than
+    // immediately post-charge, so this probe should yield strictly less output than a
+    // matching probe taken with no silence between charge and probe.
+    let mut probe_after_decay = vec![Complex::new(0.5, 0.0); NB];
+    state.apply(&p, &mut probe_after_decay, hop_dt);
+    for c in &probe_after_decay { assert!(c.re.is_finite() && c.im.is_finite()); }
+
+    // Reset state, charge, then immediately probe (no silence in between).
+    let mut state2 = AmpNodeState::new(AmpMode::Vactrol, NB);
+    let mut charge = vec![Complex::new(1.0, 0.0); NB];
+    state2.apply(&p, &mut charge, hop_dt);
+    let mut probe_no_decay = vec![Complex::new(0.5, 0.0); NB];
+    state2.apply(&p, &mut probe_no_decay, hop_dt);
+    assert!(probe_after_decay[0].norm() < probe_no_decay[0].norm(),
+            "vactrol cap should decay during silence: probe_after_decay={} probe_no_decay={}",
+            probe_after_decay[0].norm(), probe_no_decay[0].norm());
 }
 
 #[test]

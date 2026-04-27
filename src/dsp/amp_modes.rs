@@ -1,3 +1,4 @@
+use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
 /// Per-cell amp mode for the routing matrix. Each cell of `RouteMatrix` carries
@@ -49,11 +50,9 @@ impl Default for AmpCellParams {
     }
 }
 
-use num_complex::Complex;
-
 /// Per-cell DSP state. One of these per (row, col) per channel in the matrix.
 /// State arrays are sized to `num_bins` at construction; the audio thread later
-/// calls `resize` (inside `permit_alloc`) if the FFT size changes.
+/// calls `resize` (inside `nih_plug::util::permit_alloc(|| …)`) if the FFT size changes.
 #[derive(Debug)]
 pub enum AmpNodeState {
     Linear,
@@ -65,7 +64,8 @@ pub enum AmpNodeState {
 
 impl AmpNodeState {
     /// Construct state for `mode`. Allocates per-bin arrays for non-Linear modes.
-    /// Caller is responsible for invoking inside `permit_alloc!` if on the audio thread.
+    /// Caller is responsible for invoking inside `nih_plug::util::permit_alloc(|| …)`
+    /// if on the audio thread.
     pub fn new(mode: AmpMode, num_bins: usize) -> Self {
         match mode {
             AmpMode::Linear   => AmpNodeState::Linear,
@@ -106,7 +106,7 @@ impl AmpNodeState {
     }
 
     /// Resize state arrays for a new fft size. Allocates if growing; cheap if same.
-    /// Must be called inside `permit_alloc!` if on the audio thread.
+    /// Must be called inside `nih_plug::util::permit_alloc(|| …)` if on the audio thread.
     pub fn resize(&mut self, num_bins: usize) {
         match self {
             AmpNodeState::Linear => {}
@@ -156,7 +156,9 @@ fn apply_vactrol(p: &AmpCellParams, buf: &mut [Complex<f32>], cap: &mut [f32], h
             *cap_k = release_a * *cap_k + (1.0 - release_a) * mag;
         }
         let gain = (*cap_k).clamp(0.0, 1.0).powf(0.6);
-        let blend = 1.0 - p.amount + p.amount * gain;
+        // amount > 1 ("exaggerated") can drive `blend` negative when gain is small,
+        // which would flip the bin's phase. Clamp at zero — the floor is silence.
+        let blend = (1.0 - p.amount + p.amount * gain).max(0.0);
         *c *= blend;
     }
 }
@@ -184,7 +186,9 @@ fn apply_slew(p: &AmpCellParams, buf: &mut [Complex<f32>], current_db: &mut [f32
         let delta = (target_db - *cur_db).clamp(-max_step_db, max_step_db);
         *cur_db = (*cur_db + delta).max(-120.0);
         let new_mag = 10f32.powf(*cur_db * 0.05);
-        let new_gain = (new_mag / mag) * p.amount + (1.0 - p.amount);
+        // amount > 1 ("exaggerated") with new_mag/mag < 1 can drive `new_gain` negative,
+        // flipping bin phase. Clamp at zero — slew can attenuate to silence but never invert.
+        let new_gain = ((new_mag / mag) * p.amount + (1.0 - p.amount)).max(0.0);
         *c *= new_gain;
     }
 }
