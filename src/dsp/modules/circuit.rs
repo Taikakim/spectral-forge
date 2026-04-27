@@ -180,6 +180,8 @@ pub struct CircuitModule {
     rng_state: [u32; 2],                     // xorshift32 per channel for BBD dither
     sample_rate: f32,
     fft_size: usize,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe: crate::dsp::modules::ProbeSnapshot,
 }
 
 impl CircuitModule {
@@ -194,6 +196,8 @@ impl CircuitModule {
             rng_state: [0xDEAD_BEEFu32, 0xCAFE_BABEu32],
             sample_rate: 48_000.0,
             fft_size: 2048,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe: crate::dsp::modules::ProbeSnapshot::default(),
         }
     }
 
@@ -233,6 +237,14 @@ impl SpectralModule for CircuitModule {
     ) {
         debug_assert!(channel < 2);
 
+        // Probe capture: all three kernels share the same mapping for curves[0] and curves[3].
+        // curves[0] (AMOUNT): g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
+        // curves[3] (MIX):   g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
+        #[cfg(any(test, feature = "probe"))]
+        let probe_amount_pct = curves[0].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
+        #[cfg(any(test, feature = "probe"))]
+        let probe_mix_pct = curves[3].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
+
         match self.mode {
             CircuitMode::BbdBins => {
                 let bbd = &mut self.bbd_mag[channel];
@@ -250,6 +262,15 @@ impl SpectralModule for CircuitModule {
 
         for s in suppression_out.iter_mut() {
             *s = 0.0;
+        }
+
+        #[cfg(any(test, feature = "probe"))]
+        {
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                amount_pct: Some(probe_amount_pct),
+                mix_pct:    Some(probe_mix_pct),
+                ..Default::default()
+            };
         }
     }
 
@@ -278,4 +299,7 @@ impl SpectralModule for CircuitModule {
     fn num_curves(&self) -> usize {
         4
     }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }

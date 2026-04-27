@@ -1208,3 +1208,104 @@ fn modulate_ground_loop_mix_max_probes_100_pct() {
     let observed = probe.mix_pct.expect("modulate must probe mix_pct");
     assert!((observed - 100.0).abs() < 2.0, "GroundLoop MIX=2.0 → 100%, got {}", observed);
 }
+
+// ── Circuit ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn circuit_bbd_bins_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::BbdBins);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "BbdBins AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_bbd_bins_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::BbdBins);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "BbdBins AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_bbd_bins_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::BbdBins);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 3, 2.0);   // MIX is curves[3] (Circuit has 4 curves)
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "BbdBins MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_spectral_schmitt_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::SpectralSchmitt);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "SpectralSchmitt AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_spectral_schmitt_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::SpectralSchmitt);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "SpectralSchmitt AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_spectral_schmitt_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::SpectralSchmitt);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 3, 2.0);   // MIX is curves[3] (Circuit has 4 curves)
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "SpectralSchmitt MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_crossover_distortion_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::CrossoverDistortion);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "CrossoverDistortion AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_crossover_distortion_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::CrossoverDistortion);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "CrossoverDistortion AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_crossover_distortion_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::CrossoverDistortion);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 3, 2.0);   // MIX is curves[3] (Circuit has 4 curves)
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "CrossoverDistortion MIX=2.0 → 100%, got {}", observed);
+}
