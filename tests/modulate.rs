@@ -540,3 +540,93 @@ fn modulate_mode_dispatch_via_trait_setter() {
     concrete.reset(48_000.0, 4096);
     assert_eq!(concrete.current_mode(), ModulateMode::GroundLoop);
 }
+
+/// End-to-end finite/bounded regression guard: 200 hops × 2 channels × 5 modes.
+/// Hammers every ModulateMode with a non-trivial complex spectrum and verifies
+/// every output bin is finite and below the runaway threshold (1e6), and every
+/// suppression entry is finite and non-negative.
+#[test]
+fn modulate_finite_bounded_all_modes_dual_channel() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let num_bins = 1025;
+
+    for mode in [
+        ModulateMode::PhasePhaser,
+        ModulateMode::BinSwapper,
+        ModulateMode::RmFmMatrix,
+        ModulateMode::DiodeRm,
+        ModulateMode::GroundLoop,
+    ] {
+        let mut module = ModulateModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_mode(mode);
+
+        // Non-trivial complex spectrum with varying magnitudes across bins.
+        let mut bins_l: Vec<Complex<f32>> = (0..num_bins)
+            .map(|k| Complex::new(
+                ((k as f32 * 0.07).sin() + 0.1).abs(),
+                (k as f32 * 0.13).cos() * 0.5,
+            ))
+            .collect();
+        // Right channel slightly quieter so left != right.
+        let mut bins_r: Vec<Complex<f32>> = bins_l.iter().map(|b| b * 0.6).collect();
+
+        // Sidechain: used by RmFmMatrix and DiodeRm kernels.
+        let sc: Vec<f32> = (0..num_bins)
+            .map(|k| ((k as f32 * 0.05).sin() + 0.2).abs())
+            .collect();
+
+        // AMOUNT=1.5 pushes kernels noticeably; all other curves nominal; MIX=1.0 full wet.
+        let amount     = vec![1.5_f32; num_bins];
+        let neutral    = vec![1.0_f32; num_bins];
+        let mix        = vec![1.0_f32; num_bins];
+        // curves: [AMOUNT, REACH, RATE, THRESH, AMPGATE, MIX]
+        let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &neutral, &mix];
+
+        let mut suppression = vec![0.0_f32; num_bins];
+        let ctx = ModuleContext::new(
+            48_000.0, 2048, num_bins,
+            10.0, 100.0, 1.0,
+            0.5, false, false,
+        );
+
+        for hop in 0..200 {
+            for ch in 0..2_usize {
+                let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
+                module.process(
+                    ch,
+                    StereoLink::Independent,
+                    FxChannelTarget::All,
+                    bins,
+                    Some(&sc),
+                    &curves,
+                    &mut suppression,
+                    &ctx,
+                );
+                for (i, b) in bins.iter().enumerate() {
+                    assert!(
+                        b.norm().is_finite(),
+                        "NaN/Inf: mode={:?} hop={} ch={} bin={} norm={}",
+                        mode, hop, ch, i, b.norm()
+                    );
+                    assert!(
+                        b.norm() < 1e6,
+                        "runaway: mode={:?} hop={} ch={} bin={} norm={}",
+                        mode, hop, ch, i, b.norm()
+                    );
+                }
+                for (i, s) in suppression.iter().enumerate() {
+                    assert!(
+                        s.is_finite() && *s >= 0.0,
+                        "bad suppression: mode={:?} hop={} ch={} idx={} val={}",
+                        mode, hop, ch, i, s
+                    );
+                }
+            }
+        }
+    }
+}

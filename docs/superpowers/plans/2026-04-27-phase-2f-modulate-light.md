@@ -1,6 +1,6 @@
 # Phase 2f — Modulate-light Module Implementation Plan
 
-> **Status:** PLANNED — implementation pending. Phase 2 sub-plan; depends on Phase 1 foundation infra (`docs/superpowers/plans/2026-04-27-phase-1-foundation-infra.md`).
+> **Status:** IMPLEMENTED — landed on branch `feature/next-gen-modules-plans` (Phase 2f, all 11 tasks).
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
