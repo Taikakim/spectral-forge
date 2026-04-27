@@ -92,7 +92,6 @@ pub struct RhythmModule {
     /// The arpeggiator grid (set by the GUI via `set_arp_grid`).
     arp_grid:    ArpGrid,
     /// Per-voice peak bin (assigned at step crossings, held for the step duration).
-    #[allow(dead_code)] // used by Arpeggiator arm in Task 5
     arp_voice_peak_bin: [u32; 8],
     /// Per-voice envelope state (0..1) for amp ramp-up at each gate-on.
     arp_voice_env: [f32; 8],
@@ -220,7 +219,83 @@ impl SpectralModule for RhythmModule {
                 }
             }
             RhythmMode::Arpeggiator => {
-                // Implemented in Task 5.
+                // On step crossing, re-pick peak bins for active voices.
+                if step_idx != self.last_step_idx {
+                    // Find up to 8 peak bins by scanning the input magnitudes.
+                    // Simple top-N peak picker (good enough for a step-rate event).
+                    let mut top: [(f32, u32); 8] = [(0.0, 0); 8];
+                    for k in 1..n - 1 {
+                        let m = bins[k].norm();
+                        if m <= bins[k - 1].norm() || m < bins[k + 1].norm() { continue; }
+                        // Insert into top[] sorted desc.
+                        for i in 0..8 {
+                            if m > top[i].0 {
+                                for j in (i + 1..8).rev() { top[j] = top[j - 1]; }
+                                top[i] = (m, k as u32);
+                                break;
+                            }
+                        }
+                    }
+                    #[allow(clippy::needless_range_loop)] // index `v` is needed for multi-field per-voice update
+                    for v in 0..8 {
+                        self.arp_voice_peak_bin[v] = top[v].1;
+                        // Reset envelope to 0 for voices that are gated on at this step.
+                        if self.arp_grid.voice_active_at(v, step_idx as usize) {
+                            self.arp_voice_env[v] = 0.0;
+                        }
+                    }
+                }
+
+                // Per-hop envelope advance: simple linear ramp over `attack_hops`.
+                let attack_g = af_curve.get(probe_k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+                let attack_step_frac = (attack_g * 0.25).clamp(0.01, 0.5);
+                // Steps are nominally bar/steps long. attack_step_frac of a step in hops:
+                let bar_secs = 4.0 / (ctx.bpm.max(1.0) / 60.0);
+                let step_secs = bar_secs / steps as f32;
+                let hop_dt = ctx.fft_size as f32 / ctx.sample_rate / 4.0;
+                let attack_hops = ((attack_step_frac * step_secs / hop_dt).max(1.0)) as f32;
+                let env_step = 1.0 / attack_hops;
+
+                // Build voice-gain spectrum: zero everywhere, add +AMOUNT at each active voice's peak bin.
+                for v in 0..8 {
+                    if self.arp_grid.voice_active_at(v, step_idx as usize) {
+                        self.arp_voice_env[v] = (self.arp_voice_env[v] + env_step).min(1.0);
+                    } else {
+                        self.arp_voice_env[v] = (self.arp_voice_env[v] - env_step).max(0.0);
+                    }
+                }
+
+                let mix_g_global = mix_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                let mix_global   = (mix_g_global * 0.5).clamp(0.0, 1.0);
+                let amount_g     = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                let amount       = amount_g.clamp(0.0, 2.0);
+
+                // First pass: compute per-bin "voice gate" — max envelope for voices whose peak is at k.
+                // Allocate-free: scan voices, compare bins.
+                #[allow(clippy::needless_range_loop)] // index `k` is needed to compare vs. peak_bin and index bins
+                for k in 0..n {
+                    let mut voice_gate = 0.0f32;
+                    for v in 0..8 {
+                        if self.arp_voice_peak_bin[v] as usize == k {
+                            voice_gate = voice_gate.max(self.arp_voice_env[v]);
+                        }
+                    }
+                    let dry = bins[k];
+                    // Wet: original × voice_gate × amount, with amount=2.0 as full passthrough.
+                    let wet = dry * (voice_gate * amount * 0.5);
+                    bins[k] = Complex::new(
+                        dry.re * (1.0 - mix_global) + wet.re * mix_global,
+                        dry.im * (1.0 - mix_global) + wet.im * mix_global,
+                    );
+                }
+
+                #[cfg(any(test, feature = "probe"))]
+                {
+                    let amount_norm = (amount_g * 0.5).clamp(0.0, 1.0);
+                    probe_amount_pct = amount_norm * 100.0;
+                    probe_mix_pct    = mix_global * 100.0;
+                }
+
                 let _ = tphase_curve;
             }
             RhythmMode::PhaseReset => {

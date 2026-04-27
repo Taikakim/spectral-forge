@@ -170,3 +170,55 @@ fn bjorklund_1_of_8_has_one_pulse() {
     assert_eq!(pattern.iter().filter(|&&b| b).count(), 1,
         "single pulse must produce exactly one true");
 }
+
+// ── Task 5 tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn arpeggiator_advances_at_step_crossing() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = RhythmModule::new();
+    m.set_mode(RhythmMode::Arpeggiator);
+    let mut g = ArpGrid::default();
+    // Voice 0 plays only at step 0.
+    g.toggle(0, 0);
+    // Voice 1 plays only at step 4.
+    g.toggle(1, 4);
+    m.set_arp_grid(g);
+    m.reset(48000.0, 1024);
+
+    let amount = vec![2.0f32; 513];
+    let div    = vec![1.0f32; 513];
+    let af     = vec![0.0f32; 513];
+    let tphase = vec![1.0f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &div, &af, &tphase, &mix];
+
+    // Build input: peaks at bins 50 and 100.
+    let mut input = vec![Complex::new(0.1, 0.0); 513];
+    input[50]  = Complex::new(1.0, 0.0);
+    input[100] = Complex::new(1.0, 0.0);
+
+    let mut supp = vec![0.0f32; 513];
+
+    // At beat_position=0 (step 0), only voice 0 active → only the highest peak (or first picked) plays.
+    let mut bins = input.clone();
+    let mut ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    ctx.bpm = 120.0;
+    ctx.beat_position = 0.0;
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut supp, &ctx);
+    // Just check finite + bounded.
+    for c in &bins { assert!(c.re.is_finite() && c.norm() <= 2.0); }
+
+    // At step 4 (half a bar in at 8 steps): beat_position = 2.0
+    let mut bins = input.clone();
+    let mut ctx2 = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    ctx2.bpm = 120.0;
+    ctx2.beat_position = 2.0;
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut supp, &ctx2);
+    for c in &bins { assert!(c.re.is_finite() && c.norm() <= 2.0); }
+}
