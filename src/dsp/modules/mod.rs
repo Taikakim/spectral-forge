@@ -25,6 +25,7 @@ pub enum ModuleType {
     TransientSustainedSplit,
     Harmonic,
     Future,
+    Punch,
     Master,
 }
 
@@ -342,6 +343,18 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
     };
+    static PUNCH: ModuleSpec = ModuleSpec {
+        display_name: "Punch",
+        color_lit: Color32::from_rgb(0xe0, 0x70, 0x60),
+        color_dim: Color32::from_rgb(0x48, 0x20, 0x20),
+        num_curves: 6,
+        curve_labels: &["AMOUNT", "WIDTH", "FILL_MODE", "AMP_FILL", "HEAL", "MIX"],
+        supports_sidechain: true,
+        // First module to opt-in to sidechain auto-routing by default — fresh
+        // Punch slot prompts the host to assign an aux input.
+        wants_sidechain: true,
+        panel_widget: None,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -372,6 +385,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::TransientSustainedSplit => &TS,
         ModuleType::Harmonic               => &HARM,
         ModuleType::Future                 => &FUT,
+        ModuleType::Punch                  => &PUNCH,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -467,6 +481,7 @@ pub fn create_module(
         ModuleType::TransientSustainedSplit => Box::new(ts_split::TsSplitModule::new()),
         ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
         ModuleType::Future                 => Box::new(future::FutureModule::new()),
+        ModuleType::Punch                  => Box::new(punch_stub::PunchStub),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
@@ -478,6 +493,29 @@ pub fn create_module(
         "module_spec and num_curves() disagree for {:?}", ty
     );
     m
+}
+
+// ── PunchStub — temporary placeholder, replaced in Task 2c.2 ──────────────
+
+/// Placeholder so `create_module(Punch)` compiles. Task 2c.2 replaces this with
+/// `PunchModule::new()` from `src/dsp/modules/punch.rs`.
+mod punch_stub {
+    use num_complex::Complex;
+    use crate::params::{FxChannelTarget, StereoLink};
+    use super::{ModuleContext, ModuleType, SpectralModule};
+
+    pub struct PunchStub;
+
+    impl SpectralModule for PunchStub {
+        fn reset(&mut self, _: f32, _: usize) {}
+        fn process(
+            &mut self, _: usize, _: StereoLink, _: FxChannelTarget,
+            _: &mut [Complex<f32>], _: Option<&[f32]>, _: &[&[f32]],
+            suppression_out: &mut [f32], _: &ModuleContext<'_>,
+        ) { suppression_out.fill(0.0); }
+        fn module_type(&self) -> ModuleType { ModuleType::Punch }
+        fn num_curves(&self) -> usize { 6 }
+    }
 }
 
 // ── Submodules ─────────────────────────────────────────────────────────────

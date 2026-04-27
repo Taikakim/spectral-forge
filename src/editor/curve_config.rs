@@ -48,6 +48,7 @@ pub fn curve_display_config(
         ModuleType::MidSide  => mid_side_config(curve_idx),
         ModuleType::TransientSustainedSplit => ts_split_config(curve_idx),
         ModuleType::Future   => future_config(curve_idx),
+        ModuleType::Punch    => punch_config(curve_idx),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
@@ -262,6 +263,13 @@ fn ts_split_config(i: usize) -> CurveDisplayConfig {
 /// Pre-Echo (Task 4) kernels land. All five curves currently fall through to
 /// default_config() until physical-unit display ranges are decided.
 fn future_config(_curve_idx: usize) -> CurveDisplayConfig {
+    default_config()
+}
+
+/// Curve config for Punch module. Stub — populated as the Punch DSP lands in
+/// Tasks 2c.2-2c.6. All six curves currently fall through to default_config()
+/// until physical-unit display ranges are decided.
+fn punch_config(_curve_idx: usize) -> CurveDisplayConfig {
     default_config()
 }
 

@@ -5,6 +5,7 @@ fn supports_sidechain_flag_matches_spec() {
     assert!(module_spec(ModuleType::Gain).supports_sidechain);
     assert!(module_spec(ModuleType::PhaseSmear).supports_sidechain);
     assert!(module_spec(ModuleType::Freeze).supports_sidechain);
+    assert!(module_spec(ModuleType::Punch).supports_sidechain);
     assert!(!module_spec(ModuleType::Contrast).supports_sidechain);
     assert!(!module_spec(ModuleType::MidSide).supports_sidechain);
     assert!(!module_spec(ModuleType::TransientSustainedSplit).supports_sidechain);

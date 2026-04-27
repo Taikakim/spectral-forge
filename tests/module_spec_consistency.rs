@@ -4,7 +4,7 @@ const ALL_TYPES: &[ModuleType] = &[
     ModuleType::Empty, ModuleType::Dynamics, ModuleType::Freeze,
     ModuleType::PhaseSmear, ModuleType::Contrast, ModuleType::Gain,
     ModuleType::MidSide, ModuleType::TransientSustainedSplit,
-    ModuleType::Harmonic, ModuleType::Future, ModuleType::Master,
+    ModuleType::Harmonic, ModuleType::Future, ModuleType::Punch, ModuleType::Master,
 ];
 
 #[test]
@@ -30,4 +30,12 @@ fn module_spec_wants_sidechain_default_false_for_non_sc_modules() {
     // Sidechain-capable modules also default to false: opt-in is intentional
     // so existing presets don't auto-route a fresh slot to a stale aux.
     assert!(!module_spec(ModuleType::Dynamics).wants_sidechain);
+}
+
+#[test]
+fn punch_wants_sidechain_by_default() {
+    // Punch is the first module to opt-in to sidechain auto-routing —
+    // a fresh Punch slot prompts the host to assign an aux input.
+    assert!(module_spec(ModuleType::Punch).wants_sidechain);
+    assert!(module_spec(ModuleType::Punch).supports_sidechain);
 }
