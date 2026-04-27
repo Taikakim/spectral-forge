@@ -56,16 +56,18 @@ fn rhythm_module_skeleton_is_passthrough() {
 
 #[test]
 fn bjorklund_5_of_8_distributes_evenly() {
-    use spectral_forge::dsp::modules::rhythm::bjorklund;
-    let pattern = bjorklund(5, 8);
+    use spectral_forge::dsp::modules::rhythm::bjorklund_into;
+    let mut pattern = vec![false; 8];
+    bjorklund_into(5, 8, &mut pattern);
     let count: usize = pattern.iter().filter(|&&b| b).count();
     assert_eq!(count, 5);
 }
 
 #[test]
 fn bjorklund_zero_pulses_is_all_silent() {
-    use spectral_forge::dsp::modules::rhythm::bjorklund;
-    let pattern = bjorklund(0, 8);
+    use spectral_forge::dsp::modules::rhythm::bjorklund_into;
+    let mut pattern = vec![false; 8];
+    bjorklund_into(0, 8, &mut pattern);
     assert_eq!(pattern.iter().filter(|&&b| b).count(), 0);
 }
 
@@ -162,8 +164,9 @@ fn division_to_steps_neutral_is_8() {
 
 #[test]
 fn bjorklund_1_of_8_has_one_pulse() {
-    use spectral_forge::dsp::modules::rhythm::bjorklund;
-    let pattern = bjorklund(1, 8);
+    use spectral_forge::dsp::modules::rhythm::bjorklund_into;
+    let mut pattern = vec![false; 8];
+    bjorklund_into(1, 8, &mut pattern);
     assert_eq!(pattern.iter().filter(|&&b| b).count(), 1,
         "single pulse must produce exactly one true");
 }

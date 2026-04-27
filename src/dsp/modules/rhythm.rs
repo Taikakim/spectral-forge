@@ -36,15 +36,6 @@ pub fn bjorklund_into(pulses: usize, steps: usize, out: &mut [bool]) {
     }
 }
 
-/// Convenience Vec wrapper for tests / non-realtime callers. Allocates.
-/// Gated behind cfg(any(test, feature = "probe")) so audio-path callers
-/// physically cannot reach it from a release build.
-#[cfg(any(test, feature = "probe"))]
-pub fn bjorklund(pulses: usize, steps: usize) -> Vec<bool> {
-    let mut out = vec![false; steps];
-    bjorklund_into(pulses, steps, &mut out);
-    out
-}
 
 /// Map a DIVISION curve gain (0..=2) to a discrete step count from {1, 2, 4, 8, 16, 32}.
 /// Neutral 1.0 → 8 steps.

@@ -32,10 +32,6 @@ probe = []
 name = "calibration_roundtrip"
 required-features = ["probe"]
 
-[[test]]
-name = "rhythm"
-required-features = ["probe"]
-
 [dev-dependencies]
 approx = "0.5"
 tempfile = "3"
