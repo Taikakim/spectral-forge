@@ -317,18 +317,18 @@ impl Pipeline {
             params.sensitivity.smoothed.next_step(block_size)
         };
 
-        // Build ModuleContext (all Copy fields, no borrows)
-        let ctx = ModuleContext {
-            sample_rate:       self.sample_rate,
+        // Build ModuleContext
+        let ctx = ModuleContext::new(
+            self.sample_rate,
             fft_size,
             num_bins,
-            attack_ms:         attack_ms_base,
-            release_ms:        release_ms_base,
+            attack_ms_base,
+            release_ms_base,
             sensitivity,
-            suppression_width: params.suppression_width.smoothed.next_step(block_size),
-            auto_makeup:       params.auto_makeup.value(),
+            params.suppression_width.smoothed.next_step(block_size),
+            params.auto_makeup.value(),
             delta_monitor,
-        };
+        );
 
         // Snapshot of slot targets (needed for SC channel resolution in MidSide mode).
         let slot_targets_snap: [FxChannelTarget; 9] = params.slot_targets.try_lock()

@@ -85,7 +85,7 @@ impl FxMatrix {
         slot_targets:    &[FxChannelTarget; 9],
         slot_curves:     &[Vec<Vec<f32>>],   // [slot][curve][bin]
         route_matrix:    &RouteMatrix,
-        ctx:             &ModuleContext,
+        ctx:             &ModuleContext<'_>,
         suppression_out: &mut [f32],
         num_bins:        usize,
     ) {

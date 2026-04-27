@@ -199,11 +199,10 @@ fn fx_matrix_no_route_to_master_produces_silence() {
     let mut supp = vec![0.0f32; n];
     let sc: [Option<&[f32]>; 9] = [None; 9];
     let targets = [FxChannelTarget::All; 9];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
     fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
 
     // All bins should be zero when nothing routes to Master
@@ -246,17 +245,10 @@ fn fx_matrix_passthrough_preserves_finite() {
         .collect();
     let sc_args: [Option<&[f32]>; 9] = [None; 9];
     let slot_targets = [FxChannelTarget::All; 9];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0,
-        fft_size: 2048,
-        num_bins,
-        attack_ms: 10.0,
-        release_ms: 80.0,
-        sensitivity: 0.0,
-        suppression_width: 0.0,
-        auto_makeup: false,
-        delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, num_bins,
+        10.0, 80.0, 0.0, 0.0, false, false,
+    );
 
     let mut supp_out = vec![0.0f32; num_bins];
     let rm = spectral_forge::dsp::modules::RouteMatrix::default();
@@ -376,17 +368,10 @@ fn fx_matrix_dynamics_produces_finite_output() {
         .collect();
     let sc_args: [Option<&[f32]>; 9] = [None; 9];
     let slot_targets = [FxChannelTarget::All; 9];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0,
-        fft_size: 2048,
-        num_bins,
-        attack_ms: 10.0,
-        release_ms: 80.0,
-        sensitivity: 0.0,
-        suppression_width: 0.0,
-        auto_makeup: false,
-        delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, num_bins,
+        10.0, 80.0, 0.0, 0.0, false, false,
+    );
 
     let mut supp_out = vec![0.0f32; num_bins];
     let rm = spectral_forge::dsp::modules::RouteMatrix::default();
@@ -475,11 +460,10 @@ fn mid_side_module_compiles_and_passes_through_at_neutral() {
 
     let mut bins = vec![Complex::new(1.0f32, 0.0); n];
     let mut supp = vec![0.0f32; n];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
 
     // Mid channel — neutral balance (1.0) → mid_scale = sqrt(1.0) = 1.0 → bins unchanged
     m.process(0, StereoLink::MidSide, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
@@ -522,11 +506,10 @@ fn matrix_routing_serial_default_passes_signal() {
     let sc: [Option<&[f32]>; 9] = [None; 9];
     let targets = [FxChannelTarget::All; 9];
     let rm = RouteMatrix::default();
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
     fm.process_hop(0, StereoLink::Linked, &mut bins, &sc, &targets, &curves, &rm, &ctx, &mut supp, n);
     // Signal should make it through: at least some bins are non-zero.
     assert!(bins.iter().any(|c| c.norm() > 0.01), "signal lost through matrix");
@@ -583,12 +566,10 @@ fn contrast_module_neutral_curve_passes_flat_spectrum() {
 
     let input_mag = 1.0f32;
     let mut supp = vec![0.0f32; n];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0,
-        auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
 
     // Converge the contrast envelope with a flat spectrum
     for _ in 0..500 {
@@ -629,11 +610,10 @@ fn ts_split_virtual_outputs_populated_after_process() {
     let curves: &[&[f32]] = &curves_storage;
     let mut bins = vec![Complex::new(1.0f32, 0.0); n];
     let mut supp = vec![0.0f32; n];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
     m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
 
     let vouts = m.virtual_outputs().unwrap();
@@ -686,11 +666,10 @@ fn fx_matrix_ts_split_routes_sustained_to_next_slot() {
     let mut supp = vec![0.0f32; n];
     let sc: [Option<&[f32]>; 9] = [None; 9];
     let targets = [FxChannelTarget::All; 9];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
 
     // Converge the T/S split avg_mag tracker
     for _ in 0..200 {
@@ -728,11 +707,10 @@ fn mid_side_module_processes_in_linked_mode() {
 
     let mut bins = vec![Complex::new(1.0f32, 0.0); n];
     let mut supp = vec![0.0f32; n];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
 
     // Channel 0 in Linked mode: balance=0.5 → mid_scale = sqrt(0.5) ≈ 0.707 → bins reduced
     m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
@@ -769,11 +747,10 @@ fn mid_side_side_channel_preserves_real_dc_and_nyquist() {
     // DC and Nyquist have zero imaginary part.
     let mut bins: Vec<Complex<f32>> = (0..n).map(|k| Complex::new(1.0 + k as f32 * 0.01, 0.0)).collect();
     let mut supp = vec![0.0f32; n];
-    let ctx = ModuleContext {
-        sample_rate: 44100.0, fft_size: 2048, num_bins: n,
-        attack_ms: 10.0, release_ms: 100.0, sensitivity: 0.0,
-        suppression_width: 0.0, auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        44100.0, 2048, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
 
     m.process(1, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, curves, &mut supp, &ctx);
 

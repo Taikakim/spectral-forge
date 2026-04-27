@@ -13,18 +13,12 @@ const FFT_SIZE: usize = 2048;
 const NUM_BINS: usize = FFT_SIZE / 2 + 1;
 const SAMPLE_RATE: f32 = 48_000.0;
 
-fn make_ctx() -> ModuleContext {
-    ModuleContext {
-        sample_rate: SAMPLE_RATE,
-        fft_size: FFT_SIZE,
-        num_bins: NUM_BINS,
-        attack_ms: 10.0,
-        release_ms: 100.0,
-        sensitivity: 0.5,
-        suppression_width: 0.0,
-        auto_makeup: false,
-        delta_monitor: false,
-    }
+fn make_ctx() -> ModuleContext<'static> {
+    ModuleContext::new(
+        SAMPLE_RATE, FFT_SIZE, NUM_BINS,
+        10.0, 100.0, 0.5,
+        0.0, false, false,
+    )
 }
 
 /// Run the module with every curve filled with `gain_on_target` on

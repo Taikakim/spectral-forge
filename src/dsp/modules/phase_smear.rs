@@ -47,7 +47,7 @@ impl SpectralModule for PhaseSmearModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        _ctx: &ModuleContext,
+        _ctx: &ModuleContext<'_>,
     ) {
         if bins.is_empty() { suppression_out.fill(0.0); return; }
         let last = bins.len() - 1;

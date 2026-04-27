@@ -65,7 +65,7 @@ impl SpectralModule for FreezeModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        ctx: &ModuleContext,
+        ctx: &ModuleContext<'_>,
     ) {
         debug_assert_eq!(bins.len(), self.frozen_bins.len(),
             "FreezeModule: bins/buffer size mismatch — call reset() before process()");

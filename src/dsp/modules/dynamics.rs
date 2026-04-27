@@ -69,7 +69,7 @@ impl SpectralModule for DynamicsModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        ctx: &ModuleContext,
+        ctx: &ModuleContext<'_>,
     ) {
         // Channel gating: skip if this slot's target doesn't match channel/mode.
         let skip = match (target, stereo_link, channel) {

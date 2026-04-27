@@ -80,14 +80,10 @@ fn freeze_threshold_default_is_minus_20_db() {
     let curves: Vec<Vec<f32>> = (0..5).map(|_| vec![1.0f32; num_bins]).collect();
     let curves_ref: Vec<&[f32]> = curves.iter().map(|v| &v[..]).collect();
     let mut supp = vec![0.0f32; num_bins];
-    let ctx = ModuleContext {
-        sample_rate: 48000.0,
-        fft_size: 2048,
-        num_bins,
-        attack_ms: 10.0, release_ms: 80.0,
-        sensitivity: 0.5, suppression_width: 0.0,
-        auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
     // Process once to capture initial frame.
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
               &mut bins, None, &curves_ref, &mut supp, &ctx);
@@ -134,12 +130,10 @@ fn gain_pull_peak_hold_decays_with_curve() {
         .collect();
 
     let mut supp = vec![0.0f32; num_bins];
-    let ctx = ModuleContext {
-        sample_rate: 48000.0, fft_size: 2048, num_bins,
-        attack_ms: 10.0, release_ms: 80.0,
-        sensitivity: 0.5, suppression_width: 0.0,
-        auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
               &mut bins, Some(&sc_impulse), &curves_ref, &mut supp, &ctx);
     let env_after_hop1 = m.peak_env_at(100);
@@ -176,12 +170,10 @@ fn gain_add_mode_does_not_use_peak_hold() {
     let curves_ref: Vec<&[f32]> = curves_vec.iter().map(|v| &v[..]).collect();
     let sc = vec![0.5f32; num_bins];
     let mut supp = vec![0.0f32; num_bins];
-    let ctx = ModuleContext {
-        sample_rate: 48000.0, fft_size: 2048, num_bins,
-        attack_ms: 10.0, release_ms: 80.0,
-        sensitivity: 0.5, suppression_width: 0.0,
-        auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
 
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
               &mut bins, Some(&sc), &curves_ref, &mut supp, &ctx);
@@ -223,12 +215,10 @@ fn gain_match_preserves_harmonics_but_tilts_broadband() {
     let curves_ref: Vec<&[f32]> = curves_vec.iter().map(|v| &v[..]).collect();
 
     let mut supp = vec![0.0f32; num_bins];
-    let ctx = ModuleContext {
-        sample_rate: 48000.0, fft_size: 2048, num_bins,
-        attack_ms: 10.0, release_ms: 80.0,
-        sensitivity: 0.5, suppression_width: 0.0,
-        auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
 
     // Run a handful of hops so peak_env settles on the 4.0 SC.
     let fresh_bins = bins.clone();
@@ -286,12 +276,10 @@ fn phase_smear_sc_modulates_amount() {
 
     let mut supp_a = vec![0.0f32; num_bins];
     let mut supp_b = vec![0.0f32; num_bins];
-    let ctx = ModuleContext {
-        sample_rate: 48000.0, fft_size: 2048, num_bins,
-        attack_ms: 10.0, release_ms: 80.0,
-        sensitivity: 0.5, suppression_width: 0.0,
-        auto_makeup: false, delta_monitor: false,
-    };
+    let ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
 
     a.process(0, StereoLink::Linked, FxChannelTarget::All,
               &mut bins_a, Some(&sc_hot),  &curves_ref, &mut supp_a, &ctx);
@@ -425,4 +413,12 @@ fn offset_identity_at_zero_all_dynamics_curves() {
                 "Dynamics curve {} offset_fn(g={}, 0) should be {}, got {}", c, g, g, result);
         }
     }
+}
+
+#[test]
+fn module_context_has_block_lifetime_and_is_not_copy() {
+    use spectral_forge::dsp::modules::ModuleContext;
+    fn assert_not_copy<T>() where T: Sized {}  // intentionally no Copy bound
+    assert_not_copy::<ModuleContext<'static>>();
+    // If this compiles after Task 1, the lifetime is in place.
 }

@@ -49,7 +49,7 @@ impl SpectralModule for TsSplitModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        _ctx: &ModuleContext,
+        _ctx: &ModuleContext<'_>,
     ) {
         let n = bins.len();
         let slow_coeff: f32 = 0.98;

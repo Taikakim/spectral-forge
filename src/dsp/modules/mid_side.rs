@@ -43,7 +43,7 @@ impl SpectralModule for MidSideModule {
         _sidechain:   Option<&[f32]>,
         curves:       &[&[f32]],
         suppression_out: &mut [f32],
-        _ctx:         &ModuleContext,
+        _ctx:         &ModuleContext<'_>,
     ) {
         suppression_out.fill(0.0);
 

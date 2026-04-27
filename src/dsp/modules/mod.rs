@@ -66,7 +66,7 @@ impl Default for RouteMatrix {
 
 // ── ModuleContext ──────────────────────────────────────────────────────────
 
-pub struct ModuleContext {
+pub struct ModuleContext<'block> {
     pub sample_rate:       f32,
     pub fft_size:          usize,
     pub num_bins:          usize,
@@ -76,6 +76,22 @@ pub struct ModuleContext {
     pub suppression_width: f32,
     pub auto_makeup:       bool,
     pub delta_monitor:     bool,
+    // Phantom keeps the lifetime live until later tasks add real `&'block` fields.
+    _phantom: std::marker::PhantomData<&'block ()>,
+}
+
+impl<'block> ModuleContext<'block> {
+    pub fn new(
+        sample_rate: f32, fft_size: usize, num_bins: usize,
+        attack_ms: f32, release_ms: f32, sensitivity: f32,
+        suppression_width: f32, auto_makeup: bool, delta_monitor: bool,
+    ) -> Self {
+        Self {
+            sample_rate, fft_size, num_bins, attack_ms, release_ms,
+            sensitivity, suppression_width, auto_makeup, delta_monitor,
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 // ── ProbeSnapshot (test-only) ──────────────────────────────────────────────
@@ -120,7 +136,7 @@ pub trait SpectralModule: Send {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        ctx: &ModuleContext,
+        ctx: &ModuleContext<'_>,
     );
 
     fn reset(&mut self, sample_rate: f32, fft_size: usize);

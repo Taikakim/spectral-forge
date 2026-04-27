@@ -65,7 +65,7 @@ impl SpectralModule for ContrastModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        ctx: &ModuleContext,
+        ctx: &ModuleContext<'_>,
     ) {
         let n = self.num_bins;
         for k in 0..n {
