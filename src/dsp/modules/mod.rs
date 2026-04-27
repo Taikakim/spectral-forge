@@ -29,6 +29,7 @@ pub enum ModuleType {
     Rhythm,
     Geometry,
     Modulate,
+    Circuit,
     Master,
 }
 
@@ -402,6 +403,16 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: true,
         panel_widget: None,
     };
+    static CIR: ModuleSpec = ModuleSpec {
+        display_name: "Circuit",
+        color_lit: crate::editor::theme::CIRCUIT_DOT_COLOR,
+        color_dim: Color32::from_rgb(0x40, 0x2c, 0x18),
+        num_curves: 4,
+        curve_labels: &["AMOUNT", "THRESH", "RELEASE", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -436,6 +447,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Rhythm                 => &RHY,
         ModuleType::Geometry               => &GEO,
         ModuleType::Modulate               => &MODULATE,
+        ModuleType::Circuit                => &CIR,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -536,6 +548,8 @@ pub fn create_module(
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
         ModuleType::Modulate               => Box::new(modulate::ModulateModule::new()),
+        // Task 2g.2 will replace this stub with CircuitModule::new().
+        ModuleType::Circuit                => Box::new(master::EmptyModule),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };

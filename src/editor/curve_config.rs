@@ -54,6 +54,8 @@ pub fn curve_display_config(
         ModuleType::Geometry => default_config(),
         // TODO(2f.3-2f.7): replace with modulate_config(curve_idx) when kernels land
         ModuleType::Modulate => modulate_config(curve_idx),
+        // TODO(2g.3-2g.5): replace with circuit_config(curve_idx) when kernels land
+        ModuleType::Circuit => default_config(),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }

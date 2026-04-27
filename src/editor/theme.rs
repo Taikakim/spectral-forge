@@ -89,6 +89,8 @@ pub const MODULE_COLOR_DIM: Color32 = Color32::from_rgb(0x20, 0x40, 0x41);
 pub const GEOMETRY_DOT_COLOR: Color32 = Color32::from_rgb(0x50, 0xb4, 0xa0);
 /// Modulate module dot color (purple-magenta, matches ModuleSpec color_lit).
 pub const MODULATE_DOT_COLOR: Color32 = Color32::from_rgb(180, 100, 200);
+/// Circuit module — copper/orange for "analog component" feel.
+pub const CIRCUIT_DOT_COLOR: Color32 = Color32::from_rgb(200, 140, 80);
 
 // ─── Freeze curve colours (4 equidistant, 30°, 120°, 210°, 300°) ─────────────
 
