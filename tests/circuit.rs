@@ -220,3 +220,60 @@ fn circuit_crossover_smooth_deadzone() {
     assert!((bins[50].norm() - expected_50).abs() < 0.05,
         "bin 50 = {} not within tolerance of {}", bins[50].norm(), expected_50);
 }
+
+#[test]
+fn circuit_finite_bounded_all_modes_dual_channel() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let num_bins = 1025;
+
+    for mode in [
+        CircuitMode::CrossoverDistortion,
+        CircuitMode::SpectralSchmitt,
+        CircuitMode::BbdBins,
+    ] {
+        let mut module = CircuitModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_mode(mode);
+
+        let mut bins_l: Vec<Complex<f32>> = (0..num_bins).map(|k|
+            Complex::new(((k as f32 * 0.07).sin() + 0.1).abs(),
+                         (k as f32 * 0.11).cos() * 0.5)
+        ).collect();
+        let mut bins_r: Vec<Complex<f32>> = bins_l.iter().map(|b| b * 0.6).collect();
+
+        let amount = vec![1.5_f32; num_bins];
+        let mid = vec![1.0_f32; num_bins];
+        let mix = vec![1.0_f32; num_bins];
+        let curves: Vec<&[f32]> = vec![&amount, &mid, &mid, &mix];
+
+        let mut suppression = vec![0.0_f32; num_bins];
+        let ctx = ModuleContext::new(
+            48_000.0, 2048, num_bins,
+            10.0, 100.0, 1.0,
+            0.5, false, false,
+        );
+
+        for hop in 0..200 {
+            for ch in 0..2 {
+                let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
+                module.process(ch, StereoLink::Independent, FxChannelTarget::All,
+                               bins, None, &curves, &mut suppression, &ctx);
+                for (i, b) in bins.iter().enumerate() {
+                    assert!(b.norm().is_finite(),
+                        "mode={:?} hop={} ch={} bin={} norm={}",
+                        mode, hop, ch, i, b.norm());
+                    assert!(b.norm() < 1e6,
+                        "runaway: mode={:?} hop={} ch={} bin={} norm={}",
+                        mode, hop, ch, i, b.norm());
+                }
+                for s in &suppression {
+                    assert!(s.is_finite() && *s >= 0.0);
+                }
+            }
+        }
+    }
+}
