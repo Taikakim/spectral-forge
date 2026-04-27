@@ -142,10 +142,10 @@ fn apply_linear(p: &AmpCellParams, buf: &mut [Complex<f32>]) {
     for c in buf.iter_mut() { *c *= p.amount; }
 }
 
-/// Vactrol: capacitor charges fast (~1 ms time constant) on input, releases slowly.
+/// Vactrol: capacitor charges fast (~5 ms time constant) on input, releases slowly.
 /// The capacitor level then becomes a gain modulator on the next sample (LDR behaviour).
 fn apply_vactrol(p: &AmpCellParams, buf: &mut [Complex<f32>], cap: &mut [f32], hop_dt: f32) {
-    const ATTACK_MS: f32 = 1.0;
+    const ATTACK_MS: f32 = 5.0;
     let attack_a  = (-hop_dt / (ATTACK_MS * 0.001)).exp();
     let release_a = (-hop_dt / (p.release_ms * 0.001)).exp();
     for (c, cap_k) in buf.iter_mut().zip(cap.iter_mut()) {

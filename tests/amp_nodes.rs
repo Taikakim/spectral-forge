@@ -42,7 +42,10 @@ fn vactrol_holds_then_releases() {
     let hop_dt = 1.0 / 48000.0 * 512.0;
     state.apply(&p, &mut buf, hop_dt); // first hit, capacitor charges fast
     let charged_mag = buf[0].norm();
-    assert!(charged_mag > 0.99);
+    // 5 ms attack TC + ~10.7 ms hop ≈ exp(-2.13) ≈ 0.118 leftover, so cap ≈ 0.882,
+    // gain ≈ 0.882^0.6 ≈ 0.926. The test only verifies "charges quickly" — well
+    // above the un-charged 0.0 baseline within one hop.
+    assert!(charged_mag > 0.85, "vactrol should charge quickly on first hit, got {charged_mag}");
     for _ in 0..5 {
         let mut zero_buf = vec![Complex::new(0.0, 0.0); NB];
         state.apply(&p, &mut zero_buf, hop_dt);
