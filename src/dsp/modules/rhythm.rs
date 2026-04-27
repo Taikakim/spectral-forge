@@ -268,7 +268,6 @@ impl SpectralModule for RhythmModule {
                 let mix_g_global = mix_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
                 let mix_global   = (mix_g_global * 0.5).clamp(0.0, 1.0);
                 let amount_g     = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                let amount       = amount_g.clamp(0.0, 2.0);
 
                 // First pass: compute per-bin "voice gate" — max envelope for voices whose peak is at k.
                 // Allocate-free: scan voices, compare bins.
@@ -282,7 +281,7 @@ impl SpectralModule for RhythmModule {
                     }
                     let dry = bins[k];
                     // Wet: original × voice_gate × amount, with amount=2.0 as full passthrough.
-                    let wet = dry * (voice_gate * amount * 0.5);
+                    let wet = dry * (voice_gate * amount_g * 0.5);
                     bins[k] = Complex::new(
                         dry.re * (1.0 - mix_global) + wet.re * mix_global,
                         dry.im * (1.0 - mix_global) + wet.im * mix_global,

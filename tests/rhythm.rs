@@ -210,8 +210,19 @@ fn arpeggiator_advances_at_step_crossing() {
     ctx.beat_position = 0.0;
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
         &mut bins, None, &curves, &mut supp, &ctx);
-    // Just check finite + bounded.
-    for c in &bins { assert!(c.re.is_finite() && c.norm() <= 2.0); }
+    // Voice 0 active at step 0 → its peak bin (50) should pass through.
+    // Voice 1 inactive at step 0 → its peak bin (100) should be silenced (with mix=1.0).
+    // Non-peak bins should be silenced.
+    assert!(bins[50].norm() > 0.5,
+        "voice 0 active at step 0: peak bin 50 should pass, got {}", bins[50].norm());
+    assert!(bins[100].norm() < 0.05,
+        "voice 1 inactive at step 0: peak bin 100 should be silenced, got {}", bins[100].norm());
+    assert!(bins[200].norm() < 0.05,
+        "non-peak bin 200 should be silenced when mix=1.0, got {}", bins[200].norm());
+    for (idx, c) in bins.iter().enumerate() {
+        assert!(c.re.is_finite() && c.im.is_finite(),
+            "bin {} non-finite: {:?}", idx, c);
+    }
 
     // At step 4 (half a bar in at 8 steps): beat_position = 2.0
     let mut bins = input.clone();
@@ -220,5 +231,14 @@ fn arpeggiator_advances_at_step_crossing() {
     ctx2.beat_position = 2.0;
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
         &mut bins, None, &curves, &mut supp, &ctx2);
-    for c in &bins { assert!(c.re.is_finite() && c.norm() <= 2.0); }
+    // Voice 1 active at step 4 → its peak bin (100) should pass through.
+    // Voice 0 inactive at step 4 → its peak bin (50) should be silenced.
+    assert!(bins[100].norm() > 0.5,
+        "voice 1 active at step 4: peak bin 100 should pass, got {}", bins[100].norm());
+    assert!(bins[50].norm() < 0.05,
+        "voice 0 inactive at step 4: peak bin 50 should be silenced, got {}", bins[50].norm());
+    for (idx, c) in bins.iter().enumerate() {
+        assert!(c.re.is_finite() && c.im.is_finite(),
+            "bin {} non-finite: {:?}", idx, c);
+    }
 }
