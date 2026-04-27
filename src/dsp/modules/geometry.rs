@@ -6,11 +6,17 @@
 //!   conservative within ~5%).
 //! - **Helmholtz Traps** — 8 fixed log-spaced bandpass traps absorb input energy
 //!   into per-trap fill levels; on overflow (fill > threshold·capacity) energy
-//!   re-injects at the trap centre + 2nd-harmonic overtone with phase-preserving
-//!   magnitude scaling.
+//!   re-injects at the 2nd-harmonic overtone with phase-preserving magnitude
+//!   scaling. (Center injection was removed: the center bin sits inside the
+//!   absorption band and would just be re-absorbed, yielding a leaky notch.)
 //!
 //! Wavefield + Persistent Homology defer to Phase 7 (need SIMD wave kernel +
 //! History Buffer infra respectively).
+//!
+//! Performance: both kernels are O(num_bins) and well under the heavy-CPU
+//! threshold — Chladni does two linear passes; Helmholtz does N_TRAPS × trap_bw
+//! work (8 × ~32 = ~256 ops at 2048-FFT). `heavy_cpu_for_mode()` stays at the
+//! trait default (false). Re-measure if Wavefield (Phase 7) reuses any of this.
 
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
