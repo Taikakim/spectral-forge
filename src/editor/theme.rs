@@ -179,3 +179,15 @@ pub fn scaled(base: f32, scale: f32) -> f32 { base * scale }
 pub fn scaled_stroke(base: f32, scale: f32) -> f32 {
     if scale >= 1.75 { base * 2.0 } else { base * scale }
 }
+
+/// Amp-mode indicator dot colours, indexed by `AmpMode as usize`.
+/// Linear is transparent (no dot drawn).
+pub const AMP_DOT_COLORS: [Color32; 5] = [
+    Color32::TRANSPARENT,                         // Linear
+    Color32::from_rgb(0xff, 0xa6, 0x3d),          // Vactrol  — warm orange
+    Color32::from_rgb(0x6d, 0xc7, 0xff),          // Schmitt  — cool blue
+    Color32::from_rgb(0xa3, 0xff, 0x9d),          // Slew     — pale green
+    Color32::from_rgb(0xb3, 0x8d, 0xff),          // Stiction — violet
+];
+
+pub const AMP_DOT_RADIUS: f32 = 2.5;
