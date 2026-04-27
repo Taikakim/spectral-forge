@@ -116,7 +116,6 @@ impl RhythmModule {
 
     pub fn set_mode(&mut self, mode: RhythmMode) { self.mode = mode; }
     pub fn mode(&self) -> RhythmMode { self.mode }
-    pub fn set_arp_grid(&mut self, g: ArpGrid) { self.arp_grid = g; }
 }
 
 impl Default for RhythmModule {
@@ -365,6 +364,9 @@ impl SpectralModule for RhythmModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Rhythm }
     fn num_curves(&self) -> usize { 5 }
+
+    fn set_rhythm_mode(&mut self, mode: RhythmMode) { self.set_mode(mode); }
+    fn set_arp_grid(&mut self, g: ArpGrid) { self.arp_grid = g; }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }

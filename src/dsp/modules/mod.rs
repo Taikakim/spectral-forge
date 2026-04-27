@@ -216,6 +216,12 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Punch modules. Default no-op for all other types.
     fn set_punch_mode(&mut self, _: crate::dsp::modules::punch::PunchMode) {}
 
+    /// Update the operating mode for Rhythm modules. Default no-op for all other types.
+    fn set_rhythm_mode(&mut self, _: crate::dsp::modules::rhythm::RhythmMode) {}
+
+    /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
+    fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
+
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.
     /// MUST NOT allocate, lock, or do I/O.

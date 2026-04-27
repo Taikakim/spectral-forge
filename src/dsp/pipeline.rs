@@ -481,6 +481,16 @@ impl Pipeline {
             self.fx_matrix.set_punch_modes(&*modes);
         }
 
+        // Propagate rhythm modes + grids each block (try_lock is non-blocking; skipped if GUI holds lock).
+        // The two locks are independent — if either is held by GUI, skip dispatch this block;
+        // the next block will pick up the GUI-side write.
+        if let (Some(modes), Some(grids)) = (
+            params.slot_rhythm_mode.try_lock(),
+            params.slot_arp_grid.try_lock(),
+        ) {
+            self.fx_matrix.set_rhythm_modes_and_grids(&*modes, &*grids);
+        }
+
         // Build route matrix from automatable params each block.
         // virtual_rows + amp_mode + amp_params are not exposed as automation
         // targets, so we read them from the Mutex — but never block waiting for it.

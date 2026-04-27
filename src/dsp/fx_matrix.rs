@@ -4,6 +4,7 @@ use crate::dsp::modules::{
     create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
 };
 use crate::dsp::modules::punch::PunchMode;
+use crate::dsp::modules::rhythm::{RhythmMode, ArpGrid};
 use crate::dsp::amp_modes::AmpNodeState;
 use crate::dsp::pipeline::MAX_NUM_BINS;
 use crate::params::{FxChannelTarget, StereoLink};
@@ -164,6 +165,21 @@ impl FxMatrix {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_punch_mode(modes[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot RhythmMode + ArpGrid from params to RhythmModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_rhythm_modes_and_grids(
+        &mut self,
+        modes: &[RhythmMode; 9],
+        grids: &[ArpGrid;    9],
+    ) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_rhythm_mode(modes[s]);
+                m.set_arp_grid(grids[s]);
             }
         }
     }
