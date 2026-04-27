@@ -476,6 +476,11 @@ impl Pipeline {
             self.fx_matrix.set_future_modes(&*modes);
         }
 
+        // Propagate punch modes each block (try_lock is non-blocking; skipped if GUI holds lock).
+        if let Some(modes) = params.slot_punch_mode.try_lock() {
+            self.fx_matrix.set_punch_modes(&*modes);
+        }
+
         // Build route matrix from automatable params each block.
         // virtual_rows + amp_mode + amp_params are not exposed as automation
         // targets, so we read them from the Mutex — but never block waiting for it.

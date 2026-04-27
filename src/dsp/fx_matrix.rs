@@ -3,6 +3,7 @@ use crate::dsp::modules::{
     ModuleContext, ModuleType, RouteMatrix, GainMode, FutureMode, SpectralModule,
     create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
 };
+use crate::dsp::modules::punch::PunchMode;
 use crate::dsp::amp_modes::AmpNodeState;
 use crate::dsp::pipeline::MAX_NUM_BINS;
 use crate::params::{FxChannelTarget, StereoLink};
@@ -153,6 +154,16 @@ impl FxMatrix {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_future_mode(modes[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot PunchMode from params to PunchModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_punch_modes(&mut self, modes: &[PunchMode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_punch_mode(modes[s]);
             }
         }
     }

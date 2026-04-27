@@ -212,6 +212,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Future modules. Default no-op for all other types.
     fn set_future_mode(&mut self, _: FutureMode) {}
 
+    /// Update the operating mode for Punch modules. Default no-op for all other types.
+    fn set_punch_mode(&mut self, _: crate::dsp::modules::punch::PunchMode) {}
+
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.
     /// MUST NOT allocate, lock, or do I/O.

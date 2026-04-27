@@ -266,6 +266,7 @@ impl SpectralModule for PunchModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Punch }
     fn num_curves(&self) -> usize { 6 }
+    fn set_punch_mode(&mut self, mode: PunchMode) { self.set_mode(mode); }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
