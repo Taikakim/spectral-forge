@@ -595,6 +595,7 @@ impl FxMatrix {
     }
 }
 
+#[cfg(feature = "probe")]
 impl FxMatrix {
     /// Test-only: force a slot to be treated as a BinPhysics writer.
     ///
@@ -610,8 +611,29 @@ impl FxMatrix {
     ///
     /// **Not for production use.** Phase 5 will remove the need for this once
     /// real writer modules ship and the spec-based path is exercised directly.
+    ///
+    /// # PANICS
+    ///
+    /// **Only `slot == 0` or `slot == 8` are safe today.**
+    ///
+    /// Calling this with `slot ∈ 1..=7` will:
+    /// 1. Promote that slot to the front of `phys_order` (writer-first ordering).
+    /// 2. Immediately trip the `debug_assert!` in `process_hop` (lines 327–332)
+    ///    that guards the stale-audio defect: audio assembly (`for src in 0..s`)
+    ///    reads `slot_out` in *numerical* order, so any writer slot moved earlier
+    ///    in `phys_order` would read previous-hop (stale) data.
+    ///
+    /// Phase 5 must teach the audio-assembly loop to follow `phys_order` (not
+    /// numerical order) before this restriction can be lifted. Until then,
+    /// **do not call `test_force_writer` with slot 1..=7 in any test**.
     pub fn test_force_writer(&mut self, slot: usize) {
         debug_assert!(slot < MAX_SLOTS);
+        debug_assert!(
+            slot == 0 || slot == 8,
+            "test_force_writer: only slot 0 or 8 are safe today; \
+             slots 1..=7 trip the stale-audio guard in process_hop. \
+             Phase 5 will lift this."
+        );
         self.writer_bits[slot] = true;
         self.bin_physics_in_use = true;
         if slot < 8 {

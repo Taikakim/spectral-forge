@@ -32,6 +32,10 @@ probe = []
 name = "calibration_roundtrip"
 required-features = ["probe"]
 
+[[test]]
+name = "bin_physics_pipeline"
+required-features = ["probe"]
+
 [dev-dependencies]
 approx = "0.5"
 tempfile = "3"
