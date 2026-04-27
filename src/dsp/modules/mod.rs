@@ -481,7 +481,7 @@ pub fn create_module(
         ModuleType::TransientSustainedSplit => Box::new(ts_split::TsSplitModule::new()),
         ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
         ModuleType::Future                 => Box::new(future::FutureModule::new()),
-        ModuleType::Punch                  => Box::new(punch_stub::PunchStub),
+        ModuleType::Punch                  => Box::new(punch::PunchModule::new()),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
@@ -493,29 +493,6 @@ pub fn create_module(
         "module_spec and num_curves() disagree for {:?}", ty
     );
     m
-}
-
-// ── PunchStub — temporary placeholder, replaced in Task 2c.2 ──────────────
-
-/// Placeholder so `create_module(Punch)` compiles. Task 2c.2 replaces this with
-/// `PunchModule::new()` from `src/dsp/modules/punch.rs`.
-mod punch_stub {
-    use num_complex::Complex;
-    use crate::params::{FxChannelTarget, StereoLink};
-    use super::{ModuleContext, ModuleType, SpectralModule};
-
-    pub struct PunchStub;
-
-    impl SpectralModule for PunchStub {
-        fn reset(&mut self, _: f32, _: usize) {}
-        fn process(
-            &mut self, _: usize, _: StereoLink, _: FxChannelTarget,
-            _: &mut [Complex<f32>], _: Option<&[f32]>, _: &[&[f32]],
-            suppression_out: &mut [f32], _: &ModuleContext<'_>,
-        ) { suppression_out.fill(0.0); }
-        fn module_type(&self) -> ModuleType { ModuleType::Punch }
-        fn num_curves(&self) -> usize { 6 }
-    }
 }
 
 // ── Submodules ─────────────────────────────────────────────────────────────
@@ -534,3 +511,4 @@ pub mod master;
 pub mod mid_side;
 pub mod future;
 pub use future::FutureMode;
+pub mod punch;
