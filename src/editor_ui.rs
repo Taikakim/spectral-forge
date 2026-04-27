@@ -575,11 +575,13 @@ pub fn create_editor(
                                     }
                                     states.insert(key, state);
                                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("mod_ring_states"), states));
-                                    // Close the ring when a click lands outside the overlay dots
-                                    // (the dots' interact() calls consume their own clicks, so any
-                                    // remaining click this frame is "outside"). Only close when no
-                                    // toggle was activated — if toggle_clicked is Some, that click
-                                    // was on a dot and should not close the ring.
+                                    // Close the ring when a click lands outside the overlay dots.
+                                    // Note: egui's pointer.any_click() is NOT drained by per-widget
+                                    // interact() calls — both a dot's clicked() and any_click() can
+                                    // fire on the same frame. The toggle_clicked.is_none() guard is
+                                    // what actually distinguishes "click on dot" (do not close) from
+                                    // "click anywhere else" (close); event consumption is not doing
+                                    // the work here. Phase 4 maintainers: always pair with this guard.
                                     if toggle_clicked.is_none() && ui.input(|i| i.pointer.any_click()) {
                                         ui.ctx().data_mut(|d| d.insert_temp(
                                             egui::Id::new("mod_ring_anchor"),
