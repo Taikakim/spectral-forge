@@ -147,6 +147,21 @@ impl FxMatrix {
                 // Short-circuit: copy input to output, leave suppression at 0.
                 self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
                 self.slot_supp[s][..num_bins].fill(0.0);
+                // If this slot declares virtual outputs (e.g. a future heavy T/S-Split),
+                // publish slot_out[s] (the passthrough) into every virtual row it owns.
+                // Using the module's internal buffers here would be wrong: they contain
+                // stale data from the last processed hop, not the bypassed signal.
+                if module.virtual_outputs().is_some() {
+                    for (v, &vrow) in route_matrix.virtual_rows.iter().enumerate() {
+                        if let Some((src_slot, _kind)) = vrow {
+                            if src_slot as usize == s {
+                                let copy_len = num_bins.min(self.slot_out[s].len());
+                                self.virtual_out[v][..copy_len]
+                                    .copy_from_slice(&self.slot_out[s][..copy_len]);
+                            }
+                        }
+                    }
+                }
             } else {
                 module.process(
                     channel, stereo_link, slot_targets[s],
@@ -156,19 +171,19 @@ impl FxMatrix {
                     ctx,
                 );
                 self.slot_out[s][..num_bins].copy_from_slice(&self.mix_buf[..num_bins]);
-            }
 
-            // Populate virtual row buffers from split modules.
-            if let Some(vouts) = module.virtual_outputs() {
-                for (v, &vrow) in route_matrix.virtual_rows.iter().enumerate() {
-                    if let Some((src_slot, kind)) = vrow {
-                        if src_slot as usize == s {
-                            let src_buf = match kind {
-                                VirtualRowKind::Transient => vouts[0],
-                                VirtualRowKind::Sustained  => vouts[1],
-                            };
-                            let copy_len = num_bins.min(src_buf.len());
-                            self.virtual_out[v][..copy_len].copy_from_slice(&src_buf[..copy_len]);
+                // Populate virtual row buffers from split modules.
+                if let Some(vouts) = module.virtual_outputs() {
+                    for (v, &vrow) in route_matrix.virtual_rows.iter().enumerate() {
+                        if let Some((src_slot, kind)) = vrow {
+                            if src_slot as usize == s {
+                                let src_buf = match kind {
+                                    VirtualRowKind::Transient => vouts[0],
+                                    VirtualRowKind::Sustained  => vouts[1],
+                                };
+                                let copy_len = num_bins.min(src_buf.len());
+                                self.virtual_out[v][..copy_len].copy_from_slice(&src_buf[..copy_len]);
+                            }
                         }
                     }
                 }
