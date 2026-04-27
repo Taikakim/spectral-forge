@@ -1,6 +1,6 @@
 # Superpowers plans & specs — implementation status
 
-**Last updated:** 2026-04-26
+**Last updated:** 2026-04-27
 
 This index is the authoritative status of every plan and design spec under
 `docs/superpowers/`. **Agents: consult this file before following any plan or
@@ -38,6 +38,7 @@ but if the two disagree, this index wins.
 | 2026-04-23-ui-parameter-spec.md | IMPLEMENTED | `CurveDisplayConfig`, curvature transform, shared hover routine, UI scaling. |
 | 2026-04-24-calibration-audit.md | IMPLEMENTED | All 11 tasks merged: per-module ProbeSnapshot + calibration round-trip tests, Dynamics/Freeze DSP clamp fixes, 10 kHz curve cutoff fix, hover-tooltip flip, Freeze row layout fix, UI spec addenda §2.3/§3.4/§4.4. |
 | 2026-04-24-ui-spec-cleanup.md | IMPLEMENTED | Closed the 2026-04-24 spec-deviation review. |
+| 2026-04-27-phase-1-foundation-infra.md | IMPLEMENTED | All 8 PRs landed. ModuleContext borrowed, ModuleSpec hints (`wants_sidechain`, `panel_widget`, `heavy_cpu_for_mode`), `enable_heavy_modules` toggle, Reset-to-default button + `clear_state` plumbing, modulation-ring scaffold (toggles disabled until BPM sync). Unblocks every Phase 2+ sub-plan. |
 
 ## Design specs (`docs/superpowers/specs/`)
 

@@ -1,5 +1,9 @@
 # Phase 1: Foundation Infrastructure Implementation Plan
 
+> **STATUS:** IMPLEMENTED (2026-04-27). Authoritative status: `docs/superpowers/STATUS.md`.
+> All 8 tasks landed on branch `feature/next-gen-modules-plans`. Code is now the source
+> of truth — this plan is kept for history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** ship six small infrastructure PRs that unblock every later phase of the next-gen-modules roadmap. None of these add an audible feature; they all enable downstream module work.
