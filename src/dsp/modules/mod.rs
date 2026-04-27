@@ -27,6 +27,7 @@ pub enum ModuleType {
     Future,
     Punch,
     Rhythm,
+    Geometry,
     Master,
 }
 
@@ -374,6 +375,16 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain:    false,
         panel_widget: Some(crate::editor::rhythm_panel::render),
     };
+    static GEO: ModuleSpec = ModuleSpec {
+        display_name: "Geometry",
+        color_lit: Color32::from_rgb(0x50, 0xb4, 0xa0),
+        color_dim: Color32::from_rgb(0x18, 0x3c, 0x34),
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "MODE_CAP", "DAMP_REL", "THRESH", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -406,6 +417,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Future                 => &FUT,
         ModuleType::Punch                  => &PUNCH,
         ModuleType::Rhythm                 => &RHY,
+        ModuleType::Geometry               => &GEO,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -504,6 +516,8 @@ pub fn create_module(
         ModuleType::Punch                  => Box::new(punch::PunchModule::new()),
         ModuleType::Rhythm                 => Box::new(rhythm::RhythmModule::new()),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
+        // TODO(2e.2): replace with GeometryModule when that task is implemented
+        ModuleType::Geometry               => unimplemented!("GeometryModule: Task 2e.2"),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };

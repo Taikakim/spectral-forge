@@ -85,6 +85,8 @@ pub const LABEL_DIM:     Color32 = Color32::from_rgb(0x44, 0x88, 0x80);
 pub const MODULE_COLOR_LIT: Color32 = Color32::from_rgb(0x50, 0xc0, 0xc4);
 /// Dim module slot color (Dynamics, unselected).
 pub const MODULE_COLOR_DIM: Color32 = Color32::from_rgb(0x20, 0x40, 0x41);
+/// Geometry module dot color (teal/green, matches ModuleSpec color_lit).
+pub const GEOMETRY_DOT_COLOR: Color32 = Color32::from_rgb(0x50, 0xb4, 0xa0);
 
 // ─── Freeze curve colours (4 equidistant, 30°, 120°, 210°, 300°) ─────────────
 

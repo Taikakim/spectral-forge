@@ -427,6 +427,20 @@ fn module_context_has_block_lifetime_and_is_not_copy() {
 }
 
 #[test]
+fn geometry_module_spec() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+    let spec = module_spec(ModuleType::Geometry);
+    assert_eq!(spec.display_name, "Geometry");
+    assert_eq!(spec.num_curves, 5);
+    assert_eq!(spec.curve_labels.len(), 5);
+    assert_eq!(spec.curve_labels[0], "AMOUNT");
+    assert_eq!(spec.curve_labels[4], "MIX");
+    assert!(!spec.wants_sidechain);
+    assert!(!spec.supports_sidechain);
+    assert!(spec.panel_widget.is_none());
+}
+
+#[test]
 fn module_context_optional_fields_default_to_none() {
     use spectral_forge::dsp::modules::ModuleContext;
     let ctx = ModuleContext::new(

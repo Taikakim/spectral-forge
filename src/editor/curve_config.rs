@@ -50,6 +50,8 @@ pub fn curve_display_config(
         ModuleType::Future   => future_config(curve_idx),
         ModuleType::Punch    => punch_config(curve_idx),
         ModuleType::Rhythm   => rhythm_config(curve_idx),
+        // TODO(2e.3): replace with geometry_config(curve_idx) when that task is implemented
+        ModuleType::Geometry => default_config(),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
