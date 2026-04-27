@@ -548,8 +548,7 @@ pub fn create_module(
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
         ModuleType::Modulate               => Box::new(modulate::ModulateModule::new()),
-        // Task 2g.2 will replace this stub with CircuitModule::new().
-        ModuleType::Circuit                => Box::new(master::EmptyModule),
+        ModuleType::Circuit                => Box::new(circuit::CircuitModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -583,3 +582,5 @@ pub mod rhythm;
 pub mod geometry;
 pub mod modulate;
 pub use modulate::ModulateMode;
+pub mod circuit;
+pub use circuit::CircuitMode;
