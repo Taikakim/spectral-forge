@@ -224,6 +224,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Geometry modules. Default no-op for all other types.
     fn set_geometry_mode(&mut self, _: crate::dsp::modules::geometry::GeometryMode) {}
 
+    /// Update the operating mode for Modulate modules. Default no-op for all other types.
+    fn set_modulate_mode(&mut self, _: crate::dsp::modules::modulate::ModulateMode) {}
+
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 
@@ -532,7 +535,7 @@ pub fn create_module(
         ModuleType::Rhythm                 => Box::new(rhythm::RhythmModule::new()),
         ModuleType::MidSide                => Box::new(mid_side::MidSideModule::new()),
         ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
-        ModuleType::Modulate               => unimplemented!("Task 2 wires ModulateModule"),
+        ModuleType::Modulate               => Box::new(modulate::ModulateModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -564,3 +567,5 @@ pub use future::FutureMode;
 pub mod punch;
 pub mod rhythm;
 pub mod geometry;
+pub mod modulate;
+pub use modulate::ModulateMode;
