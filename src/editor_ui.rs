@@ -758,9 +758,10 @@ pub fn create_editor(
                         let is_punch    = slot_type == crate::dsp::modules::ModuleType::Punch;
                         let is_rhythm   = slot_type == crate::dsp::modules::ModuleType::Rhythm;
                         let is_geometry = slot_type == crate::dsp::modules::ModuleType::Geometry;
+                        let is_modulate = slot_type == crate::dsp::modules::ModuleType::Modulate;
 
                         let mut mode_builder = egui::UiBuilder::new();
-                        if !is_future && !is_punch && !is_rhythm && !is_geometry { mode_builder = mode_builder.invisible(); }
+                        if !is_future && !is_punch && !is_rhythm && !is_geometry && !is_modulate { mode_builder = mode_builder.invisible(); }
                         ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
@@ -846,6 +847,29 @@ pub fn create_editor(
                                         let resp = ui.add(btn);
                                         if resp.clicked() {
                                             params.slot_geometry_mode.lock()[edit_slot] = mode;
+                                        }
+                                    }
+                                } else if is_modulate {
+                                    let cur_mode = params.slot_modulate_mode.lock()[edit_slot];
+                                    use crate::dsp::modules::modulate::ModulateMode;
+                                    for (label, mode) in [
+                                        ("Phase Phaser", ModulateMode::PhasePhaser),
+                                        ("Bin Swapper",  ModulateMode::BinSwapper),
+                                        ("RM/FM",        ModulateMode::RmFmMatrix),
+                                        ("Diode RM",     ModulateMode::DiodeRm),
+                                        ("Ground Loop",  ModulateMode::GroundLoop),
+                                    ] {
+                                        let is_active = cur_mode == mode;
+                                        let fill     = if is_active { th::BORDER } else { th::BG };
+                                        let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                        )
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                        let resp = ui.add(btn);
+                                        if resp.clicked() {
+                                            params.slot_modulate_mode.lock()[edit_slot] = mode;
                                         }
                                     }
                                 }

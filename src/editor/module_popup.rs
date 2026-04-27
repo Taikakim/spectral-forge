@@ -36,6 +36,7 @@ const ASSIGNABLE: &[ModuleType] = &[
     ModuleType::Punch,
     ModuleType::Rhythm,
     ModuleType::Geometry,
+    ModuleType::Modulate,
 ];
 
 /// Render the popup if open. Call every frame from the main UI closure.
