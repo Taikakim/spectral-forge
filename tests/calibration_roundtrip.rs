@@ -6,6 +6,7 @@ use num_complex::Complex;
 use spectral_forge::dsp::modules::{
     create_module, FutureMode, GainMode, ModuleContext, ModuleType, ProbeSnapshot, SpectralModule,
 };
+use spectral_forge::dsp::modules::rhythm::RhythmMode;
 use spectral_forge::editor::curve_config::curve_display_config;
 use spectral_forge::params::{FxChannelTarget, StereoLink};
 
@@ -780,5 +781,165 @@ fn punch_inverse_amount_max_probes_100_pct() {
     assert!(
         (observed - 100.0).abs() < 0.5,
         "Inverse AMOUNT=2.0 should give amount_pct≈100.0 (mode-agnostic probe), got {}", observed,
+    );
+}
+
+// ── Rhythm calibration helpers ────────────────────────────────────────────────
+
+/// Like `run_case` but sets `ctx.bpm = 120.0` so the module doesn't passthrough.
+/// Without a positive bpm, Rhythm returns immediately and the probe stays at 0.
+fn run_rhythm_case(
+    module: &mut Box<dyn SpectralModule>,
+    num_curves: usize,
+    target_curve_idx: usize,
+    gain_on_target: f32,
+) -> ProbeSnapshot {
+    let curves_storage: Vec<Vec<f32>> = (0..num_curves)
+        .map(|c| if c == target_curve_idx {
+            vec![gain_on_target; NUM_BINS]
+        } else {
+            vec![1.0; NUM_BINS]
+        })
+        .collect();
+    let curves_refs: Vec<&[f32]> = curves_storage.iter().map(|v| v.as_slice()).collect();
+
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.1, 0.0); NUM_BINS];
+    let mut suppression: Vec<f32> = vec![0.0; NUM_BINS];
+    let mut ctx = make_ctx();
+    ctx.bpm = 120.0;       // required: bpm ≤ 1e-3 causes immediate passthrough (no probe)
+    ctx.beat_position = 0.0;  // bar position 0 → step_idx 0
+    module.process(
+        0,
+        StereoLink::Linked,
+        FxChannelTarget::All,
+        &mut bins,
+        None,
+        &curves_refs,
+        &mut suppression,
+        &ctx,
+    );
+    module.last_probe()
+}
+
+// ── Rhythm / Euclidean ────────────────────────────────────────────────────────
+
+#[test]
+fn rhythm_euclidean_amount_default_probes_50_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::Euclidean);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 0, 1.0);  // AMOUNT_gain=1.0 (default)
+    let observed = probe.amount_pct.expect("rhythm must probe amount_pct");
+    assert!(
+        (observed - 50.0).abs() < 0.5,
+        "Euclidean AMOUNT=1.0 → depth=(1.0×0.5)=0.5 → amount_pct=50.0, got {}", observed,
+    );
+}
+
+#[test]
+fn rhythm_euclidean_amount_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::Euclidean);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 0, 2.0);  // AMOUNT_gain=2.0 (max)
+    let observed = probe.amount_pct.expect("rhythm must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "Euclidean AMOUNT=2.0 → depth=(2.0×0.5)=1.0 → amount_pct=100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn rhythm_euclidean_mix_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::Euclidean);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 4, 2.0);  // MIX_gain=2.0, curve idx 4
+    let observed = probe.mix_pct.expect("rhythm must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "Euclidean MIX=2.0 → mix=(2.0×0.5)=1.0 → mix_pct=100.0, got {}", observed,
+    );
+}
+
+// ── Rhythm / Arpeggiator ──────────────────────────────────────────────────────
+
+#[test]
+fn rhythm_arpeggiator_amount_default_probes_50_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::Arpeggiator);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 0, 1.0);  // AMOUNT_gain=1.0 (default)
+    let observed = probe.amount_pct.expect("rhythm must probe amount_pct");
+    assert!(
+        (observed - 50.0).abs() < 0.5,
+        "Arpeggiator AMOUNT=1.0 → amount_norm=(1.0×0.5)=0.5 → amount_pct=50.0, got {}", observed,
+    );
+}
+
+#[test]
+fn rhythm_arpeggiator_amount_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::Arpeggiator);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 0, 2.0);  // AMOUNT_gain=2.0 (max)
+    let observed = probe.amount_pct.expect("rhythm must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "Arpeggiator AMOUNT=2.0 → amount_norm=(2.0×0.5)=1.0 → amount_pct=100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn rhythm_arpeggiator_mix_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::Arpeggiator);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 4, 2.0);  // MIX_gain=2.0, curve idx 4
+    let observed = probe.mix_pct.expect("rhythm must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "Arpeggiator MIX=2.0 → mix=(2.0×0.5)=1.0 → mix_pct=100.0, got {}", observed,
+    );
+}
+
+// ── Rhythm / PhaseReset ───────────────────────────────────────────────────────
+
+#[test]
+fn rhythm_phase_reset_amount_default_probes_50_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::PhaseReset);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 0, 1.0);  // AMOUNT_gain=1.0 (default)
+    let observed = probe.amount_pct.expect("rhythm must probe amount_pct");
+    assert!(
+        (observed - 50.0).abs() < 0.5,
+        "PhaseReset AMOUNT=1.0 → strength=(1.0×0.5)=0.5 → amount_pct=50.0, got {}", observed,
+    );
+}
+
+#[test]
+fn rhythm_phase_reset_amount_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::PhaseReset);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 0, 2.0);  // AMOUNT_gain=2.0 (max)
+    let observed = probe.amount_pct.expect("rhythm must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "PhaseReset AMOUNT=2.0 → strength=(2.0×0.5)=1.0 → amount_pct=100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn rhythm_phase_reset_mix_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Rhythm, SAMPLE_RATE, FFT_SIZE);
+    m.set_rhythm_mode(RhythmMode::PhaseReset);
+    let nc = m.num_curves();
+    let probe = run_rhythm_case(&mut m, nc, 4, 2.0);  // MIX_gain=2.0, curve idx 4
+    let observed = probe.mix_pct.expect("rhythm must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "PhaseReset MIX=2.0 → mix=(2.0×0.5)=1.0 → mix_pct=100.0, got {}", observed,
     );
 }
