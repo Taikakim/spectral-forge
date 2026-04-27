@@ -188,6 +188,70 @@ fn apply_diode_rm(
     }
 }
 
+// ── Ground Loop kernel ────────────────────────────────────────────────────
+
+fn apply_ground_loop(
+    bins: &mut [Complex<f32>],
+    rms_history: &mut [f32; 16],
+    rms_idx: &mut usize,
+    sample_rate: f32,
+    fft_size: usize,
+    curves: &[&[f32]],
+) {
+    let amount_c = curves[0];
+    let reach_c  = curves[1];
+    let rate_c   = curves[2];
+    let thresh_c = curves[3];
+    let mix_c    = curves[5];
+
+    let num_bins = bins.len();
+
+    // Step 1 — record RMS.
+    let mut sum_sq = 0.0_f32;
+    for b in bins.iter() {
+        sum_sq += b.norm_sqr();
+    }
+    let rms = (sum_sq / num_bins as f32).sqrt();
+    rms_history[*rms_idx] = rms;
+    *rms_idx = (*rms_idx + 1) % 16;
+
+    // Step 2 — sag detection.
+    let avg_rms: f32 = rms_history.iter().sum::<f32>() / 16.0;
+    let thresh = thresh_c[0].clamp(0.001, 4.0);
+    let sag_factor = (avg_rms / thresh).min(2.0);
+
+    if sag_factor < 0.05 {
+        return; // Below sag threshold: no hum injection.
+    }
+
+    // Step 3 — mains frequency: RATE < 1.0 → 50 Hz, RATE >= 1.0 → 60 Hz.
+    let mains_hz = if rate_c[0] >= 1.0 { 60.0_f32 } else { 50.0_f32 };
+    let mains_bin = ((mains_hz * fft_size as f32 / sample_rate).round() as usize).max(1);
+
+    // Step 4 — harmonic count (1..5).
+    let harmonics = (1.0_f32 + reach_c[0].clamp(0.0, 2.0) * 2.0).round() as usize;
+    let harmonics = harmonics.clamp(1, 5);
+
+    // Step 5 — global amount.
+    let amount = amount_c[0].clamp(0.0, 2.0);
+
+    // Step 6 — inject hum at mains_bin × h with 1/h falloff.
+    for h in 1..=harmonics {
+        let target = mains_bin * h;
+        if target >= num_bins {
+            break;
+        }
+        let harmonic_amp = amount * sag_factor / h as f32;
+        let mix          = mix_c[target].clamp(0.0, 2.0) * 0.5;
+        let cur_mag      = bins[target].norm().max(1e-9);
+        let new_mag      = cur_mag + harmonic_amp;
+        let scale        = new_mag / cur_mag;
+        let dry          = bins[target];
+        let wet          = bins[target] * scale;
+        bins[target]     = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,7 +352,9 @@ impl SpectralModule for ModulateModule {
                 // No sidechain → passthrough (bins unchanged).
             }
             ModulateMode::GroundLoop => {
-                // GroundLoop filled in Task 7.
+                let history = &mut self.rms_history[channel];
+                let idx     = &mut self.rms_idx[channel];
+                apply_ground_loop(bins, history, idx, self.sample_rate, self.fft_size, curves);
             }
         }
 

@@ -423,3 +423,95 @@ fn modulate_diode_rm_no_sidechain_passes_through() {
         assert!(diff < 1e-6, "bin {} drifted by {} with no sidechain", k, diff);
     }
 }
+
+#[test]
+fn modulate_ground_loop_injects_mains_harmonics() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::GroundLoop);
+
+    let num_bins = 1025;
+    // Loud programme: every bin at magnitude 0.5 → high RMS → triggers sag.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); num_bins];
+
+    // AMOUNT=2 (max hum), REACH=2 (5 harmonics), RATE=0.5 (50 Hz), THRESH=0.1 (low so sag active), AMPGATE=0, MIX=2.
+    let amount  = vec![2.0_f32; num_bins];
+    let reach   = vec![2.0_f32; num_bins];
+    let rate    = vec![0.5_f32; num_bins];
+    let thresh  = vec![0.1_f32; num_bins];
+    let zeros   = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &rate, &thresh, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    // Run several hops to fill RMS history and let injection accumulate.
+    for _ in 0..20 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves, &mut suppression, &ctx);
+        // Re-seed bins each hop to keep RMS high.
+        for b in bins.iter_mut() { *b = Complex::new(0.5, 0.0); }
+    }
+
+    // One more process with no re-seed so we can read the injected magnitudes.
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, &ctx);
+
+    let mains_bin = ((50.0_f32 * 2048.0 / 48_000.0).round() as usize).max(1);
+    assert_eq!(mains_bin, 2, "mains_bin should be 2 at 48kHz/2048 for 50Hz");
+
+    assert!(bins[mains_bin].norm() > 0.6,
+        "mains bin {} = {} (expected > 0.6 with hum injected)",
+        mains_bin, bins[mains_bin].norm());
+    let h2 = mains_bin * 2;
+    assert!(bins[h2].norm() > 0.5,
+        "2nd harmonic bin {} = {} (expected > 0.5)", h2, bins[h2].norm());
+    let h3 = mains_bin * 3;
+    assert!(bins[h3].norm() > 0.5,
+        "3rd harmonic bin {} = {} (expected > 0.5)", h3, bins[h3].norm());
+}
+
+#[test]
+fn modulate_ground_loop_silent_input_no_injection() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::GroundLoop);
+
+    let num_bins = 1025;
+    // Completely silent input: zero RMS → sag_factor below threshold → no injection.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    let dry = bins.clone();
+
+    let amount = vec![2.0_f32; num_bins];
+    let reach  = vec![2.0_f32; num_bins];
+    let rate   = vec![0.5_f32; num_bins];
+    // High threshold = sag stays below 0.05 → early-return.
+    let thresh = vec![1.0_f32; num_bins];
+    let zeros  = vec![0.0_f32; num_bins];
+    let mix    = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &rate, &thresh, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    for _ in 0..10 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves, &mut suppression, &ctx);
+    }
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-6, "bin {} drifted by {} despite silent input", k, diff);
+    }
+}
