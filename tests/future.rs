@@ -176,3 +176,81 @@ fn print_through_spread_at_max_preserves_neighbour_phase() {
     assert!(bins[101].im.abs() > bins[101].re.abs() * 5.0,
         "bin 101 should carry imaginary phase from original dry, got re={} im={}", bins[101].re, bins[101].im);
 }
+
+#[test]
+fn pre_echo_full_signal_arrives_at_delay() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = FutureModule::new();
+    m.set_mode(FutureMode::PreEcho);
+    m.reset(48000.0, 1024);
+
+    // AMOUNT=1.0 (full echo), TIME=1.0 (8 hops), THRESHOLD=0.5 (low feedback decay → quick decay),
+    // SPREAD=0.0 (no HF damping), MIX=2.0 → mix=1.0 (full wet).
+    let amount = vec![1.0f32; 513];
+    let time   = vec![1.0f32; 513];
+    let thresh = vec![0.5f32; 513];
+    let spread = vec![0.0f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &thresh, &spread, &mix];
+
+    let ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+
+    // Hop 0: impulse at bin 100. Wet should still be silent.
+    let mut bins = vec![Complex::new(0.0, 0.0); 513];
+    bins[100] = Complex::new(1.0, 0.0);
+    let mut supp = vec![0.0f32; 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+
+    for _ in 1..=7 {
+        let mut buf = vec![Complex::new(0.0, 0.0); 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+    }
+
+    // Hop 8: should hear the full impulse (post-mix).
+    let mut bins = vec![Complex::new(0.0, 0.0); 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+    assert!(bins[100].norm() > 0.4,
+        "pre-echo at delay should give near-full magnitude; got {}", bins[100].norm());
+}
+
+#[test]
+fn pre_echo_feedback_creates_decaying_taps() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = FutureModule::new();
+    m.set_mode(FutureMode::PreEcho);
+    m.reset(48000.0, 1024);
+
+    // Strong feedback: THRESHOLD=2.0 → high feedback (close to 0.99).
+    let amount = vec![1.0f32; 513];
+    let time   = vec![1.0f32; 513];
+    let thresh = vec![2.0f32; 513];
+    let spread = vec![0.0f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &thresh, &spread, &mix];
+
+    let ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+
+    // Hop 0: impulse.
+    let mut bins = vec![Complex::new(0.0, 0.0); 513];
+    bins[100] = Complex::new(1.0, 0.0);
+    let mut supp = vec![0.0f32; 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut supp, &ctx);
+
+    // Run silence for many hops; with high feedback, energy should persist.
+    let mut peak_after_long_decay = 0.0f32;
+    for h in 1..=24 {
+        let mut buf = vec![Complex::new(0.0, 0.0); 513];
+        m.process(0, StereoLink::Linked, FxChannelTarget::All, &mut buf, None, &curves, &mut supp, &ctx);
+        if h >= 16 { peak_after_long_decay = peak_after_long_decay.max(buf[100].norm()); }
+        for c in &buf { assert!(c.norm() <= 4.0, "feedback runaway at hop {}: |c|={}", h, c.norm()); }
+    }
+    assert!(peak_after_long_decay > 0.05,
+        "high-feedback pre-echo should still have audible energy after 16+ hops; got peak {}",
+        peak_after_long_decay);
+}

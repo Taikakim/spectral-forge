@@ -151,10 +151,46 @@ impl SpectralModule for FutureModule {
                 }
             }
             FutureMode::PreEcho => {
-                // Task 4 implements the Pre-Echo kernel.
-                // Stub: copy dry into ring (no echo until kernel lands).
+                // Slot-wide TIME (read once at probe_k).
+                let time_gain  = time_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                let delay_hops = ((time_gain * 8.0).round() as usize).clamp(1, MAX_ECHO_FRAMES - 1);
+                let read_pos   = (self.write_pos[ch] + MAX_ECHO_FRAMES - delay_hops) % MAX_ECHO_FRAMES;
+
+                // PreEcho needs the THRESHOLD curve (PrintThrough doesn't); declare it here so it
+                // doesn't pollute PrintThrough scope.
+                let thresh_curve = curves.get(2).copied().unwrap_or(&[][..]);
+
                 for k in 0..n {
-                    self.ring[ch][self.write_pos[ch]][k] = bins[k];
+                    let amount_gain = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 4.0);
+                    let echo_amp    = amount_gain.clamp(0.0, 2.0);                          // 1.0 nominal
+                    let thresh_gain = thresh_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let feedback    = (thresh_gain * 0.4).clamp(0.0, 0.99);                  // 0.4 nominal, hard cap 0.99
+                    let spread_gain = spread_curve.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+                    let hf_damp     = (spread_gain * 0.20).clamp(0.0, 1.0);                  // 0 nominal, 1.0 = max damping
+                    let mix_gain    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                    let mix         = (mix_gain * 0.5).clamp(0.0, 1.0);
+
+                    // High-frequency damping factor: 1.0 at bin 0, (1 - hf_damp) at Nyquist.
+                    let bin_norm    = k as f32 / (n - 1).max(1) as f32;
+                    let damp_factor = 1.0 - hf_damp * bin_norm;
+
+                    let dry = bins[k];
+                    let wet = self.ring[ch][read_pos][k] * echo_amp;
+                    bins[k] = Complex::new(
+                        dry.re * (1.0 - mix) + wet.re * mix,
+                        dry.im * (1.0 - mix) + wet.im * mix,
+                    );
+
+                    #[cfg(any(test, feature = "probe"))]
+                    if k == probe_k {
+                        probe_amount_pct = echo_amp * 100.0;
+                        probe_time_hops  = delay_hops as u32;
+                        probe_mix_pct    = mix * 100.0;
+                    }
+
+                    // Write into ring: dry signal + feedback × ring-read, both damped.
+                    let to_write = (dry + wet * feedback) * damp_factor;
+                    self.ring[ch][self.write_pos[ch]][k] = to_write;
                 }
             }
         }
