@@ -471,16 +471,20 @@ impl Pipeline {
         }
 
         // Build route matrix from automatable params each block.
-        // virtual_rows (T/S Split bindings) are not exposed as automation targets,
-        // so we still read them from the Mutex — but never block waiting for it.
-        let virt = params.route_matrix.try_lock()
-            .map(|g| g.virtual_rows)
-            .unwrap_or_default();
+        // virtual_rows + amp_mode + amp_params are not exposed as automation
+        // targets, so we read them from the Mutex — but never block waiting for it.
+        let (virt, amp_mode, amp_params) = params.route_matrix.try_lock()
+            .map(|g| (g.virtual_rows, g.amp_mode, g.amp_params))
+            .unwrap_or_else(|| (
+                Default::default(),
+                crate::dsp::modules::default_amp_modes(),
+                crate::dsp::modules::default_amp_params(),
+            ));
         let mut route_matrix_snap = crate::dsp::modules::RouteMatrix {
             send: [[0.0f32; crate::dsp::modules::MAX_SLOTS]; crate::dsp::modules::MAX_MATRIX_ROWS],
             virtual_rows: virt,
-            amp_mode:   crate::dsp::modules::default_amp_modes(),
-            amp_params: crate::dsp::modules::default_amp_params(),
+            amp_mode,
+            amp_params,
         };
         for r in 0..crate::param_ids::NUM_MATRIX_ROWS {
             for col in 0..crate::param_ids::NUM_SLOTS {
