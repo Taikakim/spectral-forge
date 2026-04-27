@@ -28,6 +28,10 @@ pub struct SharedState {
     /// Whether any aux sidechain input is carrying signal.
     pub sidechain_active: Arc<AtomicBool>,
 
+    /// Set by the GUI (Reset to Default confirm) to request a Pipeline::reset()
+    /// on the next audio block. Cleared by the audio thread after handling.
+    pub reset_requested: Arc<std::sync::atomic::AtomicBool>,
+
     // Audio → GUI
     pub spectrum_tx:      TbInput<Vec<f32>>,
     pub spectrum_rx:      Arc<Mutex<TbOutput<Vec<f32>>>>,
@@ -89,6 +93,7 @@ impl SharedState {
             curve_tx,
             curve_rx,
             sidechain_active: Arc::new(AtomicBool::new(false)),
+            reset_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             spectrum_tx,
             spectrum_rx: Arc::new(Mutex::new(spectrum_rx)),
             suppression_tx,

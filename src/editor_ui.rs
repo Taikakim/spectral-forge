@@ -16,6 +16,7 @@ pub fn create_editor(
     suppression_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     sc_envelope_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     sidechain_active: Option<Arc<std::sync::atomic::AtomicBool>>,
+    reset_requested: Option<Arc<std::sync::atomic::AtomicBool>>,
     plugin_alive: std::sync::Weak<()>,
 ) -> Option<Box<dyn Editor>> {
     create_egui_editor(
@@ -187,7 +188,47 @@ pub fn create_editor(
                             egui::Sense::hover(),
                         );
                         ui.painter().rect_filled(rect, 0.0, color);
+
+                        // Reset to Default button — opens a confirm dialog.
+                        ui.add_space(8.0);
+                        let reset_btn = egui::Button::new(
+                            egui::RichText::new("Reset to Default")
+                                .color(th::LABEL_DIM)
+                                .size(th::scaled(th::FONT_SIZE_LABEL, scale)),
+                        )
+                        .fill(th::BG)
+                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                        if ui.add(reset_btn).clicked() {
+                            let key = egui::Id::new("show_reset_dialog");
+                            ui.ctx().data_mut(|d| d.insert_temp(key, true));
+                        }
                     });
+
+                    // Confirm dialog for Reset to Default.
+                    {
+                        let key = egui::Id::new("show_reset_dialog");
+                        let show: bool = ctx.data(|d| d.get_temp(key).unwrap_or(false));
+                        if show {
+                            egui::Window::new("Reset all settings?")
+                                .collapsible(false)
+                                .resizable(false)
+                                .show(ctx, |ui| {
+                                    ui.label("Reset every parameter to defaults and clear all module state. This cannot be undone.");
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Reset").clicked() {
+                                            params.reset_to_defaults(setter);
+                                            if let Some(ref arc) = reset_requested {
+                                                arc.store(true, std::sync::atomic::Ordering::Release);
+                                            }
+                                            ctx.data_mut(|d| d.insert_temp(key, false));
+                                        }
+                                        if ui.button("Cancel").clicked() {
+                                            ctx.data_mut(|d| d.insert_temp(key, false));
+                                        }
+                                    });
+                                });
+                        }
+                    }
 
                     // ── Second bar: FFT size selector ─────────────────────────────
                     ui.horizontal(|ui| {

@@ -79,6 +79,7 @@ pub struct Pipeline {
     /// Per-channel, per-slot SC magnitude slice; slot_sc_input[channel][slot][bin]. Pre-allocated.
     slot_sc_input: Vec<Vec<Vec<f32>>>,
     sample_rate: f32,
+    num_channels: usize,
 }
 
 impl Pipeline {
@@ -135,6 +136,7 @@ impl Pipeline {
             slot_sc_input,
             sample_rate,
             fft_size,
+            num_channels,
         }
     }
 
@@ -142,6 +144,7 @@ impl Pipeline {
         let fft_size = self.fft_size;
         let num_bins = fft_size / 2 + 1;
         self.sample_rate = sample_rate;
+        self.num_channels = num_channels;
 
         let mut planner = RealFftPlanner::<f32>::new();
         self.fft_plan  = planner.plan_fft_forward(fft_size);
@@ -181,6 +184,14 @@ impl Pipeline {
     ) {
         use crate::dsp::modules::{apply_curve_transform, ModuleContext, TILT_MAX};
         use crate::editor::curve_config::curve_display_config;
+
+        // Drain the GUI-side reset request flag. The swap is lock-free.
+        // Pipeline::reset() is already called by the host's reset() callback,
+        // so it is RT-safe here — it only zeroes pre-allocated buffers and
+        // rebuilds FFT plans (which re-use internal Arc'd plan objects).
+        if shared.reset_requested.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            self.reset(self.sample_rate, self.num_channels);
+        }
 
         let fft_size = self.fft_size;
         let num_bins = fft_size / 2 + 1;

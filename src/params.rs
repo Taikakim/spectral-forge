@@ -517,6 +517,28 @@ impl SpectralForgeParams {
         Some(matrix_dispatch!(self, row, col))
     }
 
+    /// Reset every automatable Param to its nih-plug default via the ParamSetter.
+    ///
+    /// Iterates `param_map()` using the raw GuiContext API so host automation is properly
+    /// notified. This covers all standard FloatParam / BoolParam / EnumParam fields but
+    /// does NOT touch `#[persist]` fields (curve node graphs, route matrix, slot assignments).
+    /// The audio-side `Pipeline::reset()` is triggered separately via `SharedState::reset_requested`.
+    ///
+    /// Must be called from the GUI thread (inside an egui frame, where `setter` is valid).
+    pub fn reset_to_defaults(&self, setter: &nih_plug::prelude::ParamSetter<'_>) {
+        let map = self.param_map();
+        for (_id, ptr, _group) in &map {
+            // SAFETY: `self` is held in an Arc<SpectralForgeParams> for the plugin's lifetime,
+            // so the ParamPtrs returned by param_map() are valid here.
+            unsafe {
+                let default_normalized = ptr.default_normalized_value();
+                setter.raw_context.raw_begin_set_parameter(*ptr);
+                setter.raw_context.raw_set_parameter_normalized(*ptr, default_normalized);
+                setter.raw_context.raw_end_set_parameter(*ptr);
+            }
+        }
+    }
+
     /// One-shot migration: copies legacy `#[persist]` data (curve nodes, tilt, route matrix)
     /// into the generated FloatParam smoothers so the DSP and host see the correct values on
     /// first load of an old project.
