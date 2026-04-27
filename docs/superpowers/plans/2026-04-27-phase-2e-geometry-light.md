@@ -1,6 +1,13 @@
 # Phase 2e — Geometry-light Module Implementation Plan
 
-> **Status:** PLANNED — implementation pending. Phase 2 sub-plan; depends on Phase 1 foundation infra (`docs/superpowers/plans/2026-04-27-phase-1-foundation-infra.md`).
+> **Status:** IMPLEMENTED — all 10 tasks merged on `feature/next-gen-modules-plans`. `ModuleType::Geometry` ships with two light-CPU modes (Chladni Plate Nodes, Helmholtz Traps), per-slot mode persistence via `Arc<Mutex<[GeometryMode; 9]>>`, FxMatrix dispatch through the `set_geometry_mode` trait method, themed-button Mode-row picker (NOT the plan's separate popup file), shared `ProbeSnapshot` for calibration (NOT a bespoke `GeometryProbe`), and 11 dedicated tests in `tests/geometry.rs` plus 6 calibration probes under `--features probe`. Notable implementation deltas vs the plan:
+> - **Helmholtz overflow** re-injects only at the 2nd-harmonic overtone (NOT center + overtone). The center bin sits inside the trap's own absorption band; injecting there creates a leaky notch / feedback loop.
+> - **Two safety nets in `apply_helmholtz`** (added by Task 8): cap `fill_level ≤ 2 × trigger` and clamp overtone bin magnitude at 1000.0. Without these, the orphan overtone bin (e.g. bin 98 = 2 × trap-4-center, falling outside every trap's absorption band) accumulates linearly per hop and overflows past 1e6 by ~hop 106 under sustained excitation.
+> - **Chladni AMOUNT capped at 5%/hop** in the kernel; the redistribution-conservation test threshold was lowered from the plan's 0.01 → 1e-4 to match the achievable variance under that cap (justified inline).
+> - **UI Mode-row** extends the existing themed-button row in `editor_ui.rs:751-834` (matching Future/Punch/Rhythm). The plan's `geometry_popup.rs` file was NOT created.
+> - **Persistence** uses `Arc<Mutex<[GeometryMode; 9]>>` (single Arc / Mutex / array — matching `slot_future_mode`/`slot_punch_mode`/`slot_rhythm_mode`), NOT the plan's `[Arc<Mutex<T>>; MAX_SLOTS]`.
+> - **`as_any()` was NOT added to the SpectralModule trait** — the plan asked for it, but no existing module uses it. Tests construct `GeometryModule::new()` directly to skip the trait object.
+> - **Calibration uses shared `ProbeSnapshot { amount_pct, mix_pct, … }`** with `last_probe()` trait override (matches Future/Punch/Rhythm), NOT the plan's custom `GeometryProbe { active_mode, active_trap_count, max_fill_pct, chladni_eigen_count }`.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
