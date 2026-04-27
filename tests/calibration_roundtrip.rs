@@ -4,7 +4,7 @@
 
 use num_complex::Complex;
 use spectral_forge::dsp::modules::{
-    create_module, GainMode, ModuleContext, ModuleType, ProbeSnapshot, SpectralModule,
+    create_module, FutureMode, GainMode, ModuleContext, ModuleType, ProbeSnapshot, SpectralModule,
 };
 use spectral_forge::editor::curve_config::curve_display_config;
 use spectral_forge::params::{FxChannelTarget, StereoLink};
@@ -672,4 +672,57 @@ fn all_offset_fns_are_neutral_at_zero() {
             );
         }
     }
+}
+
+#[test]
+fn future_print_through_amount_default_probes_5_pct() {
+    let mut m = create_module(ModuleType::Future, SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    // Mode defaults to PrintThrough.
+    let probe = run_case(&mut m, nc, 0, 1.0);  // AMOUNT_gain=1.0
+    let observed = probe.amount_pct.expect("future must probe amount_pct");
+    assert!(
+        (observed - 5.0).abs() < 0.5,
+        "PrintThrough AMOUNT=1.0 should give amount_pct≈5.0, got {}", observed,
+    );
+}
+
+#[test]
+fn future_print_through_mix_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Future, SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);  // MIX_gain=2.0
+    let observed = probe.mix_pct.expect("future must probe mix_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "PrintThrough MIX=2.0 should give mix_pct≈100.0, got {}", observed,
+    );
+}
+
+#[test]
+fn future_print_through_time_default_probes_length_ms() {
+    let mut m = create_module(ModuleType::Future, SAMPLE_RATE, FFT_SIZE);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 1, 1.0);  // TIME_gain=1.0 → 8 hops
+    let observed = probe.length_ms.expect("future must probe length_ms");
+    let hop_ms = (FFT_SIZE as f32 / 4.0) / SAMPLE_RATE * 1000.0;
+    let expected = 8.0 * hop_ms;
+    assert!(
+        (observed - expected).abs() < 0.5,
+        "TIME=1.0 should give length_ms≈{} ({} hops × {} ms), got {}",
+        expected, 8, hop_ms, observed,
+    );
+}
+
+#[test]
+fn future_pre_echo_amount_max_probes_100_pct() {
+    let mut m = create_module(ModuleType::Future, SAMPLE_RATE, FFT_SIZE);
+    m.set_future_mode(FutureMode::PreEcho);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);  // AMOUNT_gain=2.0 (max)
+    let observed = probe.amount_pct.expect("future must probe amount_pct");
+    assert!(
+        (observed - 100.0).abs() < 0.5,
+        "PreEcho AMOUNT=2.0 should give amount_pct≈100.0 (echo_amp × 50), got {}", observed,
+    );
 }
