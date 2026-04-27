@@ -160,3 +160,47 @@ fn circuit_schmitt_hysteresis_latches_above_threshold() {
     module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
     assert!(bins[100].norm() < 0.1, "bin 100 should latch OFF after falling below low (got {})", bins[100].norm());
 }
+
+#[test]
+fn circuit_crossover_smooth_deadzone() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(CircuitMode::CrossoverDistortion);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[10]  = Complex::new(0.05, 0.0); // well below dz=0.1
+    bins[50]  = Complex::new(0.15, 0.0); // just above dz (50% above)
+    bins[100] = Complex::new(2.0, 0.0);  // well above dz
+
+    // AMOUNT=1 → dz_width = 0.1, MIX=2 → full wet. THRESH/RELEASE unused.
+    let amount = vec![1.0_f32; num_bins];
+    let thresh = vec![1.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, &ctx);
+
+    assert!(bins[10].norm() < 0.005, "bin 10 should be deadzoned (got {})", bins[10].norm());
+    assert!(bins[50].norm() > 0.0 && bins[50].norm() < 0.1,
+        "bin 50 should re-emerge gently (got {})", bins[50].norm());
+    assert!(bins[100].norm() > 1.5, "bin 100 should pass mostly through (got {})", bins[100].norm());
+
+    // C¹ check: at mag=0.15, dz=0.1 → expected = (0.05)^2 / 0.15 ≈ 0.0167.
+    let expected_50 = 0.05_f32.powi(2) / 0.15;
+    assert!((bins[50].norm() - expected_50).abs() < 0.05,
+        "bin 50 = {} not within tolerance of {}", bins[50].norm(), expected_50);
+}

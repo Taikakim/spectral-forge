@@ -122,6 +122,40 @@ fn apply_schmitt(
     }
 }
 
+// ── Crossover helpers ──────────────────────────────────────────────────────
+
+/// C¹-smooth deadzone mimicking BJT class-B crossover artefacts.
+/// Bins with magnitude ≤ dz_width are silenced; above the deadzone,
+/// output follows `(mag - dz)² / mag`, which is continuous and has a
+/// continuous first derivative at the boundary (no audible click).
+/// Phase is preserved by scaling the original complex bin.
+/// Curves: `[AMOUNT, THRESH(unused), RELEASE(unused), MIX]`.
+fn apply_crossover(bins: &mut [Complex<f32>], curves: &[&[f32]]) {
+    let amount_c = curves[0];
+    let mix_c = curves[3];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        let dz_width = amount_c[k].clamp(0.0, 2.0) * 0.1; // up to 0.2 deadzone half-width
+        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let dry = bins[k];
+        let mag = dry.norm();
+
+        let new_mag = if mag <= dz_width {
+            0.0
+        } else {
+            let excess = mag - dz_width;
+            (excess * excess) / mag
+        };
+
+        let scale = if mag > 1e-9 { new_mag / mag } else { 0.0 };
+        let wet = dry * scale;
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,7 +243,9 @@ impl SpectralModule for CircuitModule {
                 let latched = &mut self.schmitt_latched[channel];
                 apply_schmitt(bins, latched, curves);
             }
-            _ => {} // CrossoverDistortion lands in Task 5
+            CircuitMode::CrossoverDistortion => {
+                apply_crossover(bins, curves);
+            }
         }
 
         for s in suppression_out.iter_mut() {
