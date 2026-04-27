@@ -86,6 +86,28 @@ fn ts_split_clear_state_zeroes_history() {
     m.clear_state();
 }
 
+/// Smoke test: PhaseSmearModule::clear_state() does not panic.
+/// Zeroes the per-bin peak-hold envelope; PRNG state is intentionally preserved
+/// (re-seeding mid-stream would create an audible click without any user benefit).
+#[test]
+fn phase_smear_clear_state_zeroes_envelope() {
+    use spectral_forge::dsp::modules::{create_module, ModuleType};
+    let mut m = create_module(ModuleType::PhaseSmear, 48000.0, 2048);
+    m.clear_state();
+    m.clear_state();
+}
+
+/// Smoke test: GainModule::clear_state() does not panic.
+/// Zeroes the per-bin peak-hold envelope (Pull/Match modes) and the ERB cumulative
+/// scratch (Match mode); scratch is rebuilt every block but zeroing keeps state tidy.
+#[test]
+fn gain_clear_state_zeroes_envelope() {
+    use spectral_forge::dsp::modules::{create_module, ModuleType};
+    let mut m = create_module(ModuleType::Gain, 48000.0, 2048);
+    m.clear_state();
+    m.clear_state();
+}
+
 /// Integration: Pipeline with stateful slots exercises the full clear_state path
 /// including FxMatrix iterating live slot modules and calling their clear_state().
 #[test]

@@ -38,6 +38,10 @@ impl SpectralModule for PhaseSmearModule {
         for v in &mut self.peak_env { *v = 0.0; }
     }
 
+    fn clear_state(&mut self) {
+        self.peak_env.fill(0.0);
+    }
+
     fn process(
         &mut self,
         _channel: usize,
