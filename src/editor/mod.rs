@@ -10,6 +10,7 @@ pub mod preset_menu;
 pub use preset_menu::{PresetMenuState, preset_menu_ui};
 pub mod mod_ring;
 pub use mod_ring::{ModRingState, ModRingToggle};
+pub mod rhythm_panel;
 
 /// Show a tooltip for `response` only after the pointer has been stationary
 /// over it for 1 second. Resets the timer whenever the pointer moves.

@@ -229,12 +229,11 @@ pub trait SpectralModule: Send {
 
 // ── ModuleSpec ─────────────────────────────────────────────────────────────
 
-/// Per-module panel callback. Receives the egui `Ui`, plus a slot index
-/// so the panel can read/write that slot's parameters. Lives below the
-/// curve editor area in editor_ui.rs. Restricted to non-curve UI (step
+/// Per-module panel callback. Receives the egui `Ui`, the param store, and a
+/// slot index so the panel can read/write that slot's parameters. Lives below
+/// the curve editor area in editor_ui.rs. Restricted to non-curve UI (step
 /// grids, mode pickers, etc.) — curves stay in their own canvas.
-/// (Param store is passed via the closure capture set at editor build.)
-pub type PanelWidgetFn = fn(&mut nih_plug_egui::egui::Ui, slot: usize);
+pub type PanelWidgetFn = fn(&mut nih_plug_egui::egui::Ui, &crate::params::SpectralForgeParams, slot: usize);
 
 pub struct ModuleSpec {
     pub display_name:       &'static str,
@@ -367,7 +366,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         curve_labels: &["AMOUNT", "DIVISION", "ATTACK_FADE", "TARGET_PHASE", "MIX"],
         supports_sidechain: false,
         wants_sidechain:    false,
-        panel_widget: None, // Task 7 will flip this to Some(crate::editor::rhythm_panel::render)
+        panel_widget: Some(crate::editor::rhythm_panel::render),
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",

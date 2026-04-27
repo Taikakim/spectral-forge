@@ -596,7 +596,7 @@ pub fn create_editor(
                         // every shipped module). See `dsp/modules/mod.rs::PanelWidgetFn`.
                         if let Some(panel_fn) = crate::dsp::modules::module_spec(editing_type).panel_widget {
                             ui.separator();
-                            panel_fn(ui, editing_slot);
+                            panel_fn(ui, params.as_ref(), editing_slot);
                         }
                     }
 

@@ -9,6 +9,8 @@ fn rhythm_module_spec_basic() {
     assert!(!spec.supports_sidechain);
     assert!(!spec.wants_sidechain);
     assert_eq!(spec.display_name, "Rhythm");
+    assert!(spec.panel_widget.is_some(),
+        "rhythm needs a panel widget for arpeggiator step grid");
 }
 
 #[test]
