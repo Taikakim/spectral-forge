@@ -1041,3 +1041,170 @@ fn geometry_helmholtz_mix_max_probes_100_pct() {
         "Helmholtz MIX=2.0 should give mix_pct≈100.0, got {}", observed,
     );
 }
+
+// ── Modulate ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn modulate_phase_phaser_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::PhasePhaser);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "PhasePhaser AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn modulate_phase_phaser_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::PhasePhaser);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "PhasePhaser AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_phase_phaser_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::PhasePhaser);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 5, 2.0);   // MIX is curves[5]
+    let observed = probe.mix_pct.expect("modulate must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "PhasePhaser MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_bin_swapper_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::BinSwapper);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "BinSwapper AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn modulate_bin_swapper_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::BinSwapper);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "BinSwapper AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_bin_swapper_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::BinSwapper);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 5, 2.0);   // MIX is curves[5]
+    let observed = probe.mix_pct.expect("modulate must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "BinSwapper MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_rm_fm_matrix_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::RmFmMatrix);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "RmFmMatrix AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn modulate_rm_fm_matrix_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::RmFmMatrix);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "RmFmMatrix AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_rm_fm_matrix_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::RmFmMatrix);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 5, 2.0);   // MIX is curves[5]
+    let observed = probe.mix_pct.expect("modulate must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "RmFmMatrix MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_diode_rm_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::DiodeRm);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "DiodeRm AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn modulate_diode_rm_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::DiodeRm);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "DiodeRm AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_diode_rm_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::DiodeRm);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 5, 2.0);   // MIX is curves[5]
+    let observed = probe.mix_pct.expect("modulate must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "DiodeRm MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_ground_loop_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::GroundLoop);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "GroundLoop AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn modulate_ground_loop_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::GroundLoop);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("modulate must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "GroundLoop AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn modulate_ground_loop_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let mut m = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    m.set_modulate_mode(ModulateMode::GroundLoop);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 5, 2.0);   // MIX is curves[5]
+    let observed = probe.mix_pct.expect("modulate must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "GroundLoop MIX=2.0 → 100%, got {}", observed);
+}

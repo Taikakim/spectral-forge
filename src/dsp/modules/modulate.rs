@@ -330,6 +330,14 @@ impl SpectralModule for ModulateModule {
     ) {
         debug_assert!(channel < 2);
 
+        // Probe capture: all 5 kernels share the same mapping for curves[0] and curves[5].
+        // curves[0] (AMOUNT): g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
+        // curves[5] (MIX):   g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
+        #[cfg(any(test, feature = "probe"))]
+        let probe_amount_pct = curves[0].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
+        #[cfg(any(test, feature = "probe"))]
+        let probe_mix_pct = curves[5].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
+
         match self.mode {
             ModulateMode::PhasePhaser => {
                 apply_phase_phaser(bins, self.hop_count[channel], curves);
@@ -362,7 +370,11 @@ impl SpectralModule for ModulateModule {
 
         #[cfg(any(test, feature = "probe"))]
         {
-            self.last_probe = crate::dsp::modules::ProbeSnapshot::default();
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                amount_pct: Some(probe_amount_pct),
+                mix_pct:    Some(probe_mix_pct),
+                ..Default::default()
+            };
         }
     }
 
