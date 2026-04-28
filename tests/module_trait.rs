@@ -545,7 +545,7 @@ fn life_viscosity_diffuses_and_conserves() {
 
     let mut module = LifeModule::new();
     module.reset(48_000.0, 2048);
-    module.set_mode_for_test(LifeMode::Viscosity);
+    module.set_mode(LifeMode::Viscosity);
 
     let num_bins = 1025;
     let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];

@@ -119,14 +119,7 @@ impl LifeModule {
     }
 
     /// Set mode directly. Used by Task 13 (per-slot persistence) and tests.
-    #[allow(dead_code)]
-    pub(crate) fn set_mode(&mut self, mode: LifeMode) {
-        self.mode = mode;
-    }
-
-    /// Test/probe accessor for mode injection.
-    #[cfg(any(test, feature = "probe"))]
-    pub fn set_mode_for_test(&mut self, mode: LifeMode) {
+    pub fn set_mode(&mut self, mode: LifeMode) {
         self.mode = mode;
     }
 }
