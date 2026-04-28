@@ -36,7 +36,6 @@ pub struct HistoryBuffer {
 }
 
 #[derive(Default)]
-#[allow(dead_code)] // Task 4 (lazy summary stats) populates these.
 struct SummaryCache {
     decay_estimate_valid: bool,
     rms_envelope_valid:   bool,
@@ -146,10 +145,147 @@ impl HistoryBuffer {
         self.invalidate_summary_cache();
     }
 
+    /// Number of recent frames used to derive every summary stat.
+    /// 32 frames at the default fft 2048 hop 512 / 48 kHz is ~340 ms.
+    pub const ANALYSIS_WINDOW: usize = 32;
+
     /// Called by the pipeline at the top of every audio block. Marks the
     /// summary stats stale so they get re-derived on next read.
     pub fn clear_summary_cache(&self) {
         self.invalidate_summary_cache();
+    }
+
+    /// Per-bin frames-to-fall-20-dB estimate, derived from the linear-regression
+    /// slope of `log10(magnitude)` over the most recent `ANALYSIS_WINDOW` frames.
+    /// Higher = longer-ringing bin. Bins whose magnitude is too small or whose
+    /// regression slope is non-negative get 0.0.
+    ///
+    /// Returned slice borrows the cached Vec; valid until the next
+    /// `advance_after_all_channels_written()` or `clear_summary_cache()`.
+    pub fn summary_decay_estimate(&self, channel: usize) -> std::cell::Ref<'_, [f32]> {
+        self.maybe_recompute_decay(channel);
+        std::cell::Ref::map(self.summary.borrow(), |s| s.decay_estimate.as_slice())
+    }
+
+    pub fn summary_rms_envelope(&self, channel: usize) -> std::cell::Ref<'_, [f32]> {
+        self.maybe_recompute_rms(channel);
+        std::cell::Ref::map(self.summary.borrow(), |s| s.rms_envelope.as_slice())
+    }
+
+    pub fn summary_if_stability(&self, channel: usize) -> std::cell::Ref<'_, [f32]> {
+        self.maybe_recompute_if_stability(channel);
+        std::cell::Ref::map(self.summary.borrow(), |s| s.if_stability.as_slice())
+    }
+
+    fn maybe_recompute_decay(&self, channel: usize) {
+        {
+            let s = self.summary.borrow();
+            if s.decay_estimate_valid { return; }
+        }
+        let mut s = self.summary.borrow_mut();
+        for v in &mut s.decay_estimate { *v = 0.0; }
+        if channel >= self.num_channels { s.decay_estimate_valid = true; return; }
+        let n = Self::ANALYSIS_WINDOW.min(self.frames_used);
+        if n < 4 { s.decay_estimate_valid = true; return; }
+        // Linear regression of log10(mag) vs frame index over the most recent n frames.
+        // slope < 0 = decaying; we report -1 / slope as a decay-time proxy (larger = longer ring).
+        let mean_x: f32 = (n as f32 - 1.0) * 0.5;
+        let var_x: f32 = (0..n).map(|i| {
+            let dx = i as f32 - mean_x;
+            dx * dx
+        }).sum::<f32>().max(1.0);
+        for k in 0..self.num_bins {
+            let mut mean_y = 0.0_f32;
+            for i in 0..n {
+                if let Some(frame) = self.read_frame(channel, i) {
+                    let mag = frame[k].norm().max(1e-9);
+                    mean_y += mag.log10();
+                }
+            }
+            mean_y /= n as f32;
+            let mut cov = 0.0_f32;
+            for i in 0..n {
+                if let Some(frame) = self.read_frame(channel, i) {
+                    let mag = frame[k].norm().max(1e-9);
+                    let dx = i as f32 - mean_x;
+                    let dy = mag.log10() - mean_y;
+                    cov += dx * dy;
+                }
+            }
+            let slope = cov / var_x;
+            // age 0 = most recent, age n-1 = oldest. Older frames are HIGHER index, so a
+            // decaying signal (newer is louder) gives a NEGATIVE slope (log_mag decreases
+            // with increasing age). Decay-time proxy: -1 / slope, clamped to [0, 1000].
+            s.decay_estimate[k] = if slope < -1e-6 {
+                (-1.0 / slope).clamp(0.0, 1000.0)
+            } else {
+                0.0
+            };
+        }
+        s.decay_estimate_valid = true;
+    }
+
+    fn maybe_recompute_rms(&self, channel: usize) {
+        {
+            let s = self.summary.borrow();
+            if s.rms_envelope_valid { return; }
+        }
+        let mut s = self.summary.borrow_mut();
+        for v in &mut s.rms_envelope { *v = 0.0; }
+        if channel >= self.num_channels { s.rms_envelope_valid = true; return; }
+        let n = Self::ANALYSIS_WINDOW.min(self.frames_used);
+        if n == 0 { s.rms_envelope_valid = true; return; }
+        for k in 0..self.num_bins {
+            let mut acc = 0.0_f32;
+            for i in 0..n {
+                if let Some(frame) = self.read_frame(channel, i) {
+                    let mag = frame[k].norm();
+                    acc += mag * mag;
+                }
+            }
+            s.rms_envelope[k] = (acc / n as f32).sqrt();
+        }
+        s.rms_envelope_valid = true;
+    }
+
+    fn maybe_recompute_if_stability(&self, channel: usize) {
+        {
+            let s = self.summary.borrow();
+            if s.if_stability_valid { return; }
+        }
+        let mut s = self.summary.borrow_mut();
+        for v in &mut s.if_stability { *v = 0.0; }
+        if channel >= self.num_channels { s.if_stability_valid = true; return; }
+        let n = Self::ANALYSIS_WINDOW.min(self.frames_used);
+        if n < 3 { s.if_stability_valid = true; return; }
+        // For each bin, compute hop-to-hop phase-difference variance over n-1
+        // adjacent frame pairs. Stable partials → low variance → near-1 score.
+        // Unstable / noisy bins → high variance → near-0 score. We map variance v
+        // to stability = 1 / (1 + v) so the result is bounded in (0, 1].
+        for k in 0..self.num_bins {
+            let mut diffs = [0.0_f32; Self::ANALYSIS_WINDOW];
+            let mut count = 0_usize;
+            for i in 0..(n - 1) {
+                let a = self.read_frame(channel, i);
+                let b = self.read_frame(channel, i + 1);
+                if let (Some(a), Some(b)) = (a, b) {
+                    let phase_a = a[k].arg();
+                    let phase_b = b[k].arg();
+                    let mut d = phase_a - phase_b;
+                    while d > std::f32::consts::PI  { d -= std::f32::consts::TAU; }
+                    while d < -std::f32::consts::PI { d += std::f32::consts::TAU; }
+                    diffs[count] = d;
+                    count += 1;
+                }
+            }
+            if count < 2 { continue; }
+            let mean: f32 = diffs[..count].iter().sum::<f32>() / count as f32;
+            let var: f32 = diffs[..count].iter()
+                .map(|&x| (x - mean) * (x - mean))
+                .sum::<f32>() / count as f32;
+            s.if_stability[k] = 1.0 / (1.0 + var);
+        }
+        s.if_stability_valid = true;
     }
 
     fn invalidate_summary_cache(&self) {

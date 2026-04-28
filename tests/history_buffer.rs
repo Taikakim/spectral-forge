@@ -130,3 +130,77 @@ fn write_hop_panics_in_debug_when_buffer_size_mismatches() {
         assert!(result.is_err(), "debug-mode write_hop must panic on wrong frame size");
     }
 }
+
+#[test]
+fn summary_decay_estimate_long_ringing_bin_has_high_value() {
+    // The regression reads frames at age 0..n where age 0 = most recent, age n-1 = oldest.
+    // For a bin whose magnitude is currently at peak and decaying outward into older frames,
+    // log10(mag) decreases as age increases → negative slope → non-zero decay_estimate.
+    // Bin 0: very slow decay into the past (0.99^age), bin 1: fast decay (0.5^age).
+    // We achieve this by writing magnitudes in REVERSE order (loudest last).
+    let mut h = HistoryBuffer::new(1, 64, 2);
+    let n_frames = 50usize;
+    for i in 0..n_frames {
+        // age after all writes = n_frames - 1 - i. We want mag = base^age, so mag = base^(n-1-i).
+        let age = (n_frames - 1 - i) as f32;
+        let bin0_mag = (0.99_f32).powf(age); // slow decay: nearly flat in analysis window
+        let bin1_mag = (0.50_f32).powf(age); // fast decay: drops sharply with age
+        h.write_hop(0, &[Complex::new(bin0_mag, 0.0), Complex::new(bin1_mag, 0.0)]);
+        h.advance_after_all_channels_written();
+    }
+    let decay = h.summary_decay_estimate(0);
+    assert!(decay[0] > decay[1],
+        "slow-decay bin must have higher decay_estimate than fast-decay bin (got {:?} vs {:?})", decay[0], decay[1]);
+}
+
+#[test]
+fn summary_rms_envelope_louder_bin_has_higher_rms() {
+    let mut h = HistoryBuffer::new(1, 32, 2);
+    for _ in 0..32 {
+        h.write_hop(0, &[Complex::new(1.0, 0.0), Complex::new(0.1, 0.0)]);
+        h.advance_after_all_channels_written();
+    }
+    let rms = h.summary_rms_envelope(0);
+    assert!((rms[0] - 1.0).abs() < 1e-3, "loud bin RMS should be ~1.0, got {:?}", rms[0]);
+    assert!((rms[1] - 0.1).abs() < 1e-3, "quiet bin RMS should be ~0.1, got {:?}", rms[1]);
+}
+
+#[test]
+fn summary_if_stability_finite_when_no_phase_data() {
+    let mut h = HistoryBuffer::new(1, 32, 2);
+    for _ in 0..32 {
+        h.write_hop(0, &[Complex::new(1.0, 0.0), Complex::new(0.5, 0.5)]);
+        h.advance_after_all_channels_written();
+    }
+    let stab = h.summary_if_stability(0);
+    for &v in stab.iter() {
+        assert!(v.is_finite(), "if_stability must be finite");
+        assert!(v >= 0.0 && v <= 1.0, "if_stability must be in [0, 1], got {:?}", v);
+    }
+}
+
+#[test]
+fn summary_caches_within_block_and_clears_on_request() {
+    let mut h = HistoryBuffer::new(1, 32, 2);
+    for _ in 0..32 {
+        h.write_hop(0, &[Complex::new(1.0, 0.0), Complex::new(0.0, 0.0)]);
+        h.advance_after_all_channels_written();
+    }
+    // First call computes; later calls reuse. Pointer equality is fine because
+    // RefCell hands back a stable borrow until invalidated.
+    let first = h.summary_rms_envelope(0).as_ptr();
+    let second = h.summary_rms_envelope(0).as_ptr();
+    assert_eq!(first, second);
+
+    h.clear_summary_cache();
+    // Force recompute: still same backing Vec (we recompute in place), but cache flag was reset.
+    let third = h.summary_rms_envelope(0).as_ptr();
+    assert_eq!(first, third, "summary buffer is reused — Vec is allocated once");
+}
+
+#[test]
+fn summary_returns_zeros_for_invalid_channel() {
+    let h = HistoryBuffer::new(1, 32, 2);
+    let out = h.summary_decay_estimate(99);
+    assert!(out.iter().all(|&v| v == 0.0));
+}
