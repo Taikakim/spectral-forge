@@ -464,6 +464,23 @@ fn module_context_has_bin_physics_slot_default_none() {
 }
 
 #[test]
+fn life_module_spec_present() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+
+    let spec = module_spec(ModuleType::Life);
+    assert_eq!(spec.display_name, "LIFE");
+    assert_eq!(spec.num_curves, 5);
+    assert_eq!(spec.curve_labels.len(), 5);
+    assert_eq!(spec.curve_labels[0], "AMOUNT");
+    assert_eq!(spec.curve_labels[1], "THRESHOLD");
+    assert_eq!(spec.curve_labels[2], "SPEED");
+    assert_eq!(spec.curve_labels[3], "REACH");
+    assert_eq!(spec.curve_labels[4], "MIX");
+    assert!(!spec.wants_sidechain, "Life is not a sidechain-driven module");
+    assert!(spec.writes_bin_physics, "Life writes crystallization/bias/displacement");
+}
+
+#[test]
 fn module_spec_writes_bin_physics_defaults_false_for_all_modules() {
     use spectral_forge::dsp::modules::{ModuleType, module_spec};
     for ty in [

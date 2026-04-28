@@ -31,6 +31,7 @@ pub enum ModuleType {
     Geometry,
     Modulate,
     Circuit,
+    Life,
     Master,
 }
 
@@ -483,6 +484,17 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
     };
+    static LIFE: ModuleSpec = ModuleSpec {
+        display_name: "LIFE",
+        color_lit: crate::editor::theme::LIFE_DOT_COLOR,
+        color_dim: Color32::from_rgb(0x1e, 0x36, 0x1c),
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "THRESHOLD", "SPEED", "REACH", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
+        writes_bin_physics: true,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -520,6 +532,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Geometry               => &GEO,
         ModuleType::Modulate               => &MODULATE,
         ModuleType::Circuit                => &CIR,
+        ModuleType::Life                   => &LIFE,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -621,6 +634,7 @@ pub fn create_module(
         ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
         ModuleType::Modulate               => Box::new(modulate::ModulateModule::new()),
         ModuleType::Circuit                => Box::new(circuit::CircuitModule::new()),
+        ModuleType::Life   => panic!("Life module — implemented in Phase 5a Task 2"),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };

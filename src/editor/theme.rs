@@ -91,6 +91,8 @@ pub const GEOMETRY_DOT_COLOR: Color32 = Color32::from_rgb(0x50, 0xb4, 0xa0);
 pub const MODULATE_DOT_COLOR: Color32 = Color32::from_rgb(180, 100, 200);
 /// Circuit module — copper/orange for "analog component" feel.
 pub const CIRCUIT_DOT_COLOR: Color32 = Color32::from_rgb(200, 140, 80);
+/// Life module — warm green for "biology / fluid life" feel.
+pub const LIFE_DOT_COLOR: Color32 = Color32::from_rgb(110, 185, 100);
 
 // ─── Freeze curve colours (4 equidistant, 30°, 120°, 210°, 300°) ─────────────
 
