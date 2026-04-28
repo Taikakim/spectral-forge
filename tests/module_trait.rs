@@ -1223,3 +1223,107 @@ fn life_set_mode_persists_across_calls() {
             "Bin {} not yielded (mag = {}); set_life_mode did not persist or coefficient drifted", k, bins[k].norm());
     }
 }
+
+#[test]
+fn life_all_modes_finite_and_bounded() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use num_complex::Complex;
+
+    let modes = [
+        LifeMode::Viscosity,
+        LifeMode::SurfaceTension,
+        LifeMode::Crystallization,
+        LifeMode::Archimedes,
+        LifeMode::NonNewtonian,
+        LifeMode::Stiction,
+        LifeMode::Yield,
+        LifeMode::Capillary,
+        LifeMode::Sandpaper,
+        LifeMode::Brownian,
+    ];
+
+    let num_bins = 1025;
+
+    for &mode in &modes {
+        let mut module = LifeModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_mode(mode);
+
+        // Stress curves at maximum.
+        let curves_storage: Vec<Vec<f32>> = vec![
+            vec![2.0_f32; num_bins], // AMOUNT
+            vec![0.5_f32; num_bins], // THRESHOLD (low → trigger most behaviours)
+            vec![2.0_f32; num_bins], // SPEED
+            vec![2.0_f32; num_bins], // REACH
+            vec![2.0_f32; num_bins], // MIX
+        ];
+        let curves: Vec<&[f32]> = curves_storage.iter().map(|v| v.as_slice()).collect();
+
+        // Random-ish input so cross-bin kernels have something to chew on.
+        let bins_template: Vec<Complex<f32>> = (0..num_bins)
+            .map(|k| {
+                let mag = 0.3 + ((k * 17 % 23) as f32) * 0.05;
+                let phase = (k as f32 * 0.073).sin() * std::f32::consts::PI;
+                Complex::new(mag * phase.cos(), mag * phase.sin())
+            })
+            .collect();
+
+        let mut physics = BinPhysics::new();
+        physics.reset_active(num_bins, 48_000.0, 2048);
+        // Seed velocity + temperature so velocity-/temp-reading modes get inputs.
+        for k in 0..num_bins {
+            physics.velocity[k] = 0.4 + ((k * 13 % 7) as f32) * 0.1;
+            physics.temperature[k] = 0.5;
+        }
+        let physics_ref: &BinPhysics = &physics;
+        let ctx = ModuleContext {
+            sample_rate:          48_000.0,
+            fft_size:             2048,
+            num_bins,
+            attack_ms:            10.0,
+            release_ms:           100.0,
+            sensitivity:          1.0,
+            suppression_width:    1.0,
+            auto_makeup:          false,
+            delta_monitor:        false,
+            bpm:                  120.0,
+            beat_position:        0.0,
+            unwrapped_phase:      None,
+            peaks:                None,
+            instantaneous_freq:   None,
+            chromagram:           None,
+            midi_notes:           None,
+            sidechain_derivative: None,
+            bin_physics:          Some(physics_ref),
+        };
+
+        // 200 hops × 2 channels.
+        for ch in 0..2 {
+            let mut bins = bins_template.clone();
+            let mut suppression = vec![0.0_f32; num_bins];
+            let mut physics_out = BinPhysics::new();
+            physics_out.reset_active(num_bins, 48_000.0, 2048);
+
+            for hop in 0..200 {
+                module.process(
+                    ch, StereoLink::Linked, FxChannelTarget::All,
+                    &mut bins, None, &curves, &mut suppression, Some(&mut physics_out), &ctx,
+                );
+
+                for (k, b) in bins.iter().enumerate() {
+                    assert!(b.norm().is_finite(),
+                        "Mode {:?} ch {} hop {} bin {} produced NaN/Inf", mode, ch, hop, k);
+                    assert!(b.norm() < 1e6,
+                        "Mode {:?} ch {} hop {} bin {} unbounded ({})", mode, ch, hop, k, b.norm());
+                }
+                for (k, &s) in suppression.iter().enumerate() {
+                    assert!(s.is_finite() && s >= 0.0,
+                        "Mode {:?} ch {} hop {} bin {} suppression bad ({})", mode, ch, hop, k, s);
+                }
+            }
+        }
+    }
+}
