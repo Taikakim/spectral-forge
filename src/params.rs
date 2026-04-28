@@ -51,6 +51,40 @@ pub fn fft_size_from_choice(c: FftSizeChoice) -> usize {
     }
 }
 
+/// History Buffer capacity choice. Frames-per-second is derived from
+/// `sample_rate / hop` where hop = fft_size / OVERLAP. Memory cost = `seconds *
+/// sample_rate / hop * MAX_NUM_BINS * 8 bytes` per channel; at default 4 s,
+/// 48 kHz, fft 2048 → 375 frames × 8193 bins × 8 B ≈ 24 MB per channel.
+#[derive(nih_plug::prelude::Enum, Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum HistoryBufferDepthChoice {
+    #[id = "sec1"]   #[name = "1 s"]  Sec1,
+    #[id = "sec2"]   #[name = "2 s"]  Sec2,
+    #[default]
+    #[id = "sec4"]   #[name = "4 s"]  Sec4,
+    #[id = "sec8"]   #[name = "8 s"]  Sec8,
+    #[id = "sec16"]  #[name = "16 s"] Sec16,
+}
+
+impl HistoryBufferDepthChoice {
+    pub fn seconds(self) -> f32 {
+        match self {
+            Self::Sec1 => 1.0,
+            Self::Sec2 => 2.0,
+            Self::Sec4 => 4.0,
+            Self::Sec8 => 8.0,
+            Self::Sec16 => 16.0,
+        }
+    }
+
+    /// Round-up to the number of hop frames needed to cover `seconds()` at the
+    /// given (sample_rate, fft_size). Hop = fft_size / OVERLAP (4).
+    pub fn max_frames(self, sample_rate: f32, fft_size: usize) -> usize {
+        let hop = (fft_size / crate::dsp::pipeline::OVERLAP).max(1) as f32;
+        let frames = (self.seconds() * sample_rate / hop).ceil() as usize;
+        frames.max(1)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum StereoLink { Independent, Linked, MidSide }
 
@@ -251,6 +285,8 @@ pub struct SpectralForgeParams {
     pub stereo_link: EnumParam<StereoLink>,
 
     pub fft_size: EnumParam<FftSizeChoice>,
+
+    pub history_depth: EnumParam<HistoryBufferDepthChoice>,
 
     pub threshold_mode: EnumParam<ThresholdMode>,
 
@@ -471,6 +507,7 @@ impl Default for SpectralForgeParams {
 
             stereo_link: EnumParam::new("Stereo Link", StereoLink::Linked),
             fft_size: EnumParam::new("FFT Size", FftSizeChoice::S2048),
+            history_depth: EnumParam::new("History Depth", HistoryBufferDepthChoice::default()),
             threshold_mode: EnumParam::new("Threshold Mode", ThresholdMode::Absolute),
 
             sensitivity: FloatParam::new(
@@ -781,6 +818,7 @@ unsafe impl Params for SpectralForgeParams {
 
         params.push(("stereo_link".to_string(),    self.stereo_link.as_ptr(),    String::new()));
         params.push(("fft_size".to_string(),       self.fft_size.as_ptr(),       String::new()));
+        params.push(("history_depth".to_string(),  self.history_depth.as_ptr(),  String::new()));
         params.push(("threshold_mode".to_string(), self.threshold_mode.as_ptr(), String::new()));
 
         params.push(("sensitivity".to_string(),       self.sensitivity.as_ptr(),       String::new()));
