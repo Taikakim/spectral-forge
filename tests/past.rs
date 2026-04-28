@@ -97,3 +97,49 @@ fn granular_replaces_bin_with_history_at_offset_when_amount_high() {
     assert!((bins[100].re - 5.0).abs() < 0.5,
         "expected bin[100] re ≈ 5.0, got {}", bins[100].re);
 }
+
+#[test]
+fn decay_sorter_long_ringing_bin_lands_at_low_output_bin() {
+    use spectral_forge::dsp::history_buffer::HistoryBuffer;
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, SortKey};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    // Build history where bin 200 = stable 1.0 for 40 frames (long decay)
+    // and bin 100 = single spike at frame 0 (fast decay).
+    let mut h = HistoryBuffer::new(1, 64, 256);
+    for i in 0..40 {
+        let mut frame = vec![Complex::new(0.0, 0.0); 256];
+        if i == 0 { frame[100] = Complex::new(1.0, 0.0); }
+        frame[200] = Complex::new(1.0, 0.0);
+        h.write_hop(0, &frame);
+        h.advance_after_all_channels_written();
+    }
+
+    let mut m = PastModule::new(48000.0, 2048);
+    m.set_mode(PastMode::DecaySorter);
+    m.set_sort_key(SortKey::Decay);
+
+    let mut bins = vec![Complex::new(0.0, 0.0); 256];
+    bins[100] = Complex::new(0.7, 0.0);
+    bins[200] = Complex::new(0.9, 0.0);
+
+    let amount    = vec![1.0_f32; 256];
+    let time      = vec![0.0_f32; 256];
+    let threshold = vec![0.05_f32; 256];
+    let spread    = vec![0.0_f32; 256];
+    let mix       = vec![1.0_f32; 256];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
+    let mut supp = vec![0.0_f32; 256];
+    let mut ctx = ModuleContext::new(48000.0, 2048, 256, 10.0, 100.0, 1.0, 0.5, false, false);
+    ctx.history = Some(&h);
+
+    // Note: process() takes physics: Option<&mut BinPhysics> between supp and ctx.
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves, &mut supp, None, &ctx);
+
+    assert!(bins[10].norm() > 0.5,
+        "lowest output slot should hold long-ringing partial, got {}", bins[10].norm());
+    assert!(bins[200].norm() < 0.2,
+        "bin 200 should have been moved out, got {}", bins[200].norm());
+}

@@ -2016,6 +2016,7 @@ dependencies = [
  "realfft",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "triple_buffer",
 ]

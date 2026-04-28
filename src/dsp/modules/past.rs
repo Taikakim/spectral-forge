@@ -12,6 +12,7 @@
 
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::dsp::history_buffer::HistoryBuffer;
 use crate::dsp::modules::{
@@ -200,9 +201,67 @@ impl PastModule {
     }
 
     fn apply_decay_sorter(
-        &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
-        _amount: &[f32], _threshold: &[f32], _mix: &[f32], _ctx: &ModuleContext<'_>,
-    ) {}
+        &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
+        amount: &[f32], threshold: &[f32], mix: &[f32], _ctx: &ModuleContext<'_>,
+    ) {
+        let n = bins.len();
+        // Bin 10 ≈ 230 Hz at fft 2048 / 48 kHz — first musically useful bin.
+        let low_k = 10usize.min(n.saturating_sub(1));
+        // Pick top MAX_SORT_BINS bins by current magnitude above THRESHOLD.
+        let mut candidates: SmallVec<[(u32, f32); MAX_SORT_BINS]> = SmallVec::new();
+        for k in 0..n {
+            let mag_sq = bins[k].norm_sqr();
+            let thr = threshold.get(k).copied().unwrap_or(0.0);
+            if mag_sq < thr * thr { continue; }
+            if candidates.len() < MAX_SORT_BINS {
+                candidates.push((k as u32, mag_sq));
+            } else if let Some((min_idx, _)) = candidates.iter().enumerate()
+                .min_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                if candidates[min_idx].1 < mag_sq {
+                    candidates[min_idx] = (k as u32, mag_sq);
+                }
+            }
+        }
+        // Pull the right summary stat per sort key.
+        let key_values_borrow: std::cell::Ref<'_, [f32]> = match self.sort_key {
+            SortKey::Decay     => hist.summary_decay_estimate(ch),
+            SortKey::Stability => hist.summary_if_stability(ch),
+            SortKey::Area      => hist.summary_rms_envelope(ch),
+        };
+        // Sort descending — highest key value first → lowest output slot.
+        {
+            let key_values: &[f32] = &*key_values_borrow;
+            candidates.sort_by(|a, b| {
+                let ka = key_values.get(a.0 as usize).copied().unwrap_or(0.0);
+                let kb = key_values.get(b.0 as usize).copied().unwrap_or(0.0);
+                kb.partial_cmp(&ka).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        drop(key_values_borrow);
+        // Snapshot bins before destructive write.
+        let scratch = &mut self.channels[ch].sort_scratch;
+        scratch[..n].copy_from_slice(&bins[..n]);
+        let max_dest = (low_k + candidates.len()).min(n);
+        for k in low_k..max_dest { bins[k] = Complex::new(0.0, 0.0); }
+        // Write each ranked complex value into low_k + rank.
+        for (rank, (src_k, _)) in candidates.iter().enumerate() {
+            let dest = low_k + rank;
+            if dest >= n { break; }
+            let bin_amount = amount.get(*src_k as usize).copied().unwrap_or(1.0);
+            let m_val = mix.get(dest).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            let value = scratch[*src_k as usize] * bin_amount;
+            bins[dest] = scratch[dest] * (1.0 - m_val) + value * m_val;
+        }
+        // Source bins outside the destination range get cleared (their content moved).
+        for (src_k, _) in candidates.iter() {
+            let kk = *src_k as usize;
+            if kk < low_k || kk >= max_dest {
+                let m_val = mix.get(kk).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+                bins[kk] = scratch[kk] * (1.0 - m_val);
+            }
+        }
+    }
 
     fn apply_convolution(
         &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
