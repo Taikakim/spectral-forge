@@ -27,7 +27,6 @@ use crate::dsp::modules::{
 
 /// FTCS diffusion stability clamp (research finding from ideas/.../11-life.md).
 /// Used by the Viscosity kernel (Task 3).
-#[allow(dead_code)]
 const VISCOSITY_D_MAX: f32 = 0.45;
 
 /// ~50ms time-constant LP alpha at 48k/256-hop.
@@ -84,7 +83,6 @@ fn xorshift32_signed_unit(state: &mut u32) -> f32 {
 // ── LifeModule ─────────────────────────────────────────────────────────────
 
 pub struct LifeModule {
-    #[allow(dead_code)]
     mode: LifeMode,
     /// Per-channel per-bin power envelope — Viscosity, Archimedes, NonNewtonian, Stiction, Yield.
     scratch_power: [Vec<f32>; 2],
@@ -137,22 +135,82 @@ impl Default for LifeModule {
     fn default() -> Self { Self::new() }
 }
 
+/// FTCS finite-volume diffusion of `|bin|^2` (power) with harmonic-mean face flux.
+/// Reflective boundaries (zero flux at k=0 and k=num_bins-1).
+/// Phase preserved via complex scaling.
+fn apply_viscosity(
+    bins: &mut [Complex<f32>],
+    scratch_power: &mut [f32],
+    scratch_mag: &mut [f32],
+    curves: &[&[f32]],
+) {
+    const EPS: f32 = 1e-12;
+
+    let amount_c = curves[0];
+    let mix_c    = curves[4];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        let mag = bins[k].norm();
+        scratch_mag[k]   = mag;
+        scratch_power[k] = mag * mag;
+    }
+
+    for k in 1..num_bins - 1 {
+        let d_k     = (amount_c[k]     * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
+        let d_kp1   = (amount_c[k + 1] * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
+        let d_km1   = (amount_c[k - 1] * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
+        let d_face_right = 2.0 * d_k * d_kp1 / (d_k + d_kp1 + EPS);
+        let d_face_left  = 2.0 * d_k * d_km1 / (d_k + d_km1 + EPS);
+        let p_new = scratch_power[k]
+            + d_face_right * (scratch_power[k + 1] - scratch_power[k])
+            - d_face_left  * (scratch_power[k]     - scratch_power[k - 1]);
+
+        let p_new   = p_new.max(0.0);
+        let mag_new = p_new.sqrt();
+        let mix     = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+
+        let mag_old = scratch_mag[k];
+        let dry = bins[k];
+        let wet = if mag_old > EPS {
+            bins[k] * (mag_new / mag_old)
+        } else {
+            // Silent bin receiving incoming flux: inject as real-valued (no phase info).
+            Complex::new(mag_new, 0.0)
+        };
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
         channel: usize,
         _stereo_link: StereoLink,
         _target: FxChannelTarget,
-        _bins: &mut [Complex<f32>],
+        bins: &mut [Complex<f32>],
         _sidechain: Option<&[f32]>,
-        _curves: &[&[f32]],
+        curves: &[&[f32]],
         suppression_out: &mut [f32],
         _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
-        _ctx: &ModuleContext<'_>,
+        ctx: &ModuleContext<'_>,
     ) {
         debug_assert!(channel < 2);
-        // Skeleton: passthrough — bins are untouched, suppression zeroed.
-        // Kernels are added in Tasks 3–12.
+        debug_assert_eq!(bins.len(), ctx.num_bins);
+
+        let scratch_power = &mut self.scratch_power[channel];
+        let scratch_mag   = &mut self.scratch_mag[channel];
+
+        match self.mode {
+            LifeMode::Viscosity => {
+                apply_viscosity(bins, scratch_power, scratch_mag, curves);
+            }
+            _ => {
+                // Filled in Tasks 4–12.
+            }
+        }
+
         for s in suppression_out.iter_mut() {
             *s = 0.0;
         }

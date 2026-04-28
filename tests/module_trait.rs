@@ -535,3 +535,53 @@ fn module_spec_writes_bin_physics_defaults_false_for_all_modules() {
             "{:?}: writes_bin_physics must default to false in Phase 3", ty);
     }
 }
+
+#[test]
+fn life_viscosity_diffuses_and_conserves() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode_for_test(LifeMode::Viscosity);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0); // single tone, all energy at bin 100
+    let dry_power: f32 = bins.iter().map(|b| b.norm_sqr()).sum();
+
+    // AMOUNT=2 (D=0.45 max), THRESHOLD=neutral, SPEED=neutral, REACH=neutral, MIX=2 (full wet)
+    let amount  = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    // 5 hops to let energy spread.
+    for _ in 0..5 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+
+    let wet_power: f32 = bins.iter().map(|b| b.norm_sqr()).sum();
+
+    let loss_pct = (dry_power - wet_power).abs() / dry_power;
+    assert!(loss_pct < 0.05,
+        "Viscosity lost {:.2}% of power (>5% violates conservation)", loss_pct * 100.0);
+
+    assert!(bins[99].norm()  > 0.01, "Energy did not diffuse left  (bin 99 = {})",  bins[99].norm());
+    assert!(bins[101].norm() > 0.01, "Energy did not diffuse right (bin 101 = {})", bins[101].norm());
+
+    for b in &bins {
+        assert!(b.norm().is_finite());
+    }
+}
