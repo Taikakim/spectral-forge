@@ -1491,6 +1491,8 @@ fn kinetics_verlet_stays_bounded_under_unit_impulse() {
         }
     }
 
+    // Loose bound — Hooke kernel is a stub in Task 4; the test tightens in Task 5
+    // once the actual spring force lands.
     assert!(max_mag < 100.0,
         "Energy escaped integrator (max_mag = {})", max_mag);
 }

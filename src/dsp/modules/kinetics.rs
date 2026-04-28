@@ -91,7 +91,10 @@ pub struct KineticsModule {
     velocity: [Vec<f32>; 2],
     /// Per-channel temperature accumulator (ThermalExpansion mode).
     temperature_local: [Vec<f32>; 2],
-    /// Magnitude at previous hop (Ferromagnetism / Diamagnet scratchpad).
+    /// Per-channel scratch shared between two roles:
+    /// - Persisted across hops as the previous-hop magnitude (Ferromagnetism / Diamagnet).
+    /// - Reused inside `process()` as the KE+PE scratch for the energy-rise hysteresis
+    ///   step, then restored to the dry magnitude before the suppression delta runs.
     mag_prev: [Vec<f32>; 2],
     /// Phase at previous hop (OrbitalPhase / Ferromagnetism / ThermalExpansion).
     prev_phase: [Vec<f32>; 2],
@@ -321,14 +324,18 @@ impl SpectralModule for KineticsModule {
 
         // -- 1. Smooth all five parameter curves through the 1-pole at this hop. --
         for c in 0..5 {
-            if c >= curves.len() { continue; }
-            let src = &curves[c][..num_bins.min(curves[c].len())];
-            if src.len() < num_bins { continue; }
-            smooth_curve_one_pole(
-                &mut self.smoothed_curves[channel][c][..num_bins],
-                src,
-                dt,
+            if c >= curves.len() {
+                // No curve provided — hold previous smoothed value.
+                continue;
+            }
+            debug_assert!(
+                curves[c].len() >= num_bins,
+                "kinetics: curve {} length {} < num_bins {}",
+                c, curves[c].len(), num_bins
             );
+            let src = &curves[c][..num_bins];
+            let dst = &mut self.smoothed_curves[channel][c][..num_bins];
+            smooth_curve_one_pole(dst, src, dt);
         }
 
         // -- 2. Capture dry magnitudes into pre-allocated scratch (no alloc). --
@@ -371,10 +378,10 @@ impl SpectralModule for KineticsModule {
         // -- 4. Energy-rise hysteresis (after kernel mutated velocity). --
         {
             // Compute KE+PE into mag_prev scratch.
-            let strength = &self.smoothed_curves[channel][0];
-            let velocity = &self.velocity[channel];
-            let displacement = &self.displacement[channel];
-            let curr_kepe = &mut self.mag_prev[channel];
+            let strength     = &self.smoothed_curves[channel][0][..num_bins];
+            let velocity     = &self.velocity[channel][..num_bins];
+            let displacement = &self.displacement[channel][..num_bins];
+            let curr_kepe    = &mut self.mag_prev[channel][..num_bins];
             for k in 0..num_bins {
                 let v = velocity[k];
                 let d = displacement[k];
