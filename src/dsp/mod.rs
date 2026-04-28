@@ -1,6 +1,7 @@
 pub mod amp_modes;
 pub mod bin_physics;
 pub mod guard;
+pub mod history_buffer;
 pub mod modules;
 pub mod pipeline;
 pub mod engines;
