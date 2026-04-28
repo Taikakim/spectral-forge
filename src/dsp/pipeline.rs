@@ -78,6 +78,16 @@ pub struct Pipeline {
     sc_stft: StftHelper,
     /// Per-channel, per-slot SC magnitude slice; slot_sc_input[channel][slot][bin]. Pre-allocated.
     slot_sc_input: Vec<Vec<Vec<f32>>>,
+    /// PLPV: previous wrapped phase per channel. [channel][bin]
+    prev_phase: Vec<Vec<f32>>,
+    /// PLPV: previous unwrapped phase per channel. [channel][bin]
+    prev_unwrapped_phase: Vec<Vec<f32>>,
+    /// PLPV: current unwrapped phase per channel. Exposed to modules via ctx.unwrapped_phase.
+    unwrapped_phase: Vec<Vec<f32>>,
+    /// PLPV: per-channel re-wrap workspace used before iFFT. [channel][bin]
+    rewrap_buf: Vec<Vec<f32>>,
+    /// PLPV: mono scratch for the current hop's wrapped phase (filled per closure invocation).
+    scratch_curr_phase: Vec<f32>,
     sample_rate: f32,
     num_channels: usize,
 }
@@ -116,6 +126,13 @@ impl Pipeline {
             .map(|_| (0..9).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect())
             .collect();
 
+        // PLPV per-channel phase buffers (2 channels × MAX_NUM_BINS each).
+        let prev_phase:           Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let prev_unwrapped_phase: Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let unwrapped_phase:      Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let rewrap_buf:           Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let scratch_curr_phase:   Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
+
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
             fft_plan,
@@ -134,6 +151,11 @@ impl Pipeline {
             sc_complex_bufs,
             sc_stft,
             slot_sc_input,
+            prev_phase,
+            prev_unwrapped_phase,
+            unwrapped_phase,
+            rewrap_buf,
+            scratch_curr_phase,
             sample_rate,
             fft_size,
             num_channels,
@@ -168,6 +190,11 @@ impl Pipeline {
         for ch_bufs in &mut self.sc_complex_bufs {
             ch_bufs.fill(Complex::new(0.0, 0.0));
         }
+        for v in &mut self.prev_phase           { v.fill(0.0); }
+        for v in &mut self.prev_unwrapped_phase { v.fill(0.0); }
+        for v in &mut self.unwrapped_phase      { v.fill(0.0); }
+        for v in &mut self.rewrap_buf           { v.fill(0.0); }
+        self.scratch_curr_phase.fill(0.0);
         self.fx_matrix.clear_state();
     }
 
@@ -202,6 +229,11 @@ impl Pipeline {
                 slot_buf.fill(0.0);
             }
         }
+        for v in &mut self.prev_phase           { v.fill(0.0); }
+        for v in &mut self.prev_unwrapped_phase { v.fill(0.0); }
+        for v in &mut self.unwrapped_phase      { v.fill(0.0); }
+        for v in &mut self.rewrap_buf           { v.fill(0.0); }
+        self.scratch_curr_phase.fill(0.0);
         // Reset clears all amp-node state — preset load + FFT-size change both warm up from zero.
         self.fx_matrix.reset(sample_rate, fft_size);
     }
@@ -347,6 +379,7 @@ impl Pipeline {
         // ── Read feature flags and stereo link ──
         let delta_monitor = params.delta_monitor.value();
         let enable_heavy_modules = params.enable_heavy_modules.value();
+        let plpv_enable = params.plpv_enable.value();
         let stereo_link = params.stereo_link.value();
         let is_mid_side = stereo_link == StereoLink::MidSide;
 
@@ -547,12 +580,20 @@ impl Pipeline {
         let channel_supp_buf  = &mut self.channel_supp_buf;
         let slot_curve_cache_ref = &self.slot_curve_cache;
         let slot_sc_input_ref = &self.slot_sc_input;
+        // PLPV per-channel buffers + mono scratch (rebound here so the closure can borrow them
+        // without taking a second &mut self alongside &mut self.stft).
+        let prev_phase_ref           = &mut self.prev_phase;
+        let prev_unwrapped_phase_ref = &mut self.prev_unwrapped_phase;
+        let unwrapped_phase_ref      = &mut self.unwrapped_phase;
+        let rewrap_buf_ref           = &mut self.rewrap_buf;
+        let scratch_curr_phase_ref   = &mut self.scratch_curr_phase;
         // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
         // IFFT gives fft_size gain; Hann^2 OLA at 75% overlap gives 1.5 gain.
         // Combined normalization: 1 / (fft_size * 1.5) = 2 / (3 * fft_size)
         let norm = 2.0_f32 / (3.0 * fft_size as f32);
+        let hop_size = fft_size / OVERLAP;
 
         self.stft.process_overlap_add(buffer, OVERLAP, |channel, block| {
             // Analysis window + input gain
@@ -584,6 +625,31 @@ impl Pipeline {
                 }
             });
 
+            // PLPV: compute per-bin unwrapped phase trajectory before module dispatch.
+            // Defensively clamp ch index to the 2 channels we pre-allocated for.
+            let ch = channel.min(1);
+            let mut hop_ctx = ctx;
+            if plpv_enable {
+                for k in 0..num_bins {
+                    scratch_curr_phase_ref[k] = complex_buf[k].arg();
+                }
+                crate::dsp::plpv::unwrap_phase(
+                    &scratch_curr_phase_ref[..num_bins],
+                    &prev_phase_ref[ch][..num_bins],
+                    &mut prev_unwrapped_phase_ref[ch][..num_bins],
+                    &mut unwrapped_phase_ref[ch][..num_bins],
+                    fft_size,
+                    hop_size,
+                    num_bins,
+                );
+                // Roll prev_phase forward for the next hop.
+                prev_phase_ref[ch][..num_bins]
+                    .copy_from_slice(&scratch_curr_phase_ref[..num_bins]);
+                // Expose unwrapped phase to modules. Re-borrow via the rebound local so the
+                // closure does not need a second &mut self borrow.
+                hop_ctx.unwrapped_phase = Some(&unwrapped_phase_ref[ch][..num_bins]);
+            }
+
             // Run all modules through the fx_matrix slot chain.
             fx_matrix.process_hop(
                 channel,
@@ -593,13 +659,29 @@ impl Pipeline {
                 &slot_targets_snap,
                 slot_curve_cache_ref,
                 &route_matrix_snap,
-                &ctx,
+                &hop_ctx,
                 channel_supp_buf,
                 num_bins,
                 enable_heavy_modules,
             );
             for k in 0..channel_supp_buf.len() {
                 if channel_supp_buf[k] > suppression_buf[k] { suppression_buf[k] = channel_supp_buf[k]; }
+            }
+
+            // PLPV: re-wrap unwrapped phase back into (-π, π] and recombine with the (possibly
+            // modified) magnitude. When no module touched ctx.unwrapped_phase this is a no-op
+            // up to f32 round-off (typically ≤ 1 ULP).
+            if plpv_enable {
+                crate::dsp::plpv::rewrap_phase(
+                    &unwrapped_phase_ref[ch][..num_bins],
+                    &mut rewrap_buf_ref[ch][..num_bins],
+                    num_bins,
+                );
+                for k in 0..num_bins {
+                    let m = complex_buf[k].norm();
+                    let p = rewrap_buf_ref[ch][k];
+                    complex_buf[k] = Complex::from_polar(m, p);
+                }
             }
 
             ifft_plan.process(complex_buf, block).unwrap();
