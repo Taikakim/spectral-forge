@@ -113,6 +113,13 @@ pub struct ModuleContext<'block> {
     pub unwrapped_phase:      Option<&'block [Cell<f32>]>, // Phase 4.1 / 4.3b
     pub peaks:                Option<&'block [PeakInfo]>, // Phase 4.2
     pub instantaneous_freq:   Option<&'block [f32]>,      // Phase 6.1
+    /// Per-bin instantaneous-frequency offset from bin centre, normalised to
+    /// fractional bin index. `if_offset[k] = (IF[k] - bin_center_hz(k)) /
+    /// bin_center_hz(k)`. Filled by Pipeline once per block from the prior
+    /// block's analysis snapshot; one-block latency is acceptable for Past
+    /// consumers. v1 default fills with all zeros (centre-aligned); the value
+    /// becomes meaningful once Phase 4's per-channel IF cache is wired in.
+    pub if_offset: Option<&'block [f32]>,
     pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
     pub midi_notes:           Option<&'block [bool; 128]>, // Phase 6.3
     pub bpm:                  f32,                         // live from host transport (0.0 if unavailable)
@@ -145,6 +152,7 @@ impl<'block> ModuleContext<'block> {
             sidechain_derivative: None,
             bin_physics: None,
             history: None,
+            if_offset: None,
         }
     }
 }

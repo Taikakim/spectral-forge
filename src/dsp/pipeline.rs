@@ -113,6 +113,12 @@ pub struct Pipeline {
     /// Scratch pad for one hop's per-channel complex spectrum, copied out of
     /// the StftHelper closure and drained into `history` after the closure.
     pending_hop_frames: Vec<Vec<Complex<f32>>>,
+    /// Per-bin |IF − f_centre| / f_centre cache, filled at the start of every
+    /// process() call from the prior block's analysis FFT. Sized at
+    /// MAX_NUM_BINS; only `[0..num_bins]` is meaningful for the active FFT.
+    /// v1 always fills with zeros (IF == centre); replaced once Phase 4's
+    /// per-channel IF lookup is plumbed in.
+    if_offset_buf: Vec<f32>,
     sample_rate: f32,
     num_channels: usize,
 }
@@ -181,6 +187,7 @@ impl Pipeline {
         let pending_hop_frames: Vec<Vec<Complex<f32>>> = (0..2)
             .map(|_| vec![Complex::new(0.0, 0.0); MAX_NUM_BINS])
             .collect();
+        let if_offset_buf: Vec<f32> = vec![0.0; MAX_NUM_BINS];
 
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
@@ -212,6 +219,7 @@ impl Pipeline {
             history,
             history_depth_seconds,
             pending_hop_frames,
+            if_offset_buf,
             sample_rate,
             fft_size,
             num_channels,
@@ -227,9 +235,9 @@ impl Pipeline {
     /// What this does:
     /// - Zeros every stateful f32/complex pre-allocated buffer in Pipeline and FxMatrix.
     /// - Resets the dry-delay write head to 0.
-    /// - Zeros `pending_hop_frames` and calls `HistoryBuffer::reset()` (rewinds the
-    ///   ring write head + frame count + summary cache; allocation-free — same Vec
-    ///   slots, just `fill(Complex::ZERO)`).
+    /// - Zeros `pending_hop_frames` and `if_offset_buf`, and calls `HistoryBuffer::reset()`
+    ///   (rewinds the ring write head + frame count + summary cache; allocation-free —
+    ///   same Vec slots, just `fill(Complex::ZERO)`).
     /// - Does NOT reset StftHelper overlap-add ring buffers — those are private to
     ///   nih-plug and cannot be zeroed here. The result is a brief one-hop click, which
     ///   is acceptable for a user-initiated hard reset.
@@ -261,6 +269,7 @@ impl Pipeline {
         }
         self.total_hops_per_ch = [0; 2];
         for v in &mut self.pending_hop_frames { for c in v { *c = Complex::new(0.0, 0.0); } }
+        for v in &mut self.if_offset_buf { *v = 0.0; }
         self.history.reset();
         self.fx_matrix.clear_state();
     }
@@ -308,6 +317,7 @@ impl Pipeline {
         }
         self.total_hops_per_ch = [0; 2];
         for v in &mut self.pending_hop_frames { for c in v { *c = Complex::new(0.0, 0.0); } }
+        for v in &mut self.if_offset_buf { *v = 0.0; }
         // History Buffer: rebuild if the depth changed; otherwise reset in place.
         let new_capacity = {
             let hop = (fft_size / OVERLAP).max(1) as f32;
@@ -497,6 +507,18 @@ impl Pipeline {
             params.sensitivity.smoothed.next_step(block_size)
         };
 
+        // Derive if_offset from the previous block's last analysis FFT. One-block
+        // latency is acceptable for Past consumers and avoids a per-hop borrow
+        // conflict with the StftHelper closure. v1 stub: all zeros (IF == centre).
+        // Phase 4's per-channel IF lookup will replace `let inst = centre;` below.
+        let inv_fft = 1.0_f32 / fft_size as f32;
+        for k in 1..num_bins {
+            let centre = k as f32 * self.sample_rate * inv_fft;
+            let inst = centre; // TODO Phase 4 wiring: pull from per-channel IF cache.
+            self.if_offset_buf[k] = (inst - centre) / centre.max(1e-6);
+        }
+        self.if_offset_buf[0] = 0.0;
+
         // Immutable borrow of history for ctx — captures the prior block's state.
         // The mutable write path (pending_hop_frames → history) happens after the
         // closure via the separate pending_hop_frames field.
@@ -521,6 +543,10 @@ impl Pipeline {
         ctx.beat_position = transport.pos_beats().unwrap_or(0.0);
         // Attach history as the *prior* block's snapshot — readers always look back.
         ctx.history = Some(history_ref);
+        // Modules that read instantaneous-frequency offset (e.g. Past Stretch)
+        // see the prior-block snapshot. None == not yet wired (we always wire
+        // it now that the cache exists).
+        ctx.if_offset = Some(&self.if_offset_buf[..num_bins]);
 
         // Snapshot of slot targets (needed for SC channel resolution in MidSide mode).
         let slot_targets_snap: [FxChannelTarget; 9] = params.slot_targets.try_lock()

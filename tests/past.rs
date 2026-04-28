@@ -1,5 +1,6 @@
 use num_complex::Complex;
 use spectral_forge::dsp::phase::PhaseRotator;
+use spectral_forge::dsp::modules::ModuleContext;
 
 #[test]
 fn phase_rotator_zero_delta_is_identity() {
@@ -38,4 +39,14 @@ fn phase_rotator_lut_quantum_under_threshold() {
         assert!((out.re - expected.re).abs() < 0.007, "entry {} re error", i);
         assert!((out.im - expected.im).abs() < 0.007, "entry {} im error", i);
     }
+}
+
+#[test]
+fn module_context_has_if_offset_field() {
+    // Field exists and is Option<&[f32]>. We don't assert its content here —
+    // that's Pipeline's responsibility, exercised in tests/past_pipeline.rs.
+    let ctx = ModuleContext::new(
+        48000.0, 2048, 1025, 10.0, 100.0, 1.0, 0.5, false, false,
+    );
+    assert!(ctx.if_offset.is_none());
 }

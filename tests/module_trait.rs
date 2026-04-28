@@ -805,6 +805,7 @@ fn life_non_newtonian_limits_fast_transients() {
         sidechain_derivative: None,
         bin_physics:          Some(&physics_read),
         history:              None,
+        if_offset:            None,
     };
 
     module.process(
@@ -882,6 +883,7 @@ fn life_stiction_holds_quiet_bins_then_releases() {
         sidechain_derivative: None,
         bin_physics:          Some(&physics),
         history:              None,
+        if_offset:            None,
     };
 
     module.process(
@@ -945,6 +947,7 @@ fn life_yield_clamps_above_threshold_passthrough_below() {
         sidechain_derivative: None,
         bin_physics:          None,
         history:              None,
+        if_offset:            None,
     };
 
     module.process(
@@ -1005,6 +1008,7 @@ fn life_capillary_wicks_sustained_energy_upward() {
         sidechain_derivative: None,
         bin_physics:          None,
         history:              None,
+        if_offset:            None,
     };
 
     // Run 99 warm-up hops (reset only the source/target bins each time so the
@@ -1082,6 +1086,7 @@ fn life_sandpaper_emits_sparks_to_higher_bins() {
         sidechain_derivative: None,
         bin_physics:          None,
         history:              None,
+        if_offset:            None,
     };
 
     module.process(
@@ -1148,6 +1153,7 @@ fn life_brownian_drifts_with_temperature() {
         sidechain_derivative: None,
         bin_physics:          Some(&physics),
         history:              None,
+        if_offset:            None,
     };
 
     let mut bins = bins_template.clone();
@@ -1213,6 +1219,7 @@ fn life_set_mode_persists_across_calls() {
         sidechain_derivative: None,
         bin_physics:          None,
         history:              None,
+        if_offset:            None,
     };
 
     module.process(
@@ -1305,6 +1312,7 @@ fn life_all_modes_finite_and_bounded() {
             sidechain_derivative: None,
             bin_physics:          Some(&physics),
             history:              None,
+            if_offset:            None,
         };
 
         // bins accumulate across 200 hops within a channel — exercises stateful kernels.
@@ -1343,4 +1351,14 @@ fn module_context_has_history_slot_default_none() {
     );
     assert!(ctx.history.is_none(),
         "ctx.history must default to None so existing modules ignore it");
+}
+
+#[test]
+fn module_context_has_if_offset_default_none() {
+    use spectral_forge::dsp::modules::ModuleContext;
+    let ctx = ModuleContext::new(
+        48000.0, 2048, 1025, 10.0, 100.0, 1.0, 0.5, false, false,
+    );
+    assert!(ctx.if_offset.is_none(),
+        "ctx.if_offset must default to None so existing modules ignore it");
 }
