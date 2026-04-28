@@ -107,6 +107,15 @@ const SANDPAPER_SPARK_CAP:    f32 = 10.0;
 /// future tuning of one doesn't perturb the other).
 const SANDPAPER_SILENT_FLOOR: f32 = 1e-9;
 
+/// Brownian — temperature below which the bin is treated as cold (no drift applied).
+const BROWNIAN_TEMP_FLOOR: f32 = 1e-6;
+/// Brownian — curve → amount scaler applied before the [0, MAX] clamp.
+const BROWNIAN_AMOUNT_SCALE: f32 = 0.5;
+/// Brownian — upper bound on the scaled amount (keeps drift moderate at curve=2.0).
+const BROWNIAN_AMOUNT_MAX: f32 = 1.0;
+/// Brownian — final per-hop drift multiplier (keeps the random walk small relative to bin magnitude).
+const BROWNIAN_DRIFT_SCALE: f32 = 0.1;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -696,6 +705,31 @@ fn apply_sandpaper(
     }
 }
 
+// ── Task 12: Brownian ──────────────────────────────────────────────────────
+
+fn apply_brownian(
+    bins: &mut [Complex<f32>],
+    rng_state: &mut u32,
+    curves: &[&[f32]],
+    temperature: Option<&[f32]>,
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let mix_c    = curves[4];
+
+    for k in 0..num_bins {
+        let t = temperature.map(|ts| ts[k]).unwrap_or(0.0);
+        if t <= BROWNIAN_TEMP_FLOOR { continue; }
+        let amt = (amount_c[k] * BROWNIAN_AMOUNT_SCALE).clamp(0.0, BROWNIAN_AMOUNT_MAX);
+        let drift_re = xorshift32_signed_unit(rng_state) * amt * t * BROWNIAN_DRIFT_SCALE;
+        let drift_im = xorshift32_signed_unit(rng_state) * amt * t * BROWNIAN_DRIFT_SCALE;
+        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let dry = bins[k];
+        let wet = bins[k] + Complex::new(drift_re, drift_im);
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -756,9 +790,11 @@ impl SpectralModule for LifeModule {
                 let _ = physics;
                 apply_sandpaper(bins, scratch_mag, curves, ctx.num_bins);
             }
-            _ => {
+            LifeMode::Brownian => {
                 let _ = physics;
-                // Filled in Task 12 (Brownian).
+                let temp = ctx.bin_physics.map(|bp| &bp.temperature[..ctx.num_bins]);
+                let rng  = &mut self.rng_state[channel];
+                apply_brownian(bins, rng, curves, temp, ctx.num_bins);
             }
         }
 

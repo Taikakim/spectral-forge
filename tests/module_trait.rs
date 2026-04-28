@@ -1097,3 +1097,62 @@ fn life_sandpaper_emits_sparks_to_higher_bins() {
     }
     for b in &bins { assert!(b.norm().is_finite()); }
 }
+
+#[test]
+fn life_brownian_drifts_with_temperature() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::Brownian);
+
+    let num_bins = 1025;
+    let bins_template: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(0.5, 0.0)).collect();
+
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+    physics.temperature[100] = 1.0;
+
+    let amount  = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext {
+        sample_rate:       48_000.0,
+        fft_size:          2048,
+        num_bins,
+        attack_ms:         10.0,
+        release_ms:        100.0,
+        sensitivity:       1.0,
+        suppression_width: 0.0,
+        auto_makeup:       false,
+        delta_monitor:     false,
+        unwrapped_phase:      None,
+        peaks:                None,
+        instantaneous_freq:   None,
+        chromagram:           None,
+        midi_notes:           None,
+        bpm:                  0.0,
+        beat_position:        0.0,
+        sidechain_derivative: None,
+        bin_physics:          Some(&physics),
+    };
+
+    let mut bins = bins_template.clone();
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    let drift_100 = (bins[100] - bins_template[100]).norm();
+    let drift_0   = (bins[0]   - bins_template[0]).norm();
+    assert!(drift_100 > 0.001, "Bin 100 did not drift (drift = {})", drift_100);
+    assert!(drift_0   < 1e-6,  "Bin 0 drifted despite temp=0 (drift = {})", drift_0);
+    for b in &bins { assert!(b.norm().is_finite()); }
+}
