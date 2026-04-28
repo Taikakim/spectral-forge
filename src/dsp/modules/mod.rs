@@ -174,6 +174,17 @@ pub struct ProbeSnapshot {
     pub pan_pct:       Option<f32>,
     pub sensitivity_pct: Option<f32>,
     pub peak_hold_ms:  Option<f32>,
+
+    // BinPhysics probe values — sampled at bin 100 (a non-edge mid-band bin).
+    // Populated in Phase 5 by writer modules (Life, Kinetics, etc.); Phase 3
+    // ships only the field shapes so calibration tests can compile against them.
+    pub bp_mass:            Option<f32>,
+    pub bp_temperature:     Option<f32>,
+    pub bp_flux:            Option<f32>,
+    pub bp_crystallization: Option<f32>,
+    pub bp_phase_momentum:  Option<f32>,
+    pub bp_slew:            Option<f32>,
+    pub bp_bias:            Option<f32>,
 }
 
 // ── SpectralModule trait ───────────────────────────────────────────────────

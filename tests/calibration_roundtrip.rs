@@ -1311,3 +1311,17 @@ fn circuit_crossover_distortion_mix_max_probes_100_pct() {
     let observed = probe.mix_pct.expect("circuit must probe mix_pct");
     assert!((observed - 100.0).abs() < 2.0, "CrossoverDistortion MIX=2.0 → 100%, got {}", observed);
 }
+
+#[test]
+fn bin_physics_round_trip_stub() {
+    // Phase 5 modules (Life, Kinetics) will fill this in:
+    //   1. Set the relevant curve to a known value.
+    //   2. Process one block.
+    //   3. Read back ProbeSnapshot.bp_mass / bp_temperature / etc.
+    //   4. Assert the value matches the curve→physical mapping.
+    //
+    // Phase 3 ships the probe slots only (the Option<f32> shapes on
+    // ProbeSnapshot). The stub keeps a test of the same name in CI so
+    // the Phase 5 implementer's first move is filling this in.
+    eprintln!("Phase 3 ships probe field shapes; Phase 5 fills in the round-trip.");
+}
