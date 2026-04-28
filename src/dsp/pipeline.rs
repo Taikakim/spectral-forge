@@ -88,6 +88,14 @@ pub struct Pipeline {
     rewrap_buf: Vec<Vec<f32>>,
     /// PLPV: mono scratch for the current hop's wrapped phase (filled per closure invocation).
     scratch_curr_phase: Vec<f32>,
+    /// PLPV: mono scratch for per-bin expected cumulative phase advance (per closure invocation).
+    scratch_expected: Vec<f32>,
+    /// PLPV: mono scratch for per-bin magnitudes used by low-energy phase damping.
+    scratch_mags: Vec<f32>,
+    /// PLPV: per-channel cumulative hop counter feeding `expected_phase = 2π·k·N·H/F`.
+    /// Each channel runs its own STFT closure call per hop, so they grow independently.
+    /// `u64` so this never overflows in any realistic session length.
+    total_hops_per_ch: [u64; 2],
     sample_rate: f32,
     num_channels: usize,
 }
@@ -132,6 +140,8 @@ impl Pipeline {
         let unwrapped_phase:      Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
         let rewrap_buf:           Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
         let scratch_curr_phase:   Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
+        let scratch_expected:     Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
+        let scratch_mags:         Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
 
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
@@ -156,6 +166,9 @@ impl Pipeline {
             unwrapped_phase,
             rewrap_buf,
             scratch_curr_phase,
+            scratch_expected,
+            scratch_mags,
+            total_hops_per_ch: [0; 2],
             sample_rate,
             fft_size,
             num_channels,
@@ -195,6 +208,9 @@ impl Pipeline {
         for v in &mut self.unwrapped_phase      { v.fill(0.0); }
         for v in &mut self.rewrap_buf           { v.fill(0.0); }
         self.scratch_curr_phase.fill(0.0);
+        self.scratch_expected.fill(0.0);
+        self.scratch_mags.fill(0.0);
+        self.total_hops_per_ch = [0; 2];
         self.fx_matrix.clear_state();
     }
 
@@ -234,6 +250,9 @@ impl Pipeline {
         for v in &mut self.unwrapped_phase      { v.fill(0.0); }
         for v in &mut self.rewrap_buf           { v.fill(0.0); }
         self.scratch_curr_phase.fill(0.0);
+        self.scratch_expected.fill(0.0);
+        self.scratch_mags.fill(0.0);
+        self.total_hops_per_ch = [0; 2];
         // Reset clears all amp-node state — preset load + FFT-size change both warm up from zero.
         self.fx_matrix.reset(sample_rate, fft_size);
     }
@@ -380,6 +399,7 @@ impl Pipeline {
         let delta_monitor = params.delta_monitor.value();
         let enable_heavy_modules = params.enable_heavy_modules.value();
         let plpv_enable = params.plpv_enable.value();
+        let plpv_phase_noise_floor_db = params.plpv_phase_noise_floor_db.smoothed.next_step(block_size);
         let stereo_link = params.stereo_link.value();
         let is_mid_side = stereo_link == StereoLink::MidSide;
 
@@ -587,6 +607,9 @@ impl Pipeline {
         let unwrapped_phase_ref      = &mut self.unwrapped_phase;
         let rewrap_buf_ref           = &mut self.rewrap_buf;
         let scratch_curr_phase_ref   = &mut self.scratch_curr_phase;
+        let scratch_expected_ref     = &mut self.scratch_expected;
+        let scratch_mags_ref         = &mut self.scratch_mags;
+        let total_hops_ref           = &mut self.total_hops_per_ch;
         // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
@@ -645,6 +668,28 @@ impl Pipeline {
                 // Roll prev_phase forward for the next hop.
                 prev_phase_ref[ch][..num_bins]
                     .copy_from_slice(&scratch_curr_phase_ref[..num_bins]);
+
+                // Phase 4.1.5: damp low-energy bins toward expected cumulative advance.
+                // Per-channel hop counter so two channels grow independently at the
+                // correct per-channel rate. Acceptable f32-precision loss after ~30 h.
+                let hop_total = total_hops_ref[ch] as f32;
+                let two_pi_hop_over_n = 2.0 * std::f32::consts::PI
+                    * (hop_size as f32) / (fft_size as f32);
+                for k in 0..num_bins {
+                    scratch_expected_ref[k] = two_pi_hop_over_n * (k as f32) * hop_total;
+                }
+                for k in 0..num_bins {
+                    scratch_mags_ref[k] = complex_buf[k].norm();
+                }
+                crate::dsp::plpv::damp_low_energy_bins(
+                    &mut unwrapped_phase_ref[ch][..num_bins],
+                    &scratch_mags_ref[..num_bins],
+                    &scratch_expected_ref[..num_bins],
+                    plpv_phase_noise_floor_db,
+                    num_bins,
+                );
+                total_hops_ref[ch] = total_hops_ref[ch].wrapping_add(1);
+
                 // Expose unwrapped phase to modules. Re-borrow via the rebound local so the
                 // closure does not need a second &mut self borrow.
                 hop_ctx.unwrapped_phase = Some(&unwrapped_phase_ref[ch][..num_bins]);

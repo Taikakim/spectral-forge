@@ -75,3 +75,44 @@ pub fn rewrap_phase(unwrapped: &[f32], wrapped_out: &mut [f32], num_bins: usize)
         wrapped_out[k] = principal_arg(unwrapped[k]);
     }
 }
+
+/// Damp the unwrapped phase of low-energy bins toward their expected-advance
+/// value, using a soft-sigmoid blend across a ±6 dB band centred on the
+/// noise floor. Avoids letting noise-dominated phase pollute downstream
+/// peak-relative math.
+///
+/// `mags` and `expected_phase` are length `>= num_bins`. The expected phase
+/// is the per-bin cumulative `2π · k · hop_total / fft_size` (caller-computed).
+/// `noise_floor_db` is the dB FS reference (typically -60.0).
+pub fn damp_low_energy_bins(
+    unwrapped:      &mut [f32],
+    mags:           &[f32],
+    expected_phase: &[f32],
+    noise_floor_db: f32,
+    num_bins:       usize,
+) {
+    debug_assert!(unwrapped.len()      >= num_bins);
+    debug_assert!(mags.len()           >= num_bins);
+    debug_assert!(expected_phase.len() >= num_bins);
+
+    let floor_lin    = 10.0_f32.powf(noise_floor_db / 20.0);
+    let band_lo      = floor_lin * 0.5_f32; // -6 dB below floor
+    let band_hi      = floor_lin * 2.0_f32; // +6 dB above floor
+    let band_inv_len = 1.0 / (band_hi - band_lo);
+
+    for k in 0..num_bins {
+        let m = mags[k];
+        let blend = if m <= band_lo {
+            1.0  // fully damped
+        } else if m >= band_hi {
+            0.0  // untouched
+        } else {
+            // Smoothstep across the ±6 dB band.
+            let t = ((band_hi - m) * band_inv_len).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        if blend > 0.0 {
+            unwrapped[k] = unwrapped[k] * (1.0 - blend) + expected_phase[k] * blend;
+        }
+    }
+}
