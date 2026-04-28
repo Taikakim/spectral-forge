@@ -15,7 +15,12 @@ use smallvec::SmallVec;
 
 use crate::dsp::bin_physics::BinPhysics;
 use crate::dsp::modules::{ModuleContext, ModuleType, SpectralModule};
-use crate::dsp::physics_helpers::{apply_energy_rise_hysteresis, smooth_curve_one_pole};
+use crate::dsp::physics_helpers::{
+    apply_energy_rise_hysteresis,
+    clamp_damping_floor,
+    clamp_for_cfl,
+    smooth_curve_one_pole,
+};
 use crate::params::{FxChannelTarget, StereoLink};
 
 // ── Enums ──────────────────────────────────────────────────────────────────
@@ -192,17 +197,104 @@ impl KineticsModule {
 
 impl KineticsModule {
     /// Hooke spring restoring force per bin. Reads dry mag from `self.dry_mag_scratch[channel]`.
-    /// Implemented in Task 5.
     #[allow(clippy::too_many_arguments)]
     fn apply_hooke(
         &mut self,
-        _channel: usize,
-        _bins: &mut [Complex<f32>],
-        _dt: f32,
-        _num_bins: usize,
+        channel: usize,
+        bins: &mut [Complex<f32>],
+        dt: f32,
+        num_bins: usize,
         _physics: Option<&BinPhysics>,
     ) {
-        // Implemented in Task 5.
+        // Curves (smoothed): 0=STRENGTH, 1=MASS, 2=REACH, 3=DAMPING, 4=MIX.
+        //   STRENGTH (omega in rad/s) : neutral=1 → 50 rad/s; range 0..max-CFL.
+        //   MASS                       : neutral=1 → 1.0; clamp to [0.1, 1000].
+        //   REACH (harmonic count)     : neutral=1 → 0 harmonic springs; up to 8 harmonics.
+        //   DAMPING                    : neutral=1 → 0.2; floored at 0.05.
+        //   MIX (wet/dry blend)        : neutral=1 → 0.5; range [0, 1].
+
+        // -- 1. Neighbour spring forces + sympathetic harmonic springs.
+        //    Split-field borrows: copy the read-only slices into locals before taking
+        //    &mut displacement / &mut velocity, which are distinct fields — the borrow
+        //    checker accepts this because no two borrows alias the same memory.
+        //
+        //    Two-pass approach to satisfy the borrow checker:
+        //      Pass A: read smoothed_curves + dry_mag_scratch, write displacement + velocity.
+        //      Pass B: read displacement + dry_mag_scratch, write bins.
+
+        // Copy the read-only data we need for pass A into fixed-size stack arrays would
+        // require knowing num_bins at compile time. Instead, copy the curve values per-bin
+        // inside the loop, reading via index (avoids holding a long-lived borrow on self).
+
+        // Pass A: Verlet integration — iterate bins, read curves by index, mutate velocity
+        // and displacement.
+        for k in 1..(num_bins - 1) {
+            let omega = clamp_for_cfl(50.0 * self.smoothed_curves[channel][0][k].max(0.0), dt);
+            let mass = self.smoothed_curves[channel][1][k].clamp(0.1, 1000.0);
+            let damping = clamp_damping_floor(0.2 * self.smoothed_curves[channel][3][k]);
+            let reach_val = self.smoothed_curves[channel][2][k];
+
+            let dry_k    = self.dry_mag_scratch[channel][k];
+            let dry_km1  = self.dry_mag_scratch[channel][k - 1];
+            let dry_kp1  = self.dry_mag_scratch[channel][k + 1];
+
+            let neighbour_avg = 0.5 * (dry_km1 + dry_kp1);
+            let mut f = -omega * omega * (dry_k - neighbour_avg);
+
+            // Sympathetic harmonic springs (cap = MAX_HARMONIC_SPRINGS).
+            let h_count = (reach_val.clamp(0.0, 2.0) * 4.0).round() as usize;
+            let h_count = h_count.min(MAX_HARMONIC_SPRINGS);
+            for h in 2..(2 + h_count) {
+                let kh = k.saturating_mul(h);
+                if kh >= num_bins - 1 {
+                    break;
+                }
+                let weight = 1.0 / h as f32;
+                f += -omega * omega * weight * (dry_k - self.dry_mag_scratch[channel][kh]);
+            }
+
+            let accel = (f - damping * self.velocity[channel][k]) / mass;
+            self.velocity[channel][k]     += accel * dt;
+            self.displacement[channel][k] += self.velocity[channel][k] * dt;
+
+            // Floor: magnitude cannot go below zero. When displacement would drive
+            // mag negative, clamp and zero velocity (absorb rather than reflect).
+            let floor = -dry_k;
+            if self.displacement[channel][k] < floor {
+                self.displacement[channel][k] = floor;
+                if self.velocity[channel][k] < 0.0 {
+                    self.velocity[channel][k] = 0.0;
+                }
+            }
+        }
+
+        // -- 2. Translate displacement → magnitude multiplier and blend with dry.
+        let max_mag = {
+            let mut m = 0.0_f32;
+            for k in 0..num_bins {
+                let v = self.dry_mag_scratch[channel][k];
+                if v > m { m = v; }
+            }
+            m
+        };
+        let cap = 4.0 * max_mag.max(1e-6);
+
+        for k in 0..num_bins {
+            let mix = self.smoothed_curves[channel][4][k].clamp(0.0, 1.0);
+            let dry_k = self.dry_mag_scratch[channel][k];
+            let new_mag = (dry_k + self.displacement[channel][k]).clamp(0.0, cap);
+            if dry_k > 1e-9 {
+                let scale = new_mag / dry_k;
+                let wet_re = bins[k].re * scale;
+                let wet_im = bins[k].im * scale;
+                bins[k].re = bins[k].re * (1.0 - mix) + wet_re * mix;
+                bins[k].im = bins[k].im * (1.0 - mix) + wet_im * mix;
+            } else if new_mag > 1e-9 {
+                // Inject displaced energy into a previously-silent bin as a real-valued tone.
+                bins[k].re = bins[k].re * (1.0 - mix) + new_mag * mix;
+                bins[k].im = bins[k].im * (1.0 - mix);
+            }
+        }
     }
 
     /// Gravity-well attraction toward static/sidechain/MIDI well positions. Implemented in Task 6.
@@ -445,7 +537,11 @@ impl SpectralModule for KineticsModule {
             self.kepe_rose_last_hop[ch].resize(num_bins, false);
             for c in 0..5 {
                 self.smoothed_curves[ch][c].clear();
-                self.smoothed_curves[ch][c].resize(num_bins, 1.0);
+                // MIX (curve 4) initialises to 0.0 so a cold-start with MIX curve=0
+                // gives exact passthrough immediately. Physical params (0-3) initialise
+                // to 1.0 (the neutral value for STRENGTH, MASS, REACH, DAMPING).
+                let init = if c == 4 { 0.0 } else { 1.0 };
+                self.smoothed_curves[ch][c].resize(num_bins, init);
             }
             self.tuning_forks[ch].clear();
             self.sc_env_smoothed[ch] = 0.0;

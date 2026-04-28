@@ -1496,3 +1496,45 @@ fn kinetics_verlet_stays_bounded_under_unit_impulse() {
     assert!(max_mag < 100.0,
         "Energy escaped integrator (max_mag = {})", max_mag);
 }
+
+#[test]
+fn kinetics_hooke_diffuses_energy_via_springs() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::Hooke);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0); // Tone at bin 100.
+    let dry_total: f32 = bins.iter().map(|b| b.norm_sqr()).sum();
+
+    // STRENGTH=2 (max), MASS=1, REACH=1, DAMPING=1 (-> floored 0.05+), MIX=2 (full wet)
+    let strength = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    for _ in 0..30 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+
+    let neighbour_energy: f32 = (95..=105).filter(|&k| k != 100)
+        .map(|k| bins[k].norm_sqr()).sum();
+    assert!(neighbour_energy > 0.001 * dry_total,
+        "Hooke springs did not couple neighbours (neighbour_energy = {} < 0.001 * dry_total = {})",
+        neighbour_energy, dry_total);
+
+    for b in &bins { assert!(b.norm().is_finite()); }
+}
