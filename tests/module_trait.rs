@@ -738,8 +738,12 @@ fn life_archimedes_ducks_under_loud_volume() {
 
     let wet_total: f32 = bins.iter().map(|b| b.norm()).sum();
 
-    assert!(wet_total < dry_total * 0.95,
-        "Archimedes did not duck (dry={}, wet={})", dry_total, wet_total);
+    // Expected: capacity = 1025 * 0.25 = 256.25; overflow_ratio ≈ 3.0; duck_factor
+    // floors at DUCK_FLOOR = 0.05. With full mix, wet ≈ 0.05 × dry. Allow generous
+    // headroom against the floor (0.5×) so the assert catches trivial regressions
+    // without being brittle to floor tweaks.
+    assert!(wet_total < dry_total * 0.5,
+        "Archimedes did not duck enough (dry={}, wet={})", dry_total, wet_total);
 
     for b in &bins {
         assert!(b.norm().is_finite());

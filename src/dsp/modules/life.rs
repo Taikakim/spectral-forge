@@ -39,6 +39,16 @@ const SURFACE_TENSION_AMT_MAX: f32 = 0.05;
 /// Surface Tension max reach in bins. Curve range maps `[0, 2]` → `[0, 8]`.
 const SURFACE_TENSION_REACH_MAX: i32 = 8;
 
+/// Archimedes — minimum residual signal kept after ducking (5%). Even at max
+/// overflow × max amount, the wet path keeps at least this fraction of the dry
+/// signal, so an out-of-control overflow can never null the bus.
+const ARCHIMEDES_DUCK_FLOOR: f32 = 0.05;
+
+/// Archimedes — guard against zero-capacity divide. If `avg_thresh` collapses
+/// to 0, capacity floors here (much looser than VISCOSITY's 1e-12 because this
+/// guards a divisor in the *transport ratio*, not a magnitude comparison).
+const ARCHIMEDES_CAPACITY_FLOOR: f32 = 1e-6;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,6 +332,10 @@ fn apply_archimedes(
     curves: &[&[f32]],
     num_bins: usize,
 ) {
+    if num_bins == 0 {
+        return;
+    }
+
     let amount_c = curves[0];
     let thresh_c = curves[1];
     let mix_c    = curves[4];
@@ -338,11 +352,11 @@ fn apply_archimedes(
         sum_thresh += thresh_c[k];
     }
     let avg_amt    = (sum_amt    / num_bins as f32 * 0.5).clamp(0.0, 1.0);
-    let avg_thresh = (sum_thresh / num_bins as f32 * 0.5).clamp(0.0, 2.0);
+    let avg_thresh = (sum_thresh / num_bins as f32 * 0.5).clamp(0.0, 1.0);
 
-    let capacity       = (num_bins as f32 * avg_thresh).max(1e-6);
+    let capacity       = (num_bins as f32 * avg_thresh).max(ARCHIMEDES_CAPACITY_FLOOR);
     let overflow_ratio = (total_mag / capacity - 1.0).max(0.0);
-    let duck_factor    = 1.0 - (overflow_ratio * avg_amt).min(0.95);
+    let duck_factor    = 1.0 - (overflow_ratio * avg_amt).min(1.0 - ARCHIMEDES_DUCK_FLOOR);
 
     for k in 0..num_bins {
         let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
