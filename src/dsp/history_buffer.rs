@@ -36,6 +36,7 @@ pub struct HistoryBuffer {
 }
 
 #[derive(Default)]
+#[allow(dead_code)] // Task 4 (lazy summary stats) populates these.
 struct SummaryCache {
     decay_estimate_valid: bool,
     rms_envelope_valid:   bool,
@@ -137,7 +138,7 @@ impl HistoryBuffer {
     pub fn reset(&mut self) {
         for ch in &mut self.frames {
             for frame in ch {
-                for c in frame { *c = Complex::new(0.0, 0.0); }
+                frame.fill(Complex::new(0.0, 0.0));
             }
         }
         self.write_pos = 0;
