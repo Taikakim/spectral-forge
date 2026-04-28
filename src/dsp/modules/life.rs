@@ -837,4 +837,8 @@ impl SpectralModule for LifeModule {
     fn num_curves(&self) -> usize {
         5
     }
+
+    fn set_life_mode(&mut self, mode: LifeMode) {
+        self.set_mode(mode);
+    }
 }

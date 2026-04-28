@@ -4,6 +4,7 @@ use crate::dsp::modules::{
     create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
 };
 use crate::dsp::modules::circuit::CircuitMode;
+use crate::dsp::modules::life::LifeMode;
 use crate::dsp::modules::geometry::GeometryMode;
 use crate::dsp::modules::modulate::ModulateMode;
 use crate::dsp::modules::punch::PunchMode;
@@ -284,6 +285,16 @@ impl FxMatrix {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_circuit_mode(modes[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot LifeMode from params to LifeModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_life_modes(&mut self, modes: &[LifeMode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_life_mode(modes[s]);
             }
         }
     }
