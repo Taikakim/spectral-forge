@@ -1536,5 +1536,17 @@ fn kinetics_hooke_diffuses_energy_via_springs() {
         "Hooke springs did not couple neighbours (neighbour_energy = {} < 0.001 * dry_total = {})",
         neighbour_energy, dry_total);
 
+    // Harmonic coupling acts via the source bin's force; net wet output at harmonic bins
+    // comes from the linear-chain ripple. Verify energy spreads beyond the immediate
+    // neighbourhood without the integrator blowing up.
+    // NOTE: This does NOT prove direct write-back into harmonic bins — that requires the
+    // TuningFork kernel (Task 11). It only checks that the chain dynamics are working
+    // over a non-trivial range.
+    let wide_window_energy: f32 = (50..=150).filter(|&k| k != 100)
+        .map(|k| bins[k].norm_sqr()).sum();
+    assert!(wide_window_energy.is_finite() && wide_window_energy > neighbour_energy,
+        "Spring chain energy should diffuse beyond ±5 bins (wide={}, neighbour={})",
+        wide_window_energy, neighbour_energy);
+
     for b in &bins { assert!(b.norm().is_finite()); }
 }

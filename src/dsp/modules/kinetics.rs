@@ -214,29 +214,31 @@ impl KineticsModule {
         //   MIX (wet/dry blend)        : neutral=1 → 0.5; range [0, 1].
 
         // -- 1. Neighbour spring forces + sympathetic harmonic springs.
-        //    Split-field borrows: copy the read-only slices into locals before taking
-        //    &mut displacement / &mut velocity, which are distinct fields — the borrow
-        //    checker accepts this because no two borrows alias the same memory.
-        //
         //    Two-pass approach to satisfy the borrow checker:
         //      Pass A: read smoothed_curves + dry_mag_scratch, write displacement + velocity.
         //      Pass B: read displacement + dry_mag_scratch, write bins.
 
-        // Copy the read-only data we need for pass A into fixed-size stack arrays would
-        // require knowing num_bins at compile time. Instead, copy the curve values per-bin
-        // inside the loop, reading via index (avoids holding a long-lived borrow on self).
+        // Bind disjoint-field borrows so the inner loop sees flat slice references,
+        // not three-level indexes through self.
+        let s_strength = &self.smoothed_curves[channel][0][..num_bins];
+        let s_mass     = &self.smoothed_curves[channel][1][..num_bins];
+        let s_reach    = &self.smoothed_curves[channel][2][..num_bins];
+        let s_damping  = &self.smoothed_curves[channel][3][..num_bins];
+        let s_dry      = &self.dry_mag_scratch[channel][..num_bins];
+        let velocity     = &mut self.velocity[channel][..num_bins];
+        let displacement = &mut self.displacement[channel][..num_bins];
 
-        // Pass A: Verlet integration — iterate bins, read curves by index, mutate velocity
+        // Pass A: Verlet integration — iterate bins, read curves by slice ref, mutate velocity
         // and displacement.
         for k in 1..(num_bins - 1) {
-            let omega = clamp_for_cfl(50.0 * self.smoothed_curves[channel][0][k].max(0.0), dt);
-            let mass = self.smoothed_curves[channel][1][k].clamp(0.1, 1000.0);
-            let damping = clamp_damping_floor(0.2 * self.smoothed_curves[channel][3][k]);
-            let reach_val = self.smoothed_curves[channel][2][k];
+            let omega   = clamp_for_cfl(50.0 * s_strength[k].max(0.0), dt);
+            let mass    = s_mass[k].clamp(0.1, 1000.0);
+            let damping = clamp_damping_floor(0.2 * s_damping[k]);
+            let reach_val = s_reach[k];
 
-            let dry_k    = self.dry_mag_scratch[channel][k];
-            let dry_km1  = self.dry_mag_scratch[channel][k - 1];
-            let dry_kp1  = self.dry_mag_scratch[channel][k + 1];
+            let dry_k   = s_dry[k];
+            let dry_km1 = s_dry[k - 1];
+            let dry_kp1 = s_dry[k + 1];
 
             let neighbour_avg = 0.5 * (dry_km1 + dry_kp1);
             let mut f = -omega * omega * (dry_k - neighbour_avg);
@@ -246,24 +248,22 @@ impl KineticsModule {
             let h_count = h_count.min(MAX_HARMONIC_SPRINGS);
             for h in 2..(2 + h_count) {
                 let kh = k.saturating_mul(h);
-                if kh >= num_bins - 1 {
-                    break;
-                }
+                if kh >= num_bins - 1 { break; }
                 let weight = 1.0 / h as f32;
-                f += -omega * omega * weight * (dry_k - self.dry_mag_scratch[channel][kh]);
+                f += -omega * omega * weight * (dry_k - s_dry[kh]);
             }
 
-            let accel = (f - damping * self.velocity[channel][k]) / mass;
-            self.velocity[channel][k]     += accel * dt;
-            self.displacement[channel][k] += self.velocity[channel][k] * dt;
+            let accel = (f - damping * velocity[k]) / mass;
+            velocity[k]     += accel * dt;
+            displacement[k] += velocity[k] * dt;
 
             // Floor: magnitude cannot go below zero. When displacement would drive
             // mag negative, clamp and zero velocity (absorb rather than reflect).
             let floor = -dry_k;
-            if self.displacement[channel][k] < floor {
-                self.displacement[channel][k] = floor;
-                if self.velocity[channel][k] < 0.0 {
-                    self.velocity[channel][k] = 0.0;
+            if displacement[k] < floor {
+                displacement[k] = floor;
+                if velocity[k] < 0.0 {
+                    velocity[k] = 0.0;
                 }
             }
         }
@@ -279,6 +279,8 @@ impl KineticsModule {
         };
         let cap = 4.0 * max_mag.max(1e-6);
 
+        // Pass A skips k=0 (DC) and k=num_bins-1 (Nyquist) — their displacement stays zero,
+        // so the wet path here reduces to identity for those bins. Intentional.
         for k in 0..num_bins {
             let mix = self.smoothed_curves[channel][4][k].clamp(0.0, 1.0);
             let dry_k = self.dry_mag_scratch[channel][k];
