@@ -216,6 +216,14 @@ pub struct ProbeSnapshot {
     pub past_active_mode_idx:      Option<u8>,
     pub past_history_frames_used:  Option<u32>,
     pub past_sort_key_idx:         Option<u8>,
+
+    // Kinetics module probes — populated by KineticsModule::process() under cfg(probe).
+    pub kinetics_strength:        Option<f32>,
+    pub kinetics_mass:            Option<f32>,
+    pub kinetics_displacement:    Option<f32>,
+    pub kinetics_velocity:        Option<f32>,
+    pub kinetics_active_mode_idx: Option<u8>,
+    pub kinetics_well_count:      Option<u16>,
 }
 
 // ── SpectralModule trait ───────────────────────────────────────────────────
@@ -290,6 +298,13 @@ pub trait SpectralModule: Send {
     fn set_past_mode(&mut self, _: crate::dsp::modules::past::PastMode) {}
     /// Update Past Decay-Sorter sort key. No-op for non-Past modules.
     fn set_past_sort_key(&mut self, _: crate::dsp::modules::past::SortKey) {}
+
+    /// Update the operating mode for Kinetics modules. Default no-op for all other types.
+    fn set_kinetics_mode(&mut self, _: crate::dsp::modules::kinetics::KineticsMode) {}
+    /// Update the WellSource for Kinetics-GravityWell mode. Default no-op for all other types.
+    fn set_kinetics_well_source(&mut self, _: crate::dsp::modules::kinetics::WellSource) {}
+    /// Update the MassSource for Kinetics-InertialMass mode. Default no-op for all other types.
+    fn set_kinetics_mass_source(&mut self, _: crate::dsp::modules::kinetics::MassSource) {}
 
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
@@ -691,8 +706,7 @@ pub fn create_module(
         ModuleType::Circuit                => Box::new(circuit::CircuitModule::new()),
         ModuleType::Life   => Box::new(life::LifeModule::new()),
         ModuleType::Past   => Box::new(past::PastModule::new(sample_rate, fft_size)),
-        // TODO(5b3.3): replace with KineticsModule::new() once the real module lands in Task 3.
-        ModuleType::Kinetics => Box::new(master::EmptyModule),
+        ModuleType::Kinetics => Box::new(kinetics::KineticsModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -739,3 +753,4 @@ pub use circuit::CircuitMode;
 pub mod life;
 pub use life::LifeMode;
 pub mod past;
+pub mod kinetics;

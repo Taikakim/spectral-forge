@@ -1390,3 +1390,48 @@ fn kinetics_module_spec_present() {
     assert!(!spec.wants_sidechain, "Kinetics opt-in via mode/source");
     assert!(spec.writes_bin_physics, "Kinetics writes mass/displacement/velocity/temperature/phase_momentum");
 }
+
+#[test]
+fn kinetics_module_constructs_and_passes_through() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{create_module, ModuleType, ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = create_module(ModuleType::Kinetics, 48_000.0, 2048);
+    assert_eq!(module.module_type(), ModuleType::Kinetics);
+    assert_eq!(module.num_curves(), 5);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new((k as f32 * 0.013).sin(), (k as f32 * 0.011).cos()))
+        .collect();
+    let dry: Vec<Complex<f32>> = bins.clone();
+
+    // STRENGTH=neutral=1, MASS=neutral=1, REACH=neutral=1, DAMPING=neutral=1, MIX=0 (dry only) → passthrough
+    let neutral = vec![1.0_f32; num_bins];
+    let zero    = vec![0.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&neutral, &neutral, &neutral, &neutral, &zero];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(
+        0,
+        StereoLink::Linked,
+        FxChannelTarget::All,
+        &mut bins,
+        None,
+        &curves,
+        &mut suppression,
+        None,
+        &ctx,
+    );
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-5, "bin {} drifted by {} (passthrough expected at MIX=0)", k, diff);
+    }
+    for s in &suppression {
+        assert!(s.is_finite() && *s >= 0.0);
+    }
+}
