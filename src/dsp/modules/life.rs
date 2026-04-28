@@ -366,6 +366,48 @@ fn apply_archimedes(
     }
 }
 
+/// Oobleck — solidifies under fast amplitude changes (large velocity), passes
+/// slow changes freely. Reads `BinPhysics.velocity` (auto-computed by Pipeline).
+/// Writes `BinPhysics.displacement` so downstream Stiction/Yield can react.
+fn apply_non_newtonian(
+    bins: &mut [Complex<f32>],
+    curves: &[&[f32]],
+    velocity: Option<&[f32]>,
+    physics_out: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let mix_c    = curves[4];
+
+    for k in 0..num_bins {
+        let v = velocity.map(|vs| vs[k]).unwrap_or(0.0);
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
+        let amt    = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+
+        if v > thresh {
+            let excess  = v - thresh;
+            let mag_old = bins[k].norm();
+            let limit   = (mag_old - excess * amt).max(0.0);
+            let scale   = if mag_old > 1e-9 { limit / mag_old } else { 0.0 };
+            let mix     = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+            let dry     = bins[k];
+            let wet     = bins[k] * scale;
+            bins[k]     = dry * (1.0 - mix) + wet * mix;
+        }
+    }
+
+    if let Some(p) = physics_out {
+        for k in 0..num_bins {
+            let v      = velocity.map(|vs| vs[k]).unwrap_or(0.0);
+            let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
+            if v > thresh {
+                p.displacement[k] = (p.displacement[k] + (v - thresh)).min(10.0);
+            }
+        }
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -402,9 +444,13 @@ impl SpectralModule for LifeModule {
                 let _ = physics;
                 apply_archimedes(bins, curves, ctx.num_bins);
             }
+            LifeMode::NonNewtonian => {
+                let velocity = ctx.bin_physics.map(|bp| &bp.velocity[..ctx.num_bins]);
+                apply_non_newtonian(bins, curves, velocity, physics, ctx.num_bins);
+            }
             _ => {
                 let _ = physics;
-                // Filled in Tasks 7–12.
+                // Filled in Tasks 8–12.
             }
         }
 

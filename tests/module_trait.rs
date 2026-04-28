@@ -749,3 +749,77 @@ fn life_archimedes_ducks_under_loud_volume() {
         assert!(b.norm().is_finite());
     }
 }
+
+#[test]
+fn life_non_newtonian_limits_fast_transients() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::NonNewtonian);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0); // Loud transient
+
+    // Read-side physics: pre-populated velocity so the kernel sees a fast transient.
+    let mut physics_read = BinPhysics::new();
+    physics_read.reset_active(num_bins, 48_000.0, 2048);
+    physics_read.velocity[100] = 1.5;
+
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.5_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+
+    // Write-side physics: module writes displacement into this.
+    let mut physics_write = BinPhysics::new();
+    physics_write.reset_active(num_bins, 48_000.0, 2048);
+
+    // ModuleContext has no with_bin_physics builder — use struct literal so we
+    // can set bin_physics: Some(&physics_read) directly.
+    let ctx = ModuleContext {
+        sample_rate:       48_000.0,
+        fft_size:          2048,
+        num_bins,
+        attack_ms:         10.0,
+        release_ms:        100.0,
+        sensitivity:       1.0,
+        suppression_width: 0.0,
+        auto_makeup:       false,
+        delta_monitor:     false,
+        unwrapped_phase:      None,
+        peaks:                None,
+        instantaneous_freq:   None,
+        chromagram:           None,
+        midi_notes:           None,
+        bpm:                  0.0,
+        beat_position:        0.0,
+        sidechain_derivative: None,
+        bin_physics:          Some(&physics_read),
+    };
+
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, Some(&mut physics_write), &ctx,
+    );
+
+    assert!(bins[100].norm() < 2.0,
+        "Non-Newtonian did not limit transient (mag = {})", bins[100].norm());
+    assert!(bins[0].norm() < 1e-6,
+        "Silent bin 0 was touched (mag = {})", bins[0].norm());
+    assert!(physics_write.displacement[100] > 0.0,
+        "Non-Newtonian did not write displacement (displacement[100] = {})",
+        physics_write.displacement[100]);
+
+    for b in &bins {
+        assert!(b.norm().is_finite());
+    }
+}
