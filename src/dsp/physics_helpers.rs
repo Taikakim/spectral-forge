@@ -4,23 +4,23 @@
 //! buffer is mutated in place. See `ideas/next-gen-modules/12-kinetics.md` § "Research
 //! findings (2026-04-26)" for the numerical-stability rationale.
 
-/// One-pole low-pass smoother applied per-bin. Coefficient is derived from
+/// One-pole low-pass smoother applied per-bin. The fixed coefficient pins
 /// `tau = 4 * dt` (research finding 3 — slow enough to suppress hop-rate Mathieu
-/// pumping but fast enough to track user gestures within ~50 ms at 44.1 kHz/hop=512).
+/// pumping, fast enough to track user gestures within ~50 ms at 44.1 kHz/hop=512).
+/// `dt` is currently unused — kept on the signature so callers wanting `tau != 4*dt`
+/// can be retrofitted without a public API change.
 ///
 /// Both slices must have the same length. Mutates `state` in place.
 #[inline]
 pub fn smooth_curve_one_pole(state: &mut [f32], input: &[f32], dt: f32) {
     debug_assert_eq!(state.len(), input.len());
-    // tau = 4*dt -> dt/tau = 0.25 -> alpha = 1 - exp(-0.25) ≈ 0.2212.
-    // Compute once instead of per-bin (avoids exp() in tight loop).
-    let alpha = 1.0_f32 - (-0.25_f32).exp();
+    // Hand-evaluated `1 - exp(-0.25)` so the constant is searchable, const-fold-friendly,
+    // and the branch is honest about what tau the function actually uses.
+    const ALPHA_TAU4: f32 = 0.221_199_22_f32;
     for k in 0..state.len() {
         let s = state[k];
-        state[k] = s + alpha * (input[k] - s);
+        state[k] = s + ALPHA_TAU4 * (input[k] - s);
     }
-    // dt is a parameter for forward compatibility — if a caller wants tau != 4*dt
-    // in the future we can swap to: alpha = 1 - exp(-dt / tau).
     let _ = dt;
 }
 
@@ -34,8 +34,7 @@ pub fn clamp_for_cfl(omega: f32, dt: f32) -> f32 {
     if omega <= 0.0 {
         return 0.0;
     }
-    let cap = 1.5_f32 / dt;
-    if omega > cap { cap } else { omega }
+    omega.min(1.5_f32 / dt)
 }
 
 /// Enforce the per-bin viscous-damping floor of 0.05 (research finding 4).
@@ -43,7 +42,7 @@ pub fn clamp_for_cfl(omega: f32, dt: f32) -> f32 {
 /// within the CFL bound.
 #[inline]
 pub fn clamp_damping_floor(damping: f32) -> f32 {
-    if damping < 0.05 { 0.05 } else { damping }
+    damping.max(0.05_f32)
 }
 
 /// Energy-rise hysteresis safety net (research finding 5). For each bin, if
@@ -62,6 +61,9 @@ pub fn apply_energy_rise_hysteresis(
     debug_assert_eq!(velocity.len(), prev_kepe.len());
     debug_assert_eq!(velocity.len(), curr_kepe.len());
     debug_assert_eq!(velocity.len(), rose_last.len());
+    // TODO(finding-5): branch-free SIMD compare path is the v2 target. v1 ships scalar
+    // because the predicate is two `bool`s and the compiler already auto-vectorises
+    // the multiply when the branch predictor is right.
     let inv_sqrt2 = 1.0_f32 / 2.0_f32.sqrt();
     for k in 0..velocity.len() {
         let doubled = curr_kepe[k] > 2.0 * prev_kepe[k];
