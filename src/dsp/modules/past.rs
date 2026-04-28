@@ -182,11 +182,12 @@ impl PastModule {
             let bin_amount = amount.get(k).copied().unwrap_or(0.0);
             let cryst_bias = cryst.and_then(|c| c.get(k).copied()).unwrap_or(0.0);
             let effective_amount = (bin_amount + cryst_bias).clamp(0.0, 1.0);
-            let mag = bins[k].norm();
+            let mag_sq = bins[k].norm_sqr();
             let thr = threshold.get(k).copied().unwrap_or(0.0);
-            if mag < thr { continue; }
+            if mag_sq < thr * thr { continue; }
             let age = (time.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0) * max_age).round() as usize;
             let frame = match hist.read_frame(ch, age) { Some(f) => f, None => continue };
+            if k >= frame.len() { continue; }
             let val = if spread.get(k).copied().unwrap_or(0.0) > 0.5 && k > 0 && k + 1 < frame.len() {
                 (frame[k - 1] + frame[k] + frame[k + 1]) * (1.0 / 3.0)
             } else {
