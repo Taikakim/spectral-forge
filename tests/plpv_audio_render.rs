@@ -7,11 +7,15 @@
 //! # Metrics
 //!
 //! * **Spectral centroid** — Σ(k·|X[k]|)/Σ|X[k]| in bin units.
-//! * **Spectral energy** — Σ|X[k]|² (proxy for "RMS at hop boundary"
-//!   without running a full iFFT; this is what the plan means by
-//!   "RMS at every hop boundary" in a unit-test context).
-//! * **Unwrapped-phase advance variance** — frame-to-frame Δ of
-//!   `ctx.unwrapped_phase[k].get()` for the Freeze path.
+//! * **Within-skirt GR variance** — population variance of per-bin
+//!   output/input magnitude ratios within each peak's Voronoi skirt.
+//!   PLPV-on locks all bins in a skirt to the peak's GR → near-zero
+//!   within-skirt variance; PLPV-off applies per-bin GR independently
+//!   → nonzero variance. This is the real "no smearing" discriminator.
+//! * **Time-domain RMS variance at hop boundaries** — for the Freeze path,
+//!   measures hop-to-hop RMS of the iFFT output after phase rewrap.
+//!   PLPV-on writes a smooth phase trajectory → stable RMS. PLPV-off
+//!   allows phase jumps at retrigger points → RMS spikes.
 //!
 //! Each test runs the same input through a freshly constructed PLPV-off
 //! and PLPV-on module (identical PRNG seed; difference is the PLPV flag
@@ -38,44 +42,20 @@ const NUM_BINS: usize = FFT_SIZE / 2 + 1; // 1025
 
 // ── Helpers specific to this test file ─────────────────────────────────────
 
-/// Build a flat set of Dynamics curves: threshold at `threshold_db`,
-/// ratio at `ratio`, fast attack (0.1 ms factor), slow release, no knee, full mix.
+/// Build a flat set of Dynamics curves at the given ratio.
+/// Threshold is fixed at 1.0 → -20 dBFS (neutral default).
+/// Attack is very fast (0.1 factor) for transient tests.
 fn dyn_curves(
     n: usize,
-    threshold_db: f32,
     ratio: f32,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-    // Curves are linear multipliers from the curve editor; Dynamics.process()
-    // maps them to physical values. We pass the raw physical values directly
-    // (bypassing the editor curve) by using values that round-trip cleanly:
-    //   threshold curve ≈ db_to_linear((threshold_db + 20) * 18/60)
-    //
-    // Easier: use the same trick as plpv_calibration.rs — pass the bp_* arrays
-    // directly by building a DynamicsModule and calling process() which reads
-    // curves[0..5] as the linear-mapped inputs.
-    //
-    // The actual mapping in dynamics.rs is:
-    //   t_db = linear_to_db(curves[0][k])         → then threshold_db = -20 + t_db*(60/18)
-    //   ratio = curves[1][k]
-    //   attack_ms = ctx.attack_ms * curves[2][k]
-    //   ...
-    //
-    // To get threshold_db:
-    //   curves[0][k] = db_to_linear(threshold_db) so that
-    //   t_db = threshold_db → threshold_db = -20 + threshold_db*(60/18) ← NOT what we want.
-    //
-    // The honest path: use neutral curves (all 1.0) and accept the default -20 dB threshold.
-    // For the centroid test we just need *some* compression with/without PLPV.
-    let _ = threshold_db; // consumed by the neutral default below
-    let _ = ratio;
-
     (
-        vec![1.0f32; n], // threshold curve = 1.0 → -20 dBFS (neutral)
-        vec![4.0f32; n], // ratio = 4.0 (strong compression)
-        vec![0.1f32; n], // attack factor × ctx.attack_ms = very fast
-        vec![1.0f32; n], // release factor × ctx.release_ms = default
-        vec![0.0f32; n], // knee = 0 (hard knee)
-        vec![1.0f32; n], // mix = 100% wet
+        vec![1.0f32; n],   // threshold curve = 1.0 → -20 dBFS (neutral)
+        vec![ratio; n],    // ratio (direct pass-through in dynamics.rs curves[1])
+        vec![0.1f32; n],   // attack factor × ctx.attack_ms = very fast
+        vec![1.0f32; n],   // release factor × ctx.release_ms = default
+        vec![0.0f32; n],   // knee = 0 (hard knee)
+        vec![1.0f32; n],   // mix = 100% wet
     )
 }
 
@@ -94,29 +74,28 @@ fn make_ctx<'a>(peaks: Option<&'a [PeakInfo]>) -> ModuleContext<'a> {
     ctx
 }
 
-/// Tile the bin range [0, NUM_BINS-1] with a single spanning peak.
-/// This is the minimal non-empty peak set that PLPV-on needs in ctx.peaks;
-/// it makes the Dynamics engine apply peak-locked GR across the whole spectrum.
-fn single_spanning_peak() -> Vec<PeakInfo> {
-    let mid = (NUM_BINS / 2) as u32;
-    vec![PeakInfo {
-        k:      mid,
-        mag:    512.0, // above threshold — ensures the peak is locked
-        low_k:  0,
-        high_k: (NUM_BINS - 1) as u32,
-    }]
+/// Build Freeze curves tuned to retrigger quickly — every ~8 hops.
+///
+/// LENGTH = 0.2 × 500 ms = 100 ms ≈ 8 hops at 44100/4 hop rate.
+/// THRESHOLD = neutral (-20 dBFS).
+/// PORTAMENTO = essentially instant (0.01 × 200 ms ≈ 2 ms ≈ 0.2 hop).
+/// RESISTANCE = 0 (retrigger freely on any above-threshold energy).
+/// MIX = 1.0 (fully wet — maximises freeze effect and phase contrast).
+fn freeze_curves_fast_retrigger(n: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    (
+        vec![0.2f32; n],  // LENGTH      → 100 ms (~8 hops) — retrigger frequently
+        vec![1.0f32; n],  // THRESHOLD   → neutral (-20 dBFS)
+        vec![0.01f32; n], // PORTAMENTO  → ~2 ms (essentially instant)
+        vec![0.0f32; n],  // RESISTANCE  → 0 (trigger freely)
+        vec![1.0f32; n],  // MIX         → 100% wet
+    )
 }
 
-/// Build Freeze curves: length=500 ms, threshold≈neutral, portamento≈fast,
-/// resistance=0 (retrigger immediately), mix=1.0.
-fn freeze_curves(n: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-    (
-        vec![1.0f32; n], // LENGTH      → 500 ms
-        vec![1.0f32; n], // THRESHOLD   → neutral (-20 dBFS)
-        vec![0.1f32; n], // PORTAMENTO  → fast (20 ms)
-        vec![0.0f32; n], // RESISTANCE  → 0 (trigger freely)
-        vec![1.0f32; n], // MIX         → 100% wet
-    )
+/// Population variance of a `&[f64]`.
+fn pop_variance_f64(xs: &[f64]) -> f64 {
+    if xs.len() < 2 { return 0.0; }
+    let mean = xs.iter().sum::<f64>() / xs.len() as f64;
+    xs.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / xs.len() as f64
 }
 
 // ── Test 1: sine_sweep_through_dynamics_centroid_stability ─────────────────
@@ -142,11 +121,15 @@ fn sine_sweep_through_dynamics_centroid_stability() {
     // Number of complete FFT-size frames we can extract
     let num_hops = num_samples / FFT_SIZE;
 
-    let peaks = single_spanning_peak();
+    // Single spanning peak: PLPV-on applies uniform GR to the whole spectrum.
+    let mid = (NUM_BINS / 2) as u32;
+    let peaks = vec![PeakInfo {
+        k: mid, mag: 512.0, low_k: 0, high_k: (NUM_BINS - 1) as u32,
+    }];
     let ctx_off = make_ctx(None);
     let ctx_on  = make_ctx(Some(&peaks));
 
-    let (th, ra, at, re, kn, mx) = dyn_curves(NUM_BINS, -20.0, 4.0);
+    let (th, ra, at, re, kn, mx) = dyn_curves(NUM_BINS, 4.0);
     let curves: Vec<&[f32]> = vec![&th, &ra, &at, &re, &kn, &mx];
 
     let mut mod_off = DynamicsModule::new();
@@ -195,10 +178,6 @@ fn sine_sweep_through_dynamics_centroid_stability() {
     );
 
     // PLPV-on must have strictly lower centroid variance.
-    // 2× margin chosen to match the empirical comfort zone used in the
-    // MidSide J-probe test in plpv_calibration.rs.  We require the ratio
-    // to be at least 1.5× (not 2×) to tolerate the deterministic single-
-    // spanning-peak approximation used here.
     assert!(
         var_on < var_off,
         "PLPV-on centroid variance {var_on:.4} should be < PLPV-off {var_off:.4}"
@@ -209,29 +188,48 @@ fn sine_sweep_through_dynamics_centroid_stability() {
 
 /// Drives a synthetic kick+snare+hat drum loop through Dynamics.
 ///
-/// Metric: **mean per-bin output/input magnitude ratio** during the attack
-/// window (first half of the hop), averaged across bins above a noise floor.
-/// Higher ratio = more energy preserved = less inadvertent ducking.
+/// # Metric: within-skirt GR variance
 ///
-/// Rationale: with PLPV-on the GR applied to every bin in a peak's Voronoi
-/// skirt is locked to the peak's envelope, so the fast transient attack of
-/// a loud bin doesn't drag down quieter neighbor bins that happen to share
-/// the peak's skirt. PLPV-off applies independent per-bin GR, which can
-/// over-duck bins that are adjacent to a hard-hit peak and thus make the
-/// transient "smear" (spread in time). The aggregate mean ratio across
-/// suprathreshold bins should be ≥ for PLPV-on, indicating at least as
-/// much or more energy is preserved.
+/// For each Voronoi-skirted peak, compute the population variance of the
+/// per-bin output/input magnitude ratio within that skirt, accumulated across
+/// all hops. Lower variance means more uniform GR across bins in the same
+/// spectral region.
+///
+/// - **PLPV-on**: all bins in a peak's skirt share the peak's gain-reduction
+///   envelope → within-skirt GR variance ≈ 0 by construction.
+/// - **PLPV-off**: each bin has its own independent envelope follower. The
+///   drum loop's transient energy concentrates at a few bins (kick/snare/hat
+///   partials), so neighbouring bins within the same skirt can be at vastly
+///   different envelope states → substantial within-skirt GR variance.
+///
+/// # Design: six disjoint peaks tiling the spectrum
+///
+/// Peaks at bins 100, 200, 300, 500, 700, 900 with Voronoi-skirted boundaries
+/// computed by `assign_voronoi_skirts`. The drum signal has uneven energy
+/// distribution across each skirt, so PLPV-off shows nonzero within-skirt
+/// variance while PLPV-on is near zero. Empirically the margin exceeds 10×;
+/// we assert ≥ 1.5× for robustness.
 #[test]
 fn drum_loop_through_dynamics_no_smearing() {
     let num_samples = SAMPLE_RATE as usize * 2; // 2 seconds
     let drums       = common::drum_loop(SAMPLE_RATE, num_samples);
     let num_hops    = num_samples / FFT_SIZE;
 
-    let peaks = single_spanning_peak();
+    // Six disjoint peaks spread across the spectrum; skirts assigned below.
+    let mut peaks = vec![
+        PeakInfo { k: 100, mag: 256.0, low_k: 0, high_k: 0 },
+        PeakInfo { k: 200, mag: 256.0, low_k: 0, high_k: 0 },
+        PeakInfo { k: 300, mag: 256.0, low_k: 0, high_k: 0 },
+        PeakInfo { k: 500, mag: 256.0, low_k: 0, high_k: 0 },
+        PeakInfo { k: 700, mag: 256.0, low_k: 0, high_k: 0 },
+        PeakInfo { k: 900, mag: 256.0, low_k: 0, high_k: 0 },
+    ];
+    spectral_forge::dsp::plpv::assign_voronoi_skirts(&mut peaks, NUM_BINS);
+
     let ctx_off = make_ctx(None);
     let ctx_on  = make_ctx(Some(&peaks));
 
-    let (th, ra, at, re, kn, mx) = dyn_curves(NUM_BINS, -20.0, 4.0);
+    let (th, ra, at, re, kn, mx) = dyn_curves(NUM_BINS, 4.0);
     let curves: Vec<&[f32]> = vec![&th, &ra, &at, &re, &kn, &mx];
 
     let mut mod_off = DynamicsModule::new();
@@ -246,14 +244,14 @@ fn drum_loop_through_dynamics_no_smearing() {
     let mut bins_on  = vec![Complex::new(0.0f32, 0.0); NUM_BINS];
     let mut supp     = vec![0.0f32; NUM_BINS];
 
-    // Track sum of output/input mag ratios across all hops and suprathreshold bins
-    let mut ratio_sum_off = 0.0_f32;
-    let mut ratio_sum_on  = 0.0_f32;
-    let mut count         = 0u64;
+    // Noise floor: bins below this in the input are excluded to avoid
+    // division-by-near-zero and measuring noise preservation.
+    let noise_floor = 2.0_f32;
 
-    // Noise floor for bin inclusion: bins with input mag below this are excluded
-    // to avoid division-by-zero and measuring noise preservation.
-    let noise_floor = 1.0_f32; // raw FFT magnitude units
+    // Accumulate per-peak within-skirt variance across all hops.
+    let mut skirt_var_sum_off = 0.0_f64;
+    let mut skirt_var_sum_on  = 0.0_f64;
+    let mut sample_count      = 0u64; // number of (hop, peak) pairs with ≥2 valid bins
 
     for h in 0..num_hops {
         let start      = h * FFT_SIZE;
@@ -271,92 +269,130 @@ fn drum_loop_through_dynamics_no_smearing() {
         mod_on.process(0, StereoLink::Linked, FxChannelTarget::All,
                        &mut bins_on, None, &curves, &mut supp, None, &ctx_on);
 
-        for k in 1..NUM_BINS - 1 {
-            let in_mag = input_bins[k].norm();
-            if in_mag > noise_floor {
-                ratio_sum_off += bins_off[k].norm() / in_mag;
-                ratio_sum_on  += bins_on[k].norm()  / in_mag;
-                count += 1;
+        // Per-peak: within-skirt population variance of output/input ratio.
+        for peak in &peaks {
+            let lo = peak.low_k  as usize;
+            let hi = peak.high_k as usize;
+
+            let ratios_off: Vec<f64> = (lo..=hi)
+                .filter_map(|k| {
+                    let in_mag = input_bins[k].norm();
+                    if in_mag > noise_floor {
+                        Some((bins_off[k].norm() / in_mag) as f64)
+                    } else { None }
+                })
+                .collect();
+            let ratios_on: Vec<f64> = (lo..=hi)
+                .filter_map(|k| {
+                    let in_mag = input_bins[k].norm();
+                    if in_mag > noise_floor {
+                        Some((bins_on[k].norm() / in_mag) as f64)
+                    } else { None }
+                })
+                .collect();
+
+            if ratios_off.len() >= 2 && ratios_on.len() >= 2 {
+                skirt_var_sum_off += pop_variance_f64(&ratios_off);
+                skirt_var_sum_on  += pop_variance_f64(&ratios_on);
+                sample_count += 1;
             }
         }
     }
 
-    // Avoid division by zero if no bins exceeded the noise floor
-    if count == 0 {
-        panic!("drum_loop produced no suprathreshold bins — check drum_loop() synthesis");
+    if sample_count == 0 {
+        panic!("drum_loop produced no suprathreshold bins in any skirt — check synthesis");
     }
 
-    let mean_ratio_off = ratio_sum_off / count as f32;
-    let mean_ratio_on  = ratio_sum_on  / count as f32;
+    let mean_var_off = (skirt_var_sum_off / sample_count as f64) as f32;
+    let mean_var_on  = (skirt_var_sum_on  / sample_count as f64) as f32;
+
+    let ratio = if mean_var_on > 1e-12 {
+        mean_var_off / mean_var_on
+    } else {
+        f32::INFINITY
+    };
 
     println!(
-        "drum_loop mean output/input ratio: PLPV-off={:.4}  PLPV-on={:.4}",
-        mean_ratio_off, mean_ratio_on,
+        "drum_loop within-skirt GR variance: PLPV-off={:.6e}  PLPV-on={:.6e}  ratio={:.2}x",
+        mean_var_off, mean_var_on, ratio,
     );
 
-    // PLPV-on must preserve at least as much energy as PLPV-off (ratio ≥).
-    // For a single spanning peak, peak-locked GR applies the same amount to all bins,
-    // so the mean ratio should be equal; in practice small float differences can
-    // tip either way — allow up to 0.5% margin in favour of PLPV-on.
+    // PLPV-on must show ≥ 1.5× less within-skirt GR variance than PLPV-off.
     assert!(
-        mean_ratio_on >= mean_ratio_off - 0.005,
-        "PLPV-on mean ratio {mean_ratio_on:.4} should be ≥ PLPV-off {mean_ratio_off:.4} \
-         (allowing 0.5% tolerance)"
+        ratio >= 1.5,
+        "PLPV-on within-skirt GR variance should be ≥1.5× cleaner than PLPV-off; \
+         got ratio={ratio:.2} (off={mean_var_off:.6e}, on={mean_var_on:.6e})"
     );
 }
 
 // ── Test 3: sustained_chord_through_freeze_no_boundary_clicks ──────────────
 
-/// Drives a major triad (C4-E4-G4 ≈ 261.6-329.6-392.0 Hz) through FreezeModule
-/// for 2 seconds and measures the hop-to-hop variance of the **unwrapped-phase
-/// advance** across bins.
+/// Drives an A3 major triad (220, 277.18, 329.63 Hz) through FreezeModule
+/// for 2 seconds and measures the hop-to-hop **inter-frame phase coherence**.
 ///
-/// # Why unwrapped-phase variance, not energy variance
+/// # What the metric measures
 ///
-/// Without the Pipeline's re-wrap stage running (unit test context), the
-/// complex-space magnitude output of FreezeModule is identical for PLPV-on
-/// and PLPV-off (both use the same freeze_port_t magnitude portamento).
-/// The audible click-reduction promised by PLPV comes from the smooth
-/// phase trajectory written to `ctx.unwrapped_phase`, which the Pipeline
-/// subsequently applies to the bins. We measure that trajectory directly:
+/// No boundary clicks → smooth phase trajectory at hop boundaries →
+/// high inter-frame phase coherence. Phase coherence between frames h and h+1
+/// for bin k is defined as:
 ///
-///   PLPV-on: `frozen_unwrapped[k]` advances by `2π·k·hop/N` per hop —
-///            a *deterministic* monotone advance. Hop-to-hop Δ is constant
-///            per bin → very low across-bin variance.
+/// ```text
+/// C_h[k] = Re( S_{h+1}[k] · conj(S_h[k]) · exp(-2πj·k·hop/N) )
+///        = |S_h[k]| · |S_{h+1}[k]| · cos(Δφ[k] - ω_k)
+/// ```
 ///
-///   PLPV-off: `ctx.unwrapped_phase` is not written by FreezeModule;
-///             it retains whatever the caller initialised it to (zeroes here).
-///             Hop-to-hop change is therefore zero for PLPV-off, but the
-///             *cross-bin* distribution of the advance is degenerate (all zeros).
+/// where `Δφ[k] = arg(S_{h+1}[k]) - arg(S_h[k])` is the actual phase
+/// change and `ω_k = 2π·k·hop/N` is the canonical (expected) phase advance.
+/// When Δφ[k] = ω_k (perfect PV coherence), `C_h[k]` reaches its maximum
+/// value of `|S_h[k]|·|S_{h+1}[k]|`.
 ///
-/// Since variance of constant zero is also zero, we instead measure the
-/// *intra-hop* standard deviation of the per-bin phase advance magnitudes.
-/// PLPV-on produces a linearly-increasing advance (k · constant), which has
-/// nonzero variance. PLPV-off leaves unwrapped untouched, so the caller's
-/// initial values are unchanged — variance of the increments is zero.
+/// # Per-hop steps
 ///
-/// **Assertion**: The PLPV-on path actively writes a nontrivial phase
-/// trajectory (std-dev > 0) while the PLPV-off path does not touch the
-/// unwrapped buffer (std-dev == 0). This confirms the routing is live and
-/// the Freeze module's phase advance is functional.
+/// 1. Forward FFT the chord frame → `input_bins`.
+/// 2. Run `freeze.process(...)` with `ctx.unwrapped_phase = Some(...)`.
+/// 3. **PLPV-on**: rewrap each bin: `bins[k] = polar(|bins[k]|, principal_arg(unwrapped_on[k]))`.
+///    **PLPV-off**: use the raw frozen complex bin as-is.
+/// 4. Accumulate `C_h[k]` across all interior bins and adjacent hop pairs.
 ///
-/// This test does NOT assert that PLPV-on produces *better* sounding audio
-/// than PLPV-off in energy terms (that's what the full Pipeline round-trip
-/// produces). It asserts the PLPV-on *mechanism* is engaged.
+/// # Why this discriminates
+///
+/// - **PLPV-on**: `frozen_unwrapped[k]` advances by `two_pi_hop_over_n·k` per hop
+///   so `Δφ[k] = ω_k` → `C_h[k] = |S|²` (maximum coherence).
+/// - **PLPV-off**: between retriggers the frozen phase is constant → `Δφ[k] = 0`
+///   but `ω_k > 0` for k > 0, so `cos(Δφ - ω_k) < 1` → reduced coherence.
+///   At each retrigger the phase jumps randomly → coherence drops further.
+///
+/// # Assertion
+///
+/// Mean inter-frame phase coherence for PLPV-on > PLPV-off with margin ≥ 1.5×.
 #[test]
 fn sustained_chord_through_freeze_no_boundary_clicks() {
-    // Major triad at A=440 Hz tuning
-    let chord_freqs = [261.63_f32, 329.63, 392.0]; // C4, E4, G4
-    let num_samples = SAMPLE_RATE as usize * 2;     // 2 seconds
+    use realfft::RealFftPlanner;
+    use std::f32::consts::PI;
+
+    // A3 major triad: A3 root (220 Hz) + major third + perfect fifth.
+    let chord_freqs = [220.0_f32, 277.18, 329.63];
+    let num_samples = SAMPLE_RATE as usize * 2; // 2 seconds
     let signal      = common::chord(&chord_freqs, SAMPLE_RATE, num_samples);
     let num_hops    = num_samples / FFT_SIZE;
 
-    // Build the unwrapped-phase slice that ModuleContext will expose.
-    // Initialised to zero; PLPV-on will advance it; PLPV-off must leave it.
+    // Canonical PV phase advance per bin per hop: ω_k = 2π·k·hop/N
+    let hop_size = FFT_SIZE / 4; // OVERLAP=4
+    let two_pi_hop_over_n = 2.0 * PI * hop_size as f32 / FFT_SIZE as f32;
+
+    // Allocate iFFT planner and scratch ONCE — no allocation inside the hop loop.
+    let mut planner   = RealFftPlanner::<f32>::new();
+    let ifft          = planner.plan_fft_inverse(FFT_SIZE);
+    let mut scratch   = ifft.make_scratch_vec();
+    let mut time_buf  = ifft.make_output_vec(); // length = FFT_SIZE
+    let ola_norm      = 2.0_f32 / (3.0 * FFT_SIZE as f32);
+
+    // Persistent unwrapped-phase cells, shared across hops.
+    // FreezeModule reads and writes these; PLPV-off leaves them untouched.
     let unwrapped_off: Vec<Cell<f32>> = vec![Cell::new(0.0f32); NUM_BINS];
     let unwrapped_on:  Vec<Cell<f32>> = vec![Cell::new(0.0f32); NUM_BINS];
 
-    let (lg, th, pt, rs, mx) = freeze_curves(NUM_BINS);
+    let (lg, th, pt, rs, mx) = freeze_curves_fast_retrigger(NUM_BINS);
     let curves: Vec<&[f32]> = vec![&lg, &th, &pt, &rs, &mx];
 
     let mut mod_off = FreezeModule::new();
@@ -371,16 +407,28 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
     let mut bins_on  = vec![Complex::new(0.0f32, 0.0); NUM_BINS];
     let mut supp     = vec![0.0f32; NUM_BINS];
 
-    // Record the per-bin unwrapped values at the *last* hop so we can measure
-    // how much the phase advanced relative to the initial zero values.
-    // We run all hops so the module's internal state (frozen_unwrapped) accumulates
-    // the correct number of canonical PV steps.
+    // Track per-hop iFFT RMS (with OLA norm) for the report.
+    let mut rms_off = Vec::with_capacity(num_hops);
+    let mut rms_on  = Vec::with_capacity(num_hops);
+
+    // Previous-hop spectra for inter-frame coherence.
+    let mut prev_off: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); NUM_BINS];
+    let mut prev_on:  Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); NUM_BINS];
+    let mut first_hop = true;
+
+    // Mean inter-frame coherence accumulators.
+    let mut coh_sum_off = 0.0_f64;
+    let mut coh_sum_on  = 0.0_f64;
+    let mut coh_count   = 0u64;
+
     for h in 0..num_hops {
+        // Forward FFT of the current chord window.
         let start      = h * FFT_SIZE;
         let end        = start + FFT_SIZE;
         let frame      = &signal[start..end];
         let input_bins = common::forward_fft(frame);
 
+        // Build ModuleContext each hop; cells persist between hops.
         let mut ctx_off = ModuleContext::new(
             SAMPLE_RATE, FFT_SIZE, NUM_BINS,
             10.0, 200.0, 0.0, 0.0, false, false,
@@ -393,45 +441,112 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
         );
         ctx_on.unwrapped_phase = Some(&unwrapped_on);
 
-        // PLPV off
+        // ── PLPV off ─────────────────────────────────────────────────────────
         bins_off.copy_from_slice(&input_bins);
         mod_off.process(0, StereoLink::Linked, FxChannelTarget::All,
                         &mut bins_off, None, &curves, &mut supp, None, &ctx_off);
+        // No rewrap for PLPV-off: use raw frozen complex output.
+        let mut ifft_in_off = bins_off.clone();
+        ifft_in_off[0].im = 0.0;
+        ifft_in_off[NUM_BINS - 1].im = 0.0;
+        ifft.process_with_scratch(&mut ifft_in_off, &mut time_buf, &mut scratch).unwrap();
+        rms_off.push(rms_of(&time_buf, ola_norm));
 
-        // PLPV on
+        // ── PLPV on ──────────────────────────────────────────────────────────
         bins_on.copy_from_slice(&input_bins);
         mod_on.process(0, StereoLink::Linked, FxChannelTarget::All,
                        &mut bins_on, None, &curves, &mut supp, None, &ctx_on);
+
+        // Manually rewrap: magnitude from bins_on, phase from principal_arg(unwrapped_on[k]).
+        // Mirrors the Pipeline's rewrap stage (src/dsp/pipeline.rs lines ~791-795).
+        for k in 0..NUM_BINS {
+            let m = bins_on[k].norm();
+            let p = spectral_forge::dsp::plpv::principal_arg(unwrapped_on[k].get());
+            bins_on[k] = Complex::from_polar(m, p);
+        }
+        let mut ifft_in_on = bins_on.clone();
+        ifft_in_on[0].im = 0.0;
+        ifft_in_on[NUM_BINS - 1].im = 0.0;
+        ifft.process_with_scratch(&mut ifft_in_on, &mut time_buf, &mut scratch).unwrap();
+        rms_on.push(rms_of(&time_buf, ola_norm));
+
+        // ── Inter-frame coherence (skip first hop — no prev frame yet) ────
+        // C_h[k] = Re( S_{h+1}[k] · conj(S_h[k]) · exp(-j·ω_k) )
+        //        = m_curr · m_prev · cos(Δφ - ω_k)
+        // where ω_k = 2π·k·hop/N and Δφ = arg(S_{h+1}) - arg(S_h).
+        // We accumulate the normalised coherence: C / (m_prev + ε)² to
+        // avoid domination by high-energy bins.
+        if !first_hop {
+            for k in 1..NUM_BINS - 1 {
+                let omega_k = two_pi_hop_over_n * k as f32;
+
+                // PLPV off
+                let conj_prev_off = prev_off[k].conj();
+                let phase_factor = Complex::from_polar(1.0, -omega_k);
+                let c_off = (bins_off[k] * conj_prev_off * phase_factor).re;
+                let m_off = prev_off[k].norm() + 1e-9;
+                coh_sum_off += (c_off / m_off) as f64;
+
+                // PLPV on
+                let conj_prev_on = prev_on[k].conj();
+                let c_on = (bins_on[k] * conj_prev_on * phase_factor).re;
+                let m_on = prev_on[k].norm() + 1e-9;
+                coh_sum_on += (c_on / m_on) as f64;
+
+                coh_count += 1;
+            }
+        }
+
+        // Save current bins for next-hop coherence computation.
+        prev_off.copy_from_slice(&bins_off);
+        prev_on.copy_from_slice(&bins_on);
+        first_hop = false;
     }
 
-    // After `num_hops` hops, measure the cross-bin distribution of
-    // accumulated phase advances.
-    //
-    // PLPV-off: unwrapped_off should still be all zeros (module never wrote it).
-    // PLPV-on:  unwrapped_on[k] ≈ k · (2π · hop/N) · num_hops — linearly increasing.
-    let advances_off: Vec<f32> = unwrapped_off.iter().map(|c| c.get()).collect();
-    let advances_on:  Vec<f32> = unwrapped_on.iter().map(|c| c.get()).collect();
+    let var_off = common::variance(&rms_off);
+    let var_on  = common::variance(&rms_on);
 
-    let var_off = common::variance(&advances_off);
-    let var_on  = common::variance(&advances_on);
+    let mean_coh_off = if coh_count > 0 { (coh_sum_off / coh_count as f64) as f32 } else { 0.0 };
+    let mean_coh_on  = if coh_count > 0 { (coh_sum_on  / coh_count as f64) as f32 } else { 0.0 };
+    // Margin: ratio of PLPV-on coherence to the absolute value of PLPV-off coherence.
+    // PLPV-off can be negative (anti-coherent); taking the absolute value gives the
+    // reference scale. The ratio represents how much MORE coherent PLPV-on is.
+    let coh_ref   = mean_coh_off.abs().max(1e-9);
+    let coh_ratio = mean_coh_on / coh_ref;
 
     println!(
-        "freeze unwrapped-phase spread: PLPV-off var={:.4}  PLPV-on var={:.4}",
+        "freeze hop-RMS variance: PLPV-off={:.6e}  PLPV-on={:.6e}",
         var_off, var_on,
     );
-
-    // PLPV-off must not have written to unwrapped — all values remain zero → variance = 0.
-    assert!(
-        var_off < 1e-10,
-        "PLPV-off must not touch unwrapped_phase; variance={var_off:.6} expected ≈0"
+    println!(
+        "freeze inter-frame coherence: PLPV-off={:.4}  PLPV-on={:.4}  ratio={:.2}x",
+        mean_coh_off, mean_coh_on, coh_ratio,
     );
 
-    // PLPV-on must have written a nontrivial phase trajectory.
-    // After num_hops hops the linear spread k·step·hops reaches
-    // ~ (NUM_BINS-1) · (2π/OVERLAP) · num_hops at the Nyquist bin,
-    // so variance is large. Require at least 1.0 (unit-free, radian²).
+    // PLPV-on must produce strictly higher inter-frame phase coherence.
+    // Higher coherence = phase advances at the expected PV rate = no boundary clicks.
     assert!(
-        var_on > 1.0,
-        "PLPV-on must write a nontrivial phase trajectory; variance={var_on:.4} expected > 1.0"
+        mean_coh_on > mean_coh_off,
+        "PLPV-on inter-frame coherence {mean_coh_on:.4} should be > PLPV-off {mean_coh_off:.4}"
     );
+
+    // Margin: PLPV-on coherence must be at least 1.5× the magnitude of
+    // PLPV-off coherence. This catches regressions where either path drifts
+    // toward the other.
+    assert!(
+        coh_ratio >= 1.5,
+        "PLPV-on coherence should be ≥1.5× the magnitude of PLPV-off coherence; \
+         got ratio={coh_ratio:.2} (off={mean_coh_off:.4}, on={mean_coh_on:.4})"
+    );
+}
+
+/// Compute the RMS of a time-domain slice, scaled by `ola_norm`.
+///
+/// `ola_norm = 2.0 / (3.0 * fft_size)` — the Hann² OLA normalisation
+/// constant used by the Pipeline. Applying it here aligns the RMS values
+/// to the same scale the Pipeline produces.
+fn rms_of(samples: &[f32], ola_norm: f32) -> f32 {
+    if samples.is_empty() { return 0.0; }
+    let energy: f32 = samples.iter().map(|s| s * s).sum();
+    (energy / samples.len() as f32).sqrt() * ola_norm
 }

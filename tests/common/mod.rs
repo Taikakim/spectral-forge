@@ -8,18 +8,6 @@ use std::f32::consts::PI;
 use num_complex::Complex;
 use realfft::RealFftPlanner;
 
-/// Synthesize a pure sine wave.
-///
-/// `freq_hz`: frequency in Hz
-/// `sample_rate`: samples per second
-/// `num_samples`: total length
-pub fn sine(freq_hz: f32, sample_rate: f32, num_samples: usize) -> Vec<f32> {
-    let omega = 2.0 * PI * freq_hz / sample_rate;
-    (0..num_samples)
-        .map(|n| (omega * n as f32).sin())
-        .collect()
-}
-
 /// Synthesize a linear frequency sweep (chirp) from `start_hz` to `end_hz`.
 ///
 /// Uses the linear instantaneous-frequency formula:
@@ -172,11 +160,6 @@ pub fn spectral_centroid(bins: &[Complex<f32>]) -> f32 {
         den += m;
     }
     if den < 1e-12 { 0.0 } else { num / den }
-}
-
-/// Total spectral energy: Σ |X[k]|².
-pub fn spectral_energy(bins: &[Complex<f32>]) -> f32 {
-    bins.iter().map(|b| b.norm_sqr()).sum()
 }
 
 /// Variance of a float slice (population variance, no Bessel correction).
