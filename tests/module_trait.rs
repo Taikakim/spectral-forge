@@ -1003,21 +1003,30 @@ fn life_capillary_wicks_sustained_energy_upward() {
         bin_physics:          None,
     };
 
-    // Run 99 warm-up hops (reset to template each time to build sustain_envelope
-    // without accumulating carry in bins), then run the 100th hop and check its output.
+    // Run 99 warm-up hops (reset only the source/target bins each time so the
+    // sustain envelope builds at bin 50 without compounding carry deposits at
+    // bin 82), then run the 100th hop and check its output.
     let mut bins = bins_template.clone();
     for _ in 0..99 {
         module.process(
             0, StereoLink::Linked, FxChannelTarget::All,
             &mut bins, None, &curves, &mut suppression, None, &ctx,
         );
-        bins = bins_template.clone();
+        bins[50] = Complex::new(1.0, 0.0);
+        bins[82] = Complex::new(0.0, 0.0);
     }
     // Final hop: check output without resetting.
     module.process(
         0, StereoLink::Linked, FxChannelTarget::All,
         &mut bins, None, &curves, &mut suppression, None, &ctx,
     );
+
+    // Reach=2.0 → reach_bins = (2.0 * 16.0) as i32 = 32 → target = 50 + 32 = 82.
+    // Direct bin-82 check catches REACH_SCALE/REACH_MAX regressions that the
+    // wide window assertion below would miss.
+    let bin82_mag = bins[82].norm();
+    assert!(bin82_mag > 0.04,
+        "Wick carry did not land at expected bin 82 (mag = {})", bin82_mag);
 
     let upper_total: f32 = (60..200).map(|k| bins[k].norm()).sum();
     assert!(upper_total > 0.04, "No upward wicking happened (upper_total = {})", upper_total);

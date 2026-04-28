@@ -8,7 +8,7 @@
 //! - **NonNewtonian**    — rate-limit transients (Task 7)
 //! - **Stiction**        — static/kinetic friction (Task 8)
 //! - **Yield**           — fabric tearing with phase scramble (Task 9)
-//! - **Capillary**       — upward harmonic wicking, two-pass (Task 10)
+//! - **Capillary**       — upward harmonic wicking, three-pass (Task 10)
 //! - **Sandpaper**       — granular phase friction sparks (Task 11)
 //! - **Brownian**        — temperature-driven random walk (Task 12)
 //!
@@ -28,7 +28,10 @@ use crate::dsp::modules::{
 /// Used by the Viscosity kernel (Task 3).
 const VISCOSITY_D_MAX: f32 = 0.45;
 
-/// ~50ms time-constant LP alpha at 48k/256-hop.
+/// Base LP coefficient for the per-bin sustain envelope. Effective alpha per hop
+/// is `SUSTAIN_LP_ALPHA * (1.0 + speed * 4.0)` → range `[0.05, 0.25]`. At the
+/// default STFT hop (2048/4 = 512 samples, 48 kHz) this yields τ ≈ 208 ms at
+/// speed=0 and τ ≈ 37 ms at speed=1.
 /// Used by the Capillary (Task 10) and Crystallization (Task 5) kernels.
 const SUSTAIN_LP_ALPHA: f32 = 0.05;
 
@@ -607,7 +610,12 @@ fn apply_capillary(
         let wet = if old_mag > CAPILLARY_SILENT_FLOOR {
             bins[k] * (new_mag / old_mag)
         } else {
-            Complex::new(new_mag, 0.0)  // silent bin → fresh real-axis tone
+            // Silent target bin: no phase to preserve. Phase=0 is a deliberate v1
+            // choice; if many silent bins receive deposits in the same hop and
+            // mix is near 1.0, the result is a real-valued spectral comb whose
+            // IFFT is a periodic impulse train. Copy source-bin phase here if
+            // that becomes audible.
+            Complex::new(new_mag, 0.0)
         };
         bins[k] = dry * (1.0 - mix) + wet * mix;
     }
