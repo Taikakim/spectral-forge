@@ -437,6 +437,8 @@ fn apply_stiction(
     let speed_c  = curves[2];
     let mix_c    = curves[4];
 
+    // Single pass: update is_moving, scale wet, accumulate displacement.
+    let mut physics_out = physics_out;
     for k in 0..num_bins {
         let v      = velocity.map(|vs| vs[k]).unwrap_or(0.0);
         let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
@@ -449,20 +451,25 @@ fn apply_stiction(
             is_moving[k] = (is_moving[k] - decay).max(0.0);
         }
 
-        let amt         = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        // stuck_factor lerps from `1 - amt` (fully stuck, is_moving=0) to `1`
+        // (free, is_moving=1). At amt=1 + is_moving=0 the bin is fully silenced.
         let stuck_factor = 1.0 - (1.0 - is_moving[k]) * amt;
 
         let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
         let dry = bins[k];
         let wet = bins[k] * stuck_factor;
         bins[k] = dry * (1.0 - mix) + wet * mix;
-    }
 
-    if let Some(p) = physics_out {
-        for k in 0..num_bins {
-            let v    = velocity.map(|vs| vs[k]).unwrap_or(0.0);
+        if let Some(p) = physics_out.as_deref_mut() {
+            // Displacement contribution = `stuck * v`. Stuck-but-low-velocity bins
+            // accumulate slowly; momentarily-stuck high-velocity bins barely register
+            // because `is_moving` was already 1.0 the moment they crossed threshold.
+            // This is the static-friction metaphor: visible displacement only when
+            // the bin is being held against a real (small) push.
             let stuck = (1.0 - is_moving[k]).clamp(0.0, 1.0);
-            p.displacement[k] = (p.displacement[k] + stuck * v).min(NON_NEWTONIAN_DISPLACEMENT_CAP);
+            p.displacement[k] =
+                (p.displacement[k] + stuck * v).min(NON_NEWTONIAN_DISPLACEMENT_CAP);
         }
     }
 }
