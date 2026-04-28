@@ -955,3 +955,72 @@ fn life_yield_clamps_above_threshold_passthrough_below() {
     assert!((bins[100].norm() - 0.2).abs() < 0.01, "Bin 100 not passthrough (mag = {})", bins[100].norm());
     for b in &bins { assert!(b.norm().is_finite()); }
 }
+
+#[test]
+fn life_capillary_wicks_sustained_energy_upward() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::Capillary);
+
+    let num_bins = 1025;
+    let bins_template: Vec<Complex<f32>> = {
+        let mut v = vec![Complex::new(0.0, 0.0); num_bins];
+        v[50] = Complex::new(1.0, 0.0);
+        v
+    };
+
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.5_f32; num_bins];
+    let speed   = vec![2.0_f32; num_bins];
+    let reach   = vec![2.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &speed, &reach, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext {
+        sample_rate:       48_000.0,
+        fft_size:          2048,
+        num_bins,
+        attack_ms:         10.0,
+        release_ms:        100.0,
+        sensitivity:       1.0,
+        suppression_width: 0.0,
+        auto_makeup:       false,
+        delta_monitor:     false,
+        unwrapped_phase:      None,
+        peaks:                None,
+        instantaneous_freq:   None,
+        chromagram:           None,
+        midi_notes:           None,
+        bpm:                  0.0,
+        beat_position:        0.0,
+        sidechain_derivative: None,
+        bin_physics:          None,
+    };
+
+    // Run 99 warm-up hops (reset to template each time to build sustain_envelope
+    // without accumulating carry in bins), then run the 100th hop and check its output.
+    let mut bins = bins_template.clone();
+    for _ in 0..99 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+        bins = bins_template.clone();
+    }
+    // Final hop: check output without resetting.
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    let upper_total: f32 = (60..200).map(|k| bins[k].norm()).sum();
+    assert!(upper_total > 0.04, "No upward wicking happened (upper_total = {})", upper_total);
+
+    for b in &bins { assert!(b.norm().is_finite()); }
+}

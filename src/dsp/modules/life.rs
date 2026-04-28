@@ -75,6 +75,16 @@ const YIELD_HEAL_RANGE: f32 = 0.045;
 /// unbounded during long high-energy passages.
 const YIELD_BIAS_CAP: f32 = 10.0;
 
+/// Capillary: per-hop drain rate scaling (curve * SCALE) and hard cap.
+const CAPILLARY_AMOUNT_SCALE: f32 = 0.025;
+const CAPILLARY_AMOUNT_MAX:   f32 = 0.05;
+/// Capillary: reach in bins = (curve * SCALE) clamped to [REACH_MIN, REACH_MAX].
+const CAPILLARY_REACH_SCALE:  f32 = 16.0;
+const CAPILLARY_REACH_MIN:    i32 = 1;
+const CAPILLARY_REACH_MAX:    i32 = 32;
+/// Capillary: silent-bin threshold for phase-vs-fresh-tone branch.
+const CAPILLARY_SILENT_FLOOR: f32 = 1e-9;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -540,6 +550,69 @@ fn apply_yield(
     }
 }
 
+/// Upward harmonic wicking (three-pass).
+///
+/// Pass 1: cache magnitudes into `scratch_mag`, update the per-bin sustain LP
+///         envelope, and zero `wick_carry`.
+/// Pass 2: compute per-bin drain amount, subtract from `scratch_mag` at the
+///         source bin, and accumulate at the target (source + reach_bins).
+///         Reading all source magnitudes before writing any sink is the reason
+///         three passes are required — a two-pass version would let a bin's
+///         carry contaminate its own later reads.
+/// Pass 3: compute final magnitudes (scratch + carry), scale the complex bin
+///         to preserve phase, mix dry/wet.
+///
+/// Curves: [0]=AMOUNT, [1]=THRESHOLD, [2]=SPEED, [3]=REACH, [4]=MIX.
+fn apply_capillary(
+    bins: &mut [Complex<f32>],
+    sustain_envelope: &mut [f32],
+    wick_carry: &mut [f32],
+    scratch_mag: &mut [f32],
+    curves: &[&[f32]],
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let speed_c  = curves[2];
+    let reach_c  = curves[3];
+    let mix_c    = curves[4];
+
+    // Pass 1: cache magnitudes, update sustain envelopes, zero carry.
+    for k in 0..num_bins {
+        scratch_mag[k] = bins[k].norm();
+        let speed = (speed_c[k] * 0.5).clamp(0.0, 1.0);
+        let alpha = SUSTAIN_LP_ALPHA * (1.0 + speed * 4.0);
+        let inst = if scratch_mag[k] > (thresh_c[k] * 0.5).clamp(0.0, 1.0) { 1.0 } else { 0.0 };
+        sustain_envelope[k] = sustain_envelope[k] * (1.0 - alpha) + inst * alpha;
+        wick_carry[k] = 0.0;
+    }
+
+    // Pass 2: drain at source, accumulate at target.
+    for k in 0..num_bins {
+        let amt = (amount_c[k] * CAPILLARY_AMOUNT_SCALE).clamp(0.0, CAPILLARY_AMOUNT_MAX);
+        let reach_bins = ((reach_c[k] * CAPILLARY_REACH_SCALE) as i32)
+            .clamp(CAPILLARY_REACH_MIN, CAPILLARY_REACH_MAX);
+        let drain = scratch_mag[k] * amt * sustain_envelope[k];
+        let target = (k as i32 + reach_bins).clamp(0, num_bins as i32 - 1) as usize;
+        scratch_mag[k] -= drain;
+        wick_carry[target] += drain;
+    }
+
+    // Pass 3: apply final magnitudes (with carry) to bins.
+    for k in 0..num_bins {
+        let new_mag = (scratch_mag[k] + wick_carry[k]).max(0.0);
+        let old_mag = bins[k].norm();
+        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let dry = bins[k];
+        let wet = if old_mag > CAPILLARY_SILENT_FLOOR {
+            bins[k] * (new_mag / old_mag)
+        } else {
+            Complex::new(new_mag, 0.0)  // silent bin → fresh real-axis tone
+        };
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -590,9 +663,15 @@ impl SpectralModule for LifeModule {
                 let rng  = &mut self.rng_state[channel];
                 apply_yield(bins, tear, rng, curves, physics, ctx.num_bins);
             }
+            LifeMode::Capillary => {
+                let _ = physics;
+                let sustain = &mut self.sustain_envelope[channel];
+                let wick    = &mut self.wick_carry[channel];
+                apply_capillary(bins, sustain, wick, scratch_mag, curves, ctx.num_bins);
+            }
             _ => {
                 let _ = physics;
-                // Filled in Tasks 10–12.
+                // Filled in Tasks 11–12.
             }
         }
 
