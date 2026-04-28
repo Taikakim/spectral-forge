@@ -846,10 +846,9 @@ impl SpectralModule for LifeModule {
 // ── Calibration probe ──────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "probe"))]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LifeProbe {
     pub active_mode: LifeMode,
-    pub average_amount_pct: f32, // populated by probe-write path; v1 default zero.
     pub recent_sustain_max: f32,
     pub recent_tear_count: usize,
 }
@@ -873,7 +872,6 @@ impl LifeModule {
 
         LifeProbe {
             active_mode: self.mode,
-            average_amount_pct: 0.0,
             recent_sustain_max,
             recent_tear_count,
         }

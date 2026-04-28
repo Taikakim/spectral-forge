@@ -1337,6 +1337,6 @@ fn life_probe_reports_active_mode() {
 
     let probe: LifeProbe = module.probe();
     assert_eq!(probe.active_mode, LifeMode::Capillary);
-    assert_eq!(probe.average_amount_pct, 0.0);
     assert_eq!(probe.recent_sustain_max, 0.0);
+    assert_eq!(probe.recent_tear_count, 0);
 }
