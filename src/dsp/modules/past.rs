@@ -270,9 +270,27 @@ impl PastModule {
     }
 
     fn apply_convolution(
-        &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
-        _amount: &[f32], _time: &[f32], _threshold: &[f32], _mix: &[f32], _ctx: &ModuleContext<'_>,
-    ) {}
+        &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
+        amount: &[f32], time: &[f32], threshold: &[f32], mix: &[f32], ctx: &ModuleContext<'_>,
+    ) {
+        let n = bins.len().min(ctx.num_bins);
+        let max_age = hist.capacity_frames() as f32;
+        let flux = ctx.bin_physics.map(|p| &p.flux[..]);
+        for k in 0..n {
+            let mag_sq = bins[k].norm_sqr();
+            let thr = threshold.get(k).copied().unwrap_or(0.0);
+            if mag_sq < thr * thr { continue; }
+            let flux_gate = flux.and_then(|f| f.get(k).copied()).unwrap_or(1.0).clamp(0.0, 1.0);
+            let bin_amount = amount.get(k).copied().unwrap_or(0.0) * flux_gate;
+            if bin_amount < 1e-6 { continue; }
+            let age = (time.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0) * max_age).round() as usize;
+            let frame = match hist.read_frame(ch, age) { Some(f) => f, None => continue };
+            if k >= frame.len() { continue; }
+            let conv = bins[k] * frame[k] * bin_amount;
+            let m_val = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            bins[k] = bins[k] * (1.0 - m_val) + conv * m_val;
+        }
+    }
 
     fn apply_reverse(
         &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
