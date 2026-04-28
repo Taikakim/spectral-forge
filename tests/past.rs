@@ -50,3 +50,12 @@ fn module_context_has_if_offset_field() {
     );
     assert!(ctx.if_offset.is_none());
 }
+
+#[test]
+fn past_module_constructs_and_reports_curves() {
+    use spectral_forge::dsp::modules::{create_module, ModuleType};
+    let m = create_module(ModuleType::Past, 48000.0, 2048);
+    assert_eq!(m.module_type(), ModuleType::Past);
+    assert_eq!(m.num_curves(), 5);
+    assert_eq!(m.tail_length(), 0);
+}

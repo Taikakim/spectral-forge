@@ -58,6 +58,8 @@ pub fn curve_display_config(
         ModuleType::Circuit => default_config(),
         // TODO(5a.3-5a.12): replace with life_config(curve_idx) when kernels land
         ModuleType::Life => default_config(),
+        // TODO(5b2.5-5b2.9): replace with past_config(curve_idx) when kernels land
+        ModuleType::Past => default_config(),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }

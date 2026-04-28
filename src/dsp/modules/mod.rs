@@ -32,6 +32,7 @@ pub enum ModuleType {
     Modulate,
     Circuit,
     Life,
+    Past,
     Master,
 }
 
@@ -512,6 +513,17 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: true,
     };
+    static PAST: ModuleSpec = ModuleSpec {
+        display_name: "PAST",
+        color_lit: Color32::from_rgb(0xa0, 0x80, 0xb0),
+        color_dim: Color32::from_rgb(0x30, 0x24, 0x38),
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "TIME", "THRESHOLD", "SPREAD", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain:    false,
+        panel_widget:       None,
+        writes_bin_physics: false,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -550,6 +562,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Modulate               => &MODULATE,
         ModuleType::Circuit                => &CIR,
         ModuleType::Life                   => &LIFE,
+        ModuleType::Past                   => &PAST,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -652,6 +665,7 @@ pub fn create_module(
         ModuleType::Modulate               => Box::new(modulate::ModulateModule::new()),
         ModuleType::Circuit                => Box::new(circuit::CircuitModule::new()),
         ModuleType::Life   => Box::new(life::LifeModule::new()),
+        ModuleType::Past   => Box::new(past::PastModule::new(sample_rate, fft_size)),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -690,3 +704,4 @@ pub mod circuit;
 pub use circuit::CircuitMode;
 pub mod life;
 pub use life::LifeMode;
+pub mod past;

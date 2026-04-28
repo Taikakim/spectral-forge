@@ -1362,3 +1362,13 @@ fn module_context_has_if_offset_default_none() {
     assert!(ctx.if_offset.is_none(),
         "ctx.if_offset must default to None so existing modules ignore it");
 }
+
+#[test]
+fn past_module_spec_present() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+    let spec = module_spec(ModuleType::Past);
+    assert_eq!(spec.display_name, "PAST");
+    assert_eq!(spec.num_curves, 5);
+    assert_eq!(spec.curve_labels, &["AMOUNT", "TIME", "THRESHOLD", "SPREAD", "MIX"]);
+    assert!(!spec.supports_sidechain, "Past v1 does not consume sidechain");
+}

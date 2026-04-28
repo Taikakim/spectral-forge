@@ -93,6 +93,8 @@ pub const MODULATE_DOT_COLOR: Color32 = Color32::from_rgb(180, 100, 200);
 pub const CIRCUIT_DOT_COLOR: Color32 = Color32::from_rgb(200, 140, 80);
 /// Life module — warm green for "biology / fluid life" feel.
 pub const LIFE_DOT_COLOR: Color32 = Color32::from_rgb(110, 185, 100);
+/// Past module — muted violet for "temporal memory / echo" feel.
+pub const PAST_DOT_COLOR: Color32 = Color32::from_rgb(0xa0, 0x80, 0xb0);
 
 // ─── Freeze curve colours (4 equidistant, 30°, 120°, 210°, 300°) ─────────────
 
