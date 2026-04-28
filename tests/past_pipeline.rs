@@ -11,7 +11,15 @@ use spectral_forge::params::{FxChannelTarget, StereoLink};
 const NUM_BINS: usize = 1025;
 
 fn synth_input(hop: usize) -> Vec<Complex<f32>> {
-    let mut frame = vec![Complex::new(0.0, 0.0); NUM_BINS];
+    // Seed every bin with low-level rotating noise so all 1025 bins exercise
+    // the kernel body (threshold = 0.0). Bins 100 and 200 carry stronger
+    // tonal content for content-shaped paths (Convolution, DecaySorter).
+    let mut frame = Vec::with_capacity(NUM_BINS);
+    for k in 0..NUM_BINS {
+        let mag = 0.1;
+        let phase = (k as f32 * 0.3 + hop as f32 * 0.05) % core::f32::consts::TAU;
+        frame.push(Complex::from_polar(mag, phase));
+    }
     frame[100] = Complex::from_polar(1.0, hop as f32 * 0.1);
     frame[200] = Complex::from_polar(0.5 * (1.0 + (hop as f32 / 100.0).sin()), 0.0);
     frame
@@ -25,7 +33,7 @@ fn drive(mode: PastMode, sort_key: SortKey) -> Vec<Vec<Complex<f32>>> {
 
     let amount    = vec![1.0_f32; NUM_BINS];
     let time      = vec![0.5_f32; NUM_BINS];
-    let threshold = vec![0.05_f32; NUM_BINS];
+    let threshold = vec![0.0_f32; NUM_BINS];
     let spread    = vec![0.0_f32; NUM_BINS];
     let mix       = vec![0.5_f32; NUM_BINS];
     let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
