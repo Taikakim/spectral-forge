@@ -842,3 +842,40 @@ impl SpectralModule for LifeModule {
         self.set_mode(mode);
     }
 }
+
+// ── Calibration probe ──────────────────────────────────────────────────────
+
+#[cfg(any(test, feature = "probe"))]
+#[derive(Debug, Clone, Copy)]
+pub struct LifeProbe {
+    pub active_mode: LifeMode,
+    pub average_amount_pct: f32, // populated by probe-write path; v1 default zero.
+    pub recent_sustain_max: f32,
+    pub recent_tear_count: usize,
+}
+
+#[cfg(any(test, feature = "probe"))]
+impl LifeModule {
+    pub fn probe(&self) -> LifeProbe {
+        let sustain_max_ch0 = self.sustain_envelope[0]
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max);
+        let sustain_max_ch1 = self.sustain_envelope[1]
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max);
+        let recent_sustain_max = sustain_max_ch0.max(sustain_max_ch1);
+
+        let tear_count_ch0 = self.tear_state[0].iter().filter(|&&t| t > 0.5).count();
+        let tear_count_ch1 = self.tear_state[1].iter().filter(|&&t| t > 0.5).count();
+        let recent_tear_count = tear_count_ch0 + tear_count_ch1;
+
+        LifeProbe {
+            active_mode: self.mode,
+            average_amount_pct: 0.0,
+            recent_sustain_max,
+            recent_tear_count,
+        }
+    }
+}

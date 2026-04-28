@@ -1325,3 +1325,18 @@ fn bin_physics_round_trip_stub() {
     // the Phase 5 implementer's first move is filling this in.
     eprintln!("Phase 3 ships probe field shapes; Phase 5 fills in the round-trip.");
 }
+
+#[test]
+fn life_probe_reports_active_mode() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode, LifeProbe};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::Capillary);
+
+    let probe: LifeProbe = module.probe();
+    assert_eq!(probe.active_mode, LifeMode::Capillary);
+    assert_eq!(probe.average_amount_pct, 0.0);
+    assert_eq!(probe.recent_sustain_max, 0.0);
+}
