@@ -149,6 +149,14 @@ impl HistoryBuffer {
     /// 32 frames at the default fft 2048 hop 512 / 48 kHz is ~340 ms.
     pub const ANALYSIS_WINDOW: usize = 32;
 
+    /// Floor below which `|X|` is replaced before taking `log10` — keeps the
+    /// regression well-defined for empty/near-zero bins.
+    const MAG_FLOOR: f32 = 1e-9;
+    /// Slope-magnitude threshold below which a bin is reported as non-decaying.
+    const SLOPE_DEADBAND: f32 = 1e-6;
+    /// Upper clamp on the `-1/slope` decay-time proxy (frames).
+    const DECAY_CLAMP: f32 = 1000.0;
+
     /// Called by the pipeline at the top of every audio block. Marks the
     /// summary stats stale so they get re-derived on next read.
     pub fn clear_summary_cache(&self) {
@@ -167,11 +175,24 @@ impl HistoryBuffer {
         std::cell::Ref::map(self.summary.borrow(), |s| s.decay_estimate.as_slice())
     }
 
+    /// Per-bin RMS magnitude over the most recent `ANALYSIS_WINDOW` frames.
+    /// `√(mean(|X[k]|²))`. Useful as a slow-moving energy floor for transient
+    /// detection and gating decisions.
+    ///
+    /// Returned slice borrows the cached Vec; valid until the next
+    /// `advance_after_all_channels_written()` or `clear_summary_cache()`.
     pub fn summary_rms_envelope(&self, channel: usize) -> std::cell::Ref<'_, [f32]> {
         self.maybe_recompute_rms(channel);
         std::cell::Ref::map(self.summary.borrow(), |s| s.rms_envelope.as_slice())
     }
 
+    /// Per-bin instantaneous-frequency stability score in `(0, 1]`. Derived
+    /// from the variance of hop-to-hop phase differences over the most recent
+    /// `ANALYSIS_WINDOW` frames; mapped via `1 / (1 + var)` so steady partials
+    /// score near 1 and noisy bins score near 0.
+    ///
+    /// Returned slice borrows the cached Vec; valid until the next
+    /// `advance_after_all_channels_written()` or `clear_summary_cache()`.
     pub fn summary_if_stability(&self, channel: usize) -> std::cell::Ref<'_, [f32]> {
         self.maybe_recompute_if_stability(channel);
         std::cell::Ref::map(self.summary.borrow(), |s| s.if_stability.as_slice())
@@ -198,7 +219,7 @@ impl HistoryBuffer {
             let mut mean_y = 0.0_f32;
             for i in 0..n {
                 if let Some(frame) = self.read_frame(channel, i) {
-                    let mag = frame[k].norm().max(1e-9);
+                    let mag = frame[k].norm().max(Self::MAG_FLOOR);
                     mean_y += mag.log10();
                 }
             }
@@ -206,7 +227,7 @@ impl HistoryBuffer {
             let mut cov = 0.0_f32;
             for i in 0..n {
                 if let Some(frame) = self.read_frame(channel, i) {
-                    let mag = frame[k].norm().max(1e-9);
+                    let mag = frame[k].norm().max(Self::MAG_FLOOR);
                     let dx = i as f32 - mean_x;
                     let dy = mag.log10() - mean_y;
                     cov += dx * dy;
@@ -216,8 +237,8 @@ impl HistoryBuffer {
             // age 0 = most recent, age n-1 = oldest. Older frames are HIGHER index, so a
             // decaying signal (newer is louder) gives a NEGATIVE slope (log_mag decreases
             // with increasing age). Decay-time proxy: -1 / slope, clamped to [0, 1000].
-            s.decay_estimate[k] = if slope < -1e-6 {
-                (-1.0 / slope).clamp(0.0, 1000.0)
+            s.decay_estimate[k] = if slope < -Self::SLOPE_DEADBAND {
+                (-1.0 / slope).clamp(0.0, Self::DECAY_CLAMP)
             } else {
                 0.0
             };
