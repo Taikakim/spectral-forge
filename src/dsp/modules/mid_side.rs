@@ -98,6 +98,19 @@ impl SpectralModule for MidSideModule {
         // intentionally diverges between the two paths because the iteration
         // shape differs (per-peak vs per-bin). Documented in the plan.
         let plpv = if self.plpv_enabled { ctx.peaks } else { None };
+        // Empty peak set → fall through to per-bin path so silent/sub-threshold
+        // blocks still apply balance/expansion.
+        let plpv = plpv.filter(|p| !p.is_empty());
+
+        // Voronoi invariant: skirts must be disjoint and sorted so that the
+        // per-peak broadcast never double-applies. Caught here in debug builds
+        // at no release cost.
+        if let Some(peaks) = plpv {
+            debug_assert!(
+                peaks.windows(2).all(|w| w[0].high_k < w[1].low_k),
+                "MidSide PLPV: peak skirts must be disjoint and sorted (Voronoi invariant)"
+            );
+        }
 
         match channel {
             0 => {

@@ -514,6 +514,10 @@ fn ms_pipeline_j(
     inter_channel_phase_drift(in_l, in_r, &out_l, &out_r, num_bins, 1e-3)
 }
 
+// Regression guard, not a clean mechanism witness: PLPV-off draws ~one rotation per bin while
+// PLPV-on draws ~one per peak, so part of the J reduction is averaging-count rather than
+// peak-aligned decode per se. The 3× empirical margin is comfortable enough to assert J_on < J_off
+// without epsilon, but don't tighten this bound without a control that equalises RNG draw counts.
 #[test]
 fn midside_plpv_does_not_increase_phase_drift_on_tonal_signal() {
     let num_bins = 1025usize;
