@@ -1,20 +1,14 @@
 use nih_plug_egui::egui::{self, Pos2, Ui};
 use crate::dsp::modules::life::LifeMode;
+use crate::dsp::modules::MAX_SLOTS;
 use crate::editor::theme as th;
 use crate::params::SpectralForgeParams;
 
-/// Ephemeral state for the Life mode picker popup. Stored in egui temp data.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct LifePopupState {
     pub open: bool,
     pub slot: usize,
     pub pos:  Pos2,
-}
-
-impl Default for LifePopupState {
-    fn default() -> Self {
-        Self { open: false, slot: 0, pos: Pos2::ZERO }
-    }
 }
 
 const MODES: &[(LifeMode, &str, &str)] = &[
@@ -30,7 +24,6 @@ const MODES: &[(LifeMode, &str, &str)] = &[
     (LifeMode::Brownian,        "Brownian",        "Temperature-driven random walk of bin magnitudes"),
 ];
 
-/// Return the short display label for a `LifeMode`.
 pub fn mode_label(mode: LifeMode) -> &'static str {
     for &(m, label, _) in MODES {
         if m == mode { return label; }
@@ -38,17 +31,18 @@ pub fn mode_label(mode: LifeMode) -> &'static str {
     "Unknown"
 }
 
-/// Render the Life mode picker popup if open. Call every frame from the main UI closure.
-/// Returns true if the popup consumed a click.
 pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool {
     let key = ui.id().with("life_popup");
     let state: LifePopupState = ui.data(|d| d.get_temp(key).unwrap_or_default());
     if !state.open { return false; }
 
     let slot = state.slot;
-    let current = params.slot_life_mode.try_lock()
-        .map(|arr| arr[slot])
-        .unwrap_or_default();
+    if slot >= MAX_SLOTS {
+        ui.data_mut(|d| d.insert_temp(key, LifePopupState::default()));
+        return false;
+    }
+
+    let current = params.slot_life_mode.lock()[slot];
 
     let mut new_state = state.clone();
     let mut consumed = false;
@@ -71,9 +65,7 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
                     let resp = ui.selectable_label(selected, label)
                         .on_hover_text(hint);
                     if resp.clicked() && !selected {
-                        if let Some(mut g) = params.slot_life_mode.try_lock() {
-                            g[slot] = mode;
-                        }
+                        params.slot_life_mode.lock()[slot] = mode;
                         new_state.open = false;
                         consumed = true;
                     }
@@ -91,7 +83,6 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
     consumed
 }
 
-/// Open the Life mode popup at `pos` for the given slot. Call from a click handler.
 pub fn open_at(ui: &mut Ui, slot: usize, pos: Pos2) {
     let key = ui.id().with("life_popup");
     ui.data_mut(|d| d.insert_temp(key, LifePopupState { open: true, slot, pos }));

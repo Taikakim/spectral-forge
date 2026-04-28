@@ -896,9 +896,7 @@ pub fn create_editor(
                                         }
                                     }
                                 } else if is_life {
-                                    let cur_mode = params.slot_life_mode.try_lock()
-                                        .map(|arr| arr[edit_slot])
-                                        .unwrap_or_default();
+                                    let cur_mode = params.slot_life_mode.lock()[edit_slot];
                                     let label = crate::editor::life_popup::mode_label(cur_mode);
                                     let btn_text = format!("Mode: {}", label);
                                     let btn = egui::Button::new(
