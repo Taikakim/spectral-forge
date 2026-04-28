@@ -1213,10 +1213,13 @@ fn life_set_mode_persists_across_calls() {
         &mut bins, None, &curves, &mut suppression, None, &ctx,
     );
 
-    // After Yield with thresh=1.0 (→ yield_thresh=0.5), all bins must be at
-    // or near the yield threshold (~0.5 ± slight overshoot).
+    // After Yield with thresh=1.0 (→ yield_thresh = thresh * 0.5 = 0.5), the
+    // phase-scramble preserves magnitude so every bin clamps exactly to 0.5.
+    // Tight bound (0.51) catches both: (a) set_life_mode failing to persist
+    // (default Viscosity passes through ≈ 2.0); (b) coefficient drift in the
+    // yield-threshold formula (e.g. thresh*0.75 → 0.75 magnitude).
     for k in 0..num_bins {
-        assert!(bins[k].norm() <= 0.6,
-            "Bin {} not yielded (mag = {}); set_life_mode did not persist", k, bins[k].norm());
+        assert!(bins[k].norm() <= 0.51,
+            "Bin {} not yielded (mag = {}); set_life_mode did not persist or coefficient drifted", k, bins[k].norm());
     }
 }
