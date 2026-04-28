@@ -760,9 +760,10 @@ pub fn create_editor(
                         let is_geometry = slot_type == crate::dsp::modules::ModuleType::Geometry;
                         let is_modulate = slot_type == crate::dsp::modules::ModuleType::Modulate;
                         let is_circuit  = slot_type == crate::dsp::modules::ModuleType::Circuit;
+                        let is_life     = slot_type == crate::dsp::modules::ModuleType::Life;
 
                         let mut mode_builder = egui::UiBuilder::new();
-                        if !is_future && !is_punch && !is_rhythm && !is_geometry && !is_modulate && !is_circuit { mode_builder = mode_builder.invisible(); }
+                        if !is_future && !is_punch && !is_rhythm && !is_geometry && !is_modulate && !is_circuit && !is_life { mode_builder = mode_builder.invisible(); }
                         ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
@@ -893,6 +894,21 @@ pub fn create_editor(
                                         if resp.clicked() {
                                             params.slot_circuit_mode.lock()[edit_slot] = mode;
                                         }
+                                    }
+                                } else if is_life {
+                                    let cur_mode = params.slot_life_mode.try_lock()
+                                        .map(|arr| arr[edit_slot])
+                                        .unwrap_or_default();
+                                    let label = crate::editor::life_popup::mode_label(cur_mode);
+                                    let btn_text = format!("Mode: {}", label);
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(btn_text).color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                    )
+                                    .fill(th::BG)
+                                    .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                    let resp = ui.add(btn);
+                                    if resp.clicked() {
+                                        crate::editor::life_popup::open_at(ui, edit_slot, resp.rect.right_top());
                                     }
                                 }
                             });
@@ -1132,6 +1148,7 @@ pub fn create_editor(
                     // Render popups (egui Area — appears above matrix)
                     let _ = crate::editor::module_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::amp_popup::show_popup(ui, &params, scale);
+                    let _ = crate::editor::life_popup::show_popup(ui, &params, scale);
 
                     // Persist preset menu state across frames via egui temp storage.
                     ui.ctx().data_mut(|d| d.insert_temp(preset_key, preset_state.clone()));
