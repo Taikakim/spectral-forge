@@ -1,6 +1,6 @@
 # Phase 5a — Life Module Implementation Plan
 
-> **Status:** PLANNED — implementation pending. Phase 5 sub-plan; depends on Phase 1 foundation infra (`docs/superpowers/plans/2026-04-27-phase-1-foundation-infra.md`) and Phase 3 BinPhysics (`docs/superpowers/plans/2026-04-27-phase-3-bin-physics.md`).
+> **Status:** IMPLEMENTED — landed in commits `33ecea8`..`085a49d` (Phase 5a.0 → 5a.17). Source of truth: source code (`src/dsp/modules/life.rs`, `src/editor/life_popup.rs`, `tests/life_conservation.rs`).
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

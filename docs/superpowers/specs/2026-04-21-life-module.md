@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics infrastructure (DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-04-28): IMPLEMENTED** — implementation plan `2026-04-27-phase-5a-life.md` landed in commits `33ecea8`..`085a49d`. The plan extended this design with four additional gap modes (Yield, Capillary, Sandpaper, Brownian) per the audit at `ideas/next-gen-modules/11-life.md`. Source of truth for runtime behaviour: source code (`src/dsp/modules/life.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
 
 # Life Module — Design Spec
 
@@ -45,3 +45,15 @@ Bins require a minimum accumulated force to break free from zero (static frictio
 - All effects are SIMD-friendly: operate on flat `[f32]` slices, adjacent-bin reads are sequential
 - Viscosity and Surface Tension need a temporary read buffer (copy of input magnitudes before diffusion) to avoid order-of-processing artifacts — FxMatrix's existing `mix_buf` can serve or a local `scratch: Vec<f32>` pre-allocated in the module struct
 - No allocation on audio thread
+
+## Follow-ups (post Phase 5a)
+
+- **Freeze reads `BinPhysics.crystallization`** — Phase 5a Life writes
+  `crystallization[k]` from the Crystallization mode but Freeze does not yet
+  read it. Add a small follow-up PR to make Freeze accumulate faster on
+  bins where `crystallization > 0` (per audit § Crystallization scope vs
+  Freeze module). This is intentionally NOT in Phase 5a's scope to keep
+  the plan focused on the Life module itself.
+- **Multi-mode-per-slot stacking** — v2 enhancement (audit § Module ordering).
+- **Cepstral envelope baseline for Capillary** — v2 enhancement (audit
+  research finding 7).
