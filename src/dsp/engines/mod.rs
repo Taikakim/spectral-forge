@@ -19,6 +19,14 @@ pub struct BinParams<'a> {
     /// Log-frequency smoothing width in semitones (half-width each side).
     /// 0.0 = no spatial blur; engine blurs gr_db across adjacent bins on a log scale.
     pub smoothing_semitones: f32,
+    /// Phase 4.3a — PLPV peak set for the current hop, or `None` when PLPV
+    /// peak detection is off in the Pipeline. SpectralCompressorEngine reads
+    /// this to lock per-peak Voronoi skirts to the peak bin's gain reduction.
+    /// Other engines (e.g. SpectralContrast) ignore this field.
+    pub peaks: Option<&'a [crate::dsp::modules::PeakInfo]>,
+    /// Phase 4.3a — per-module PLPV enable flag (Dynamics module). When false
+    /// the engine ignores `peaks` even if populated. Other engines ignore.
+    pub plpv_dynamics_enabled: bool,
 }
 
 pub trait SpectralEngine: Send {

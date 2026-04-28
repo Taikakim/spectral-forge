@@ -263,6 +263,8 @@ pub struct SpectralForgeParams {
 
     pub plpv_enable: BoolParam,
 
+    pub plpv_dynamics_enable: BoolParam,
+
     pub plpv_phase_noise_floor_db: FloatParam,
 
     pub plpv_max_peaks: IntParam,
@@ -476,6 +478,8 @@ impl Default for SpectralForgeParams {
             delta_monitor: BoolParam::new("Delta Monitor", false),
             enable_heavy_modules: BoolParam::new("Enable Heavy Modules", true),
             plpv_enable: BoolParam::new("PLPV Enable", true),
+
+            plpv_dynamics_enable: BoolParam::new("Dynamics PLPV", true),
 
             plpv_phase_noise_floor_db: FloatParam::new(
                 "PLPV Phase Noise Floor",
@@ -768,6 +772,7 @@ unsafe impl Params for SpectralForgeParams {
         params.push(("delta_monitor".to_string(), self.delta_monitor.as_ptr(), String::new()));
         params.push(("enable_heavy_modules".to_string(), self.enable_heavy_modules.as_ptr(), String::new()));
         params.push(("plpv_enable".to_string(), self.plpv_enable.as_ptr(), String::new()));
+        params.push(("plpv_dynamics_enable".to_string(), self.plpv_dynamics_enable.as_ptr(), String::new()));
         params.push(("plpv_phase_noise_floor_db".to_string(), self.plpv_phase_noise_floor_db.as_ptr(), String::new()));
         params.push(("plpv_max_peaks".to_string(), self.plpv_max_peaks.as_ptr(), String::new()));
         params.push(("plpv_peak_threshold_db".to_string(), self.plpv_peak_threshold_db.as_ptr(), String::new()));

@@ -16,6 +16,12 @@ pub struct DynamicsModule {
     bp_mix:       Vec<f32>,
     num_bins:     usize,
     sample_rate:  f32,
+    /// Phase 4.3a — per-module PLPV peak-locked ducking enable. Mirrors
+    /// `params.plpv_dynamics_enable`; written each audio block by the Pipeline
+    /// via `FxMatrix::set_plpv_dynamics_enable`. Default `true` matches the
+    /// param default so a freshly-constructed module behaves identically to
+    /// one with the param applied.
+    plpv_enabled: bool,
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
 }
@@ -34,6 +40,7 @@ impl DynamicsModule {
             bp_mix:       Vec::new(),
             num_bins:     0,
             sample_rate:  44100.0,
+            plpv_enabled: true,
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
@@ -128,6 +135,12 @@ impl SpectralModule for DynamicsModule {
             sensitivity:         ctx.sensitivity,
             auto_makeup:         ctx.auto_makeup,
             smoothing_semitones: ctx.suppression_width,
+            // Phase 4.3a — peak-locked ducking. ctx.peaks is populated by the
+            // Pipeline only when global plpv_enable is true; the per-module flag
+            // (self.plpv_enabled) is set per-block via set_plpv_enabled().
+            // Engine ignores both unless plpv_dynamics_enabled && peaks.is_some().
+            peaks:                 ctx.peaks,
+            plpv_dynamics_enabled: self.plpv_enabled,
         };
 
         let eng: &mut Box<dyn SpectralEngine> = match stereo_link {
@@ -165,6 +178,11 @@ impl SpectralModule for DynamicsModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Dynamics }
     fn num_curves(&self) -> usize { 6 }
+
+    /// Phase 4.3a — propagated each block by `FxMatrix::set_plpv_dynamics_enable`.
+    fn set_plpv_enabled(&mut self, enabled: bool) {
+        self.plpv_enabled = enabled;
+    }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }

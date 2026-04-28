@@ -89,6 +89,10 @@ impl SpectralModule for ContrastModule {
             sensitivity:         ctx.sensitivity,
             auto_makeup:         false,
             smoothing_semitones: ctx.suppression_width,
+            // SpectralContrastEngine ignores these — set to inert defaults so
+            // peak-locked ducking is a Dynamics-only feature.
+            peaks:                 None,
+            plpv_dynamics_enabled: false,
         };
         self.engine.process_bins(bins, sidechain, &params, self.sample_rate, suppression_out);
 

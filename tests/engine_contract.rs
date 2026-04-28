@@ -36,6 +36,8 @@ fn run_engine(engine: &mut Box<dyn SpectralEngine>, bins: &mut Vec<Complex<f32>>
         sensitivity: 0.0,
         auto_makeup: false,
         smoothing_semitones: 0.0,
+        peaks: None,
+        plpv_dynamics_enabled: false,
     };
     // NaN sentinel: if engine forgets to write suppression_out, the assertion
     // in callers will catch it (NaN >= 0.0 is false).
@@ -80,6 +82,8 @@ fn suppression_out_filled() {
         sensitivity: 0.0,
         auto_makeup: false,
         smoothing_semitones: 0.0,
+        peaks: None,
+        plpv_dynamics_enabled: false,
     };
     engine.process_bins(&mut bins, None, &params, 44100.0, &mut suppression);
     // All values must be >= 0 (gain reduction magnitude)
@@ -103,6 +107,8 @@ fn sidechain_some_does_not_panic() {
         sensitivity: 0.0,
         auto_makeup: false,
         smoothing_semitones: 0.0,
+        peaks: None,
+        plpv_dynamics_enabled: false,
     };
     engine.process_bins(&mut bins, Some(&sidechain_mag), &params, 44100.0, &mut suppression);
     for &s in &suppression {
@@ -134,6 +140,8 @@ fn loud_signal_gets_compressed() {
         sensitivity: 0.0,
         auto_makeup: false,
         smoothing_semitones: 0.0,
+        peaks: None,
+        plpv_dynamics_enabled: false,
     };
     let mut suppression = vec![0.0f32; n];
 
@@ -288,6 +296,7 @@ fn contrast_bypass_at_ratio_one() {
         threshold_db: &th, ratio: &ra, attack_ms: &at,
         release_ms: &re, knee_db: &kn, makeup_db: &mk, mix: &mx,
         sensitivity: 0.0, auto_makeup: false, smoothing_semitones: 4.0,
+        peaks: None, plpv_dynamics_enabled: false,
     };
     let mut suppression = vec![0.0f32; n];
     let mut bins = vec![Complex::new(input_mag, 0.0f32); n];
@@ -323,6 +332,7 @@ fn contrast_expands_peaked_spectrum() {
         // Frequency averaging would dilute a single-bin peak into the surrounding floor,
         // masking whether the contrast gain formula actually boosts the peak.
         sensitivity: 0.0, auto_makeup: false, smoothing_semitones: 0.0,
+        peaks: None, plpv_dynamics_enabled: false,
     };
     let mut suppression = vec![0.0f32; n];
     // Flat spectrum with one prominent peak at bin 512.

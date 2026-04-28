@@ -418,6 +418,7 @@ impl Pipeline {
         let delta_monitor = params.delta_monitor.value();
         let enable_heavy_modules = params.enable_heavy_modules.value();
         let plpv_enable = params.plpv_enable.value();
+        let plpv_dynamics_enable = params.plpv_dynamics_enable.value();
         let plpv_phase_noise_floor_db = params.plpv_phase_noise_floor_db.smoothed.next_step(block_size);
         // Phase 4.2: control-rate peak-detection params. Read once per block.
         let max_peaks_capped: usize = (params.plpv_max_peaks.value() as usize).min(MAX_PEAKS);
@@ -580,6 +581,11 @@ impl Pipeline {
         ) {
             self.fx_matrix.set_rhythm_modes_and_grids(&*modes, &*grids);
         }
+
+        // Phase 4.3a — propagate the Dynamics-PLPV enable flag each block. Lock-free
+        // BoolParam read above; this just walks the 9 slots and pokes the trait method
+        // (no-op for everything except DynamicsModule).
+        self.fx_matrix.set_plpv_dynamics_enable(plpv_dynamics_enable);
 
         // Build route matrix from automatable params each block.
         // virtual_rows + amp_mode + amp_params are not exposed as automation

@@ -255,6 +255,10 @@ pub trait SpectralModule: Send {
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 
+    /// Toggle the per-module PLPV peak-locked path on Dynamics modules.
+    /// Default no-op for all other types — only DynamicsModule overrides.
+    fn set_plpv_enabled(&mut self, _: bool) {}
+
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.
     /// MUST NOT allocate, lock, or do I/O.

@@ -201,6 +201,25 @@ impl SpectralEngine for SpectralCompressorEngine {
             }
         }
 
+        // Pass 2.5 — PLPV peak-locked override (Phase 4.3a).
+        // For each detected peak, force every bin in its Voronoi skirt to share the
+        // peak bin's gain reduction. Preserves partial coherence under ducking — all
+        // bins of a single partial duck together. No-op when the per-module flag is
+        // off OR the Pipeline didn't populate ctx.peaks (i.e. global PLPV off).
+        if params.plpv_dynamics_enabled {
+            if let Some(peaks) = params.peaks {
+                for p in peaks {
+                    let pk = (p.k as usize).min(n - 1);
+                    let peak_gr = self.smooth_buf[pk];
+                    let lo = (p.low_k as usize).min(n - 1);
+                    let hi = (p.high_k as usize).min(n - 1);
+                    for k in lo..=hi {
+                        self.smooth_buf[k] = peak_gr;
+                    }
+                }
+            }
+        }
+
         // Update auto-makeup long-term average (~1000ms smoothing at hop rate).
         // Tracks the mix-weighted spatially-smoothed GR (smooth_buf * mix) — i.e. the
         // GR actually applied to the audio — so compensation is exact at any mix setting.
