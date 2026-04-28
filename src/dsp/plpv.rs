@@ -1,9 +1,9 @@
 //! Peak-Locked Phase Vocoder kernels.
 //!
-//! Phase 4.1 ships per-bin phase unwrapping (Laroche-Dolson 1999) and the
-//! matching re-wrap. Low-energy phase damping (Phase 4.1.5) and peak
-//! detection / Voronoi skirt assignment (Phase 4.2) will be added in
-//! follow-on tasks.
+//! Per-bin phase unwrapping (Phase 4.1, Laroche-Dolson 1999), low-energy
+//! phase damping (Phase 4.1.5), and peak detection + Voronoi skirt
+//! assignment (Phase 4.2). Module-level consumers (Phase 4.3a–d) lock
+//! per-peak gain reduction / phase advance to the unwrapped trajectory.
 //!
 //! References:
 //! - Laroche, J. and Dolson, M. (1997). About this Phasiness Business.
