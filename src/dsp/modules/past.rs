@@ -103,11 +103,30 @@ impl PastModule {
         }
     }
 
-    /// Per-block setter, called from FxMatrix::set_past_modes via lib.rs snapshot.
-    pub fn set_mode(&mut self, mode: PastMode) { self.mode = mode; }
+    /// Per-block setter, called from FxMatrix::set_past_modes via the per-block
+    /// snapshot in pipeline.rs. On a real change of mode we clear per-channel
+    /// state so cross-mode artefacts (Reverse offset, Stretch read phase, sort
+    /// scratch) don't leak into the new mode.
+    pub fn set_mode(&mut self, mode: PastMode) {
+        if self.mode != mode {
+            self.mode = mode;
+            self.clear_channel_state();
+        }
+    }
 
-    /// Per-block setter, called from FxMatrix::set_past_sort_keys via lib.rs snapshot.
+    /// Per-block setter, called from FxMatrix::set_past_sort_keys via the
+    /// per-block snapshot in pipeline.rs.
     pub fn set_sort_key(&mut self, key: SortKey) { self.sort_key = key; }
+
+    fn clear_channel_state(&mut self) {
+        for s in &mut self.channels {
+            s.reverse_read_offset = 0;
+            s.stretch_read_phase = 0.0;
+            s.stretch_rng = 0xA5A5_A5A5;
+            for v in &mut s.sort_order { *v = 0; }
+            for v in &mut s.sort_scratch { *v = Complex::new(0.0, 0.0); }
+        }
+    }
 }
 
 impl SpectralModule for PastModule {

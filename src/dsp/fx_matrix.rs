@@ -301,7 +301,7 @@ impl FxMatrix {
 
     /// Propagate per-slot PastMode from params to PastModule instances.
     /// Called once per audio block (before process_hop).
-    pub fn set_past_modes(&mut self, modes: &[crate::dsp::modules::past::PastMode; MAX_SLOTS]) {
+    pub fn set_past_modes(&mut self, modes: &[crate::dsp::modules::past::PastMode; 9]) {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_past_mode(modes[s]);
@@ -311,7 +311,7 @@ impl FxMatrix {
 
     /// Propagate per-slot SortKey from params to PastModule instances.
     /// Called once per audio block (before process_hop).
-    pub fn set_past_sort_keys(&mut self, keys: &[crate::dsp::modules::past::SortKey; MAX_SLOTS]) {
+    pub fn set_past_sort_keys(&mut self, keys: &[crate::dsp::modules::past::SortKey; 9]) {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_past_sort_key(keys[s]);
