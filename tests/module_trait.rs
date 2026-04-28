@@ -804,6 +804,7 @@ fn life_non_newtonian_limits_fast_transients() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          Some(&physics_read),
+        history:              None,
     };
 
     module.process(
@@ -880,6 +881,7 @@ fn life_stiction_holds_quiet_bins_then_releases() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          Some(&physics),
+        history:              None,
     };
 
     module.process(
@@ -942,6 +944,7 @@ fn life_yield_clamps_above_threshold_passthrough_below() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          None,
+        history:              None,
     };
 
     module.process(
@@ -1001,6 +1004,7 @@ fn life_capillary_wicks_sustained_energy_upward() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          None,
+        history:              None,
     };
 
     // Run 99 warm-up hops (reset only the source/target bins each time so the
@@ -1077,6 +1081,7 @@ fn life_sandpaper_emits_sparks_to_higher_bins() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          None,
+        history:              None,
     };
 
     module.process(
@@ -1142,6 +1147,7 @@ fn life_brownian_drifts_with_temperature() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          Some(&physics),
+        history:              None,
     };
 
     let mut bins = bins_template.clone();
@@ -1206,6 +1212,7 @@ fn life_set_mode_persists_across_calls() {
         beat_position:        0.0,
         sidechain_derivative: None,
         bin_physics:          None,
+        history:              None,
     };
 
     module.process(
@@ -1297,6 +1304,7 @@ fn life_all_modes_finite_and_bounded() {
             midi_notes:           None,
             sidechain_derivative: None,
             bin_physics:          Some(&physics),
+            history:              None,
         };
 
         // bins accumulate across 200 hops within a channel — exercises stateful kernels.
@@ -1325,4 +1333,14 @@ fn life_all_modes_finite_and_bounded() {
             }
         }
     }
+}
+
+#[test]
+fn module_context_has_history_slot_default_none() {
+    use spectral_forge::dsp::modules::ModuleContext;
+    let ctx = ModuleContext::new(
+        48000.0, 2048, 1025, 10.0, 100.0, 1.0, 0.5, false, false,
+    );
+    assert!(ctx.history.is_none(),
+        "ctx.history must default to None so existing modules ignore it");
 }

@@ -119,6 +119,11 @@ pub struct ModuleContext<'block> {
     pub beat_position:        f64,                         // live from host transport (0.0 if unavailable)
     pub sidechain_derivative: Option<&'block [f32]>,      // Phase 5b/Modulate Slew Lag
     pub bin_physics:          Option<&'block crate::dsp::bin_physics::BinPhysics>, // Phase 3.2
+    /// Read-only handle to the per-channel STFT history ring. `None` when no
+    /// history-consuming module is in the slot chain (the pipeline only
+    /// attaches the borrow when at least one slot has `reads_history`).
+    /// See `src/dsp/history_buffer.rs`.
+    pub history: Option<&'block crate::dsp::history_buffer::HistoryBuffer>,
 }
 
 impl<'block> ModuleContext<'block> {
@@ -139,6 +144,7 @@ impl<'block> ModuleContext<'block> {
             beat_position: 0.0,
             sidechain_derivative: None,
             bin_physics: None,
+            history: None,
         }
     }
 }
