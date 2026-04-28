@@ -65,7 +65,18 @@ pub enum MassSource {
 
 const MAX_TUNING_FORKS: usize = 16;
 const MAX_HARMONIC_SPRINGS: usize = 8;
+/// Sidechain envelope smoother time constant in hops.
+/// `alpha = 1 - exp(-1 / SC_ENVELOPE_TAU_HOPS)`, so at 1.0 hops the envelope
+/// follows the sidechain within ~1 hop (very fast). The rate-of-change derived
+/// from this envelope is divided by `dt`, so the effective rate scales with
+/// sample rate / hop size; `SC_MASS_RATE_SCALE` was tuned for the default
+/// hop dt (fft=2048, sr=48k → dt ≈ 10.7 ms). If hop changes substantially,
+/// the scale may need re-tuning to keep the audible response consistent.
 const SC_ENVELOPE_TAU_HOPS: f32 = 1.0;
+/// Sidechain rate-of-change → mass multiplier scale.
+/// `mass = (1.0 + SC_MASS_RATE_SCALE * rate) * MASS_curve[k]`. Tuned for the
+/// default hop dt; if hop changes substantially this may need re-tuning.
+const SC_MASS_RATE_SCALE: f32 = 5.0;
 const TUNING_FORK_MIN_SEP: usize = 4;
 const MAX_PEAKS: usize = 16;
 const ORBITAL_SAT_HALF_WINDOW: usize = 16;
@@ -539,7 +550,12 @@ impl KineticsModule {
 
                 // -- Per-bin mass write: high rate → heavier mass. --
                 for k in 0..num_bins {
-                    let target = ((1.0 + 5.0 * rate) * mass_curve[k].clamp(0.01, 100.0))
+                    // Inner MASS clamp is 100 (not 1000 like Static) so that the rate-multiplied
+                    // product can hit the outer 1000 ceiling without immediately saturating: we
+                    // reserve dynamic range for the rate term.
+                    // `1.0 +` baseline: at zero rate, target = MASS_curve (mass never drops below
+                    // MASS_curve); rate × scale lifts it higher when SC is changing fast.
+                    let target = ((1.0 + SC_MASS_RATE_SCALE * rate) * mass_curve[k].clamp(0.01, 100.0))
                         .clamp(0.01, 1000.0);
                     let mix    = mix_curve[k].clamp(0.0, 1.0);
                     let cur    = physics.mass[k];
