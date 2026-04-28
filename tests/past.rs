@@ -59,3 +59,41 @@ fn past_module_constructs_and_reports_curves() {
     assert_eq!(m.num_curves(), 5);
     assert_eq!(m.tail_length(), 0);
 }
+
+#[test]
+fn granular_replaces_bin_with_history_at_offset_when_amount_high() {
+    use spectral_forge::dsp::history_buffer::HistoryBuffer;
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    // History has bin 100 = magnitude 5.0 at age 8 frames.
+    let mut h = HistoryBuffer::new(1, 64, 256);
+    for i in 0..16 {
+        let mut frame = vec![Complex::new(0.0, 0.0); 256];
+        if i == 7 { frame[100] = Complex::new(5.0, 0.0); }
+        h.write_hop(0, &frame);
+        h.advance_after_all_channels_written();
+    }
+
+    let mut m = PastModule::new(48000.0, 2048);
+    m.set_mode(PastMode::Granular);
+
+    let mut bins = vec![Complex::new(1.0, 0.0); 256];
+    let amount    = vec![1.0_f32; 256];
+    let time      = vec![8.0 / 64.0; 256];     // map → age 8 frames
+    let threshold = vec![0.0_f32; 256];
+    let spread    = vec![0.0_f32; 256];
+    let mix       = vec![1.0_f32; 256];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
+    let mut supp = vec![0.0_f32; 256];
+    let mut ctx = ModuleContext::new(48000.0, 2048, 256, 10.0, 100.0, 1.0, 0.5, false, false);
+    ctx.history = Some(&h);
+
+    // Note: process() now takes physics: Option<&mut BinPhysics> between supp and ctx.
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves, &mut supp, None, &ctx);
+
+    assert!((bins[100].re - 5.0).abs() < 0.5,
+        "expected bin[100] re ≈ 5.0, got {}", bins[100].re);
+}

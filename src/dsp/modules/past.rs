@@ -169,10 +169,34 @@ impl SpectralModule for PastModule {
 
 impl PastModule {
     fn apply_granular(
-        &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
-        _amount: &[f32], _time: &[f32], _threshold: &[f32], _spread: &[f32], _mix: &[f32],
-        _ctx: &ModuleContext<'_>,
-    ) {}
+        &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
+        amount: &[f32], time: &[f32], threshold: &[f32], spread: &[f32], mix: &[f32],
+        ctx: &ModuleContext<'_>,
+    ) {
+        let n = bins.len().min(ctx.num_bins);
+        // TIME maps [0..1] to [0..capacity_frames] historic frames.
+        let max_age = hist.capacity_frames() as f32;
+        // BinPhysics crystallization (if present) biases AMOUNT toward 1.0 per-bin.
+        let cryst = ctx.bin_physics.map(|p| &p.crystallization[..]);
+        for k in 0..n {
+            let bin_amount = amount.get(k).copied().unwrap_or(0.0);
+            let cryst_bias = cryst.and_then(|c| c.get(k).copied()).unwrap_or(0.0);
+            let effective_amount = (bin_amount + cryst_bias).clamp(0.0, 1.0);
+            let mag = bins[k].norm();
+            let thr = threshold.get(k).copied().unwrap_or(0.0);
+            if mag < thr { continue; }
+            let age = (time.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0) * max_age).round() as usize;
+            let frame = match hist.read_frame(ch, age) { Some(f) => f, None => continue };
+            let val = if spread.get(k).copied().unwrap_or(0.0) > 0.5 && k > 0 && k + 1 < frame.len() {
+                (frame[k - 1] + frame[k] + frame[k + 1]) * (1.0 / 3.0)
+            } else {
+                frame[k]
+            };
+            let replacement = val * effective_amount;
+            let m_val = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            bins[k] = bins[k] * (1.0 - m_val) + replacement * m_val;
+        }
+    }
 
     fn apply_decay_sorter(
         &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
