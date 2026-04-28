@@ -18,6 +18,16 @@ pub struct FreezeModule {
     freeze_captured:  bool,
     fft_size:         usize,
     sample_rate:      f32,
+    /// Phase 4.3c — per-module PLPV unwrapped-phase advance enable. Mirrors
+    /// `params.plpv_freeze_enable`; written each audio block by the Pipeline
+    /// via `FxMatrix::set_plpv_freeze_enable`. Default `true` matches the
+    /// param default so a freshly-constructed module behaves identically to
+    /// one with the param applied.
+    plpv_enabled:     bool,
+    /// Captured unwrapped phase, advanced by 2π·k·hop/N every hop and snapped
+    /// to the live unwrapped phase on first capture and on each per-bin
+    /// retrigger. Allocated to `fft_size/2 + 1` in `reset()`.
+    frozen_unwrapped: Vec<f32>,
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
 }
@@ -33,6 +43,8 @@ impl FreezeModule {
             freeze_captured:  false,
             fft_size:         2048,
             sample_rate:      44100.0,
+            plpv_enabled:     true,
+            frozen_unwrapped: Vec::new(),
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
@@ -53,6 +65,7 @@ impl SpectralModule for FreezeModule {
         self.freeze_port_t    = vec![1.0f32; n];
         self.freeze_hold_hops = vec![0u32; n];
         self.freeze_accum     = vec![0.0f32; n];
+        self.frozen_unwrapped = vec![0.0f32; n];
         self.freeze_captured  = false;
     }
 
@@ -74,6 +87,20 @@ impl SpectralModule for FreezeModule {
         use crate::dsp::pipeline::OVERLAP;
         let hop_ms = ctx.fft_size as f32 / (OVERLAP as f32 * self.sample_rate) * 1000.0;
 
+        // Phase 4.3c — bind the PLPV trajectory once. When this is `Some`, the
+        // Pipeline's re-wrap stage afterwards recomputes
+        //   bins[k] = polar(|bins[k]|, principal_arg(unwrapped[k]))
+        // so we mutate the unwrapped trajectory directly. The complex-space
+        // mix into `bins[k]` below still controls magnitude end-to-end (the
+        // rewrap reads its norm), but its phase is discarded. When `None`,
+        // the legacy complex-mix algorithm runs verbatim and bin phase is
+        // whatever the existing algorithm produces.
+        //
+        // v1 simplification: PLPV-on path snaps phase on retrigger (no phase
+        // portamento). Magnitude portamento via `freeze_port_t` is unaffected.
+        // Full phase-portamento can land in a later phase if needed.
+        let plpv = if self.plpv_enabled { ctx.unwrapped_phase } else { None };
+
         if !self.freeze_captured {
             // First call: capture current frame as initial frozen state.
             self.frozen_bins.copy_from_slice(bins);
@@ -81,6 +108,14 @@ impl SpectralModule for FreezeModule {
             self.freeze_port_t.fill(1.0);
             self.freeze_hold_hops.fill(0);
             self.freeze_accum.fill(0.0);
+            // PLPV: capture the unwrapped-phase trajectory at the same moment
+            // as the magnitude capture. Subsequent hops will advance it by
+            // the canonical 2π·k·hop/N step until a per-bin retrigger.
+            if let Some(unwrapped) = plpv {
+                for k in 0..self.frozen_unwrapped.len() {
+                    self.frozen_unwrapped[k] = unwrapped[k].get();
+                }
+            }
             self.freeze_captured = true;
         }
 
@@ -154,6 +189,12 @@ impl SpectralModule for FreezeModule {
                     self.freeze_port_t[k]    = 0.0;
                     self.freeze_hold_hops[k] = 0;
                     self.freeze_accum[k]     = 0.0;
+                    // PLPV: re-snap the frozen unwrapped phase for THIS bin.
+                    // Magnitude enters portamento via freeze_port_t; phase
+                    // snaps instantly (v1 simplification — see top of process()).
+                    if let Some(unwrapped) = plpv {
+                        self.frozen_unwrapped[k] = unwrapped[k].get();
+                    }
                 }
             }
 
@@ -169,6 +210,30 @@ impl SpectralModule for FreezeModule {
                 dry.re * (1.0 - mix) + wet.re * mix,
                 dry.im * (1.0 - mix) + wet.im * mix,
             );
+
+            // Phase 4.3c — PLPV phase trajectory.
+            // The Pipeline's re-wrap stage will overwrite bins[k]'s phase with
+            // the principal arg of `unwrapped[k]`, so we must steer the
+            // unwrapped slice here rather than touching bins[k]'s phase. The
+            // magnitude path above is preserved end-to-end (the rewrap reads
+            // `bins[k].norm()` only).
+            //
+            // Mix in unwrapped (continuous) phase space — smooth across 2π
+            // wraps, no glitches. This intentionally differs from the
+            // complex-space mix used on the PLPV-off path (same trade-off as
+            // 4.3b PhaseSmear).
+            if let Some(unwrapped) = plpv {
+                // Canonical phase-vocoder advance. Matches the Pipeline's
+                // own `two_pi_hop_over_n * k` constant used in the unwrap
+                // damping step (src/dsp/pipeline.rs).
+                let r = (ctx.fft_size / OVERLAP) as f32;          // hop_size in samples
+                let n_fft = ctx.fft_size as f32;
+                self.frozen_unwrapped[k] +=
+                    2.0 * std::f32::consts::PI * (k as f32) * r / n_fft;
+                let dry_p    = unwrapped[k].get();
+                let frozen_p = self.frozen_unwrapped[k];
+                unwrapped[k].set(dry_p * (1.0 - mix) + frozen_p * mix);
+            }
         }
 
         #[cfg(any(test, feature = "probe"))]
@@ -195,12 +260,18 @@ impl SpectralModule for FreezeModule {
         self.freeze_port_t.fill(1.0);
         self.freeze_hold_hops.fill(0);
         self.freeze_accum.fill(0.0);
+        self.frozen_unwrapped.fill(0.0);
         self.freeze_captured = false;
     }
 
     fn tail_length(&self) -> u32 { self.fft_size as u32 }
     fn module_type(&self) -> ModuleType { ModuleType::Freeze }
     fn num_curves(&self) -> usize { 5 }
+
+    /// Phase 4.3c — propagated each block by `FxMatrix::set_plpv_freeze_enable`.
+    fn set_plpv_freeze_enabled(&mut self, enabled: bool) {
+        self.plpv_enabled = enabled;
+    }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }

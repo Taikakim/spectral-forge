@@ -273,6 +273,10 @@ pub trait SpectralModule: Send {
     /// PhaseSmearModule. Default no-op for all other types.
     fn set_plpv_phase_smear_enabled(&mut self, _: bool) {}
 
+    /// Toggle the per-module PLPV unwrapped-phase advance on Freeze modules.
+    /// Default no-op for all other types — only FreezeModule overrides.
+    fn set_plpv_freeze_enabled(&mut self, _: bool) {}
+
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.
     /// MUST NOT allocate, lock, or do I/O.

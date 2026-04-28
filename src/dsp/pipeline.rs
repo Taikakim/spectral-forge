@@ -420,6 +420,7 @@ impl Pipeline {
         let plpv_enable = params.plpv_enable.value();
         let plpv_dynamics_enable = params.plpv_dynamics_enable.value();
         let plpv_phase_smear_enable = params.plpv_phase_smear_enable.value();
+        let plpv_freeze_enable = params.plpv_freeze_enable.value();
         let plpv_phase_noise_floor_db = params.plpv_phase_noise_floor_db.smoothed.next_step(block_size);
         // Phase 4.2: control-rate peak-detection params. Read once per block.
         let max_peaks_capped: usize = (params.plpv_max_peaks.value() as usize).min(MAX_PEAKS);
@@ -591,6 +592,10 @@ impl Pipeline {
         // Phase 4.3b — propagate the PhaseSmear-PLPV enable flag each block. Same
         // pattern as 4.3a; trait default is a no-op for non-PhaseSmear modules.
         self.fx_matrix.set_plpv_phase_smear_enable(plpv_phase_smear_enable);
+
+        // Phase 4.3c — propagate the Freeze-PLPV enable flag each block. Same
+        // pattern as 4.3a/b; trait default is a no-op for non-Freeze modules.
+        self.fx_matrix.set_plpv_freeze_enable(plpv_freeze_enable);
 
         // Build route matrix from automatable params each block.
         // virtual_rows + amp_mode + amp_params are not exposed as automation

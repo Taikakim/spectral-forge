@@ -174,7 +174,7 @@ fn dynamics_engine_plpv_on_locks_skirt_to_peak() {
 // RMS measurement) is deferred to Phase 4.9.
 
 use std::cell::Cell;
-use spectral_forge::dsp::modules::{ModuleContext, PhaseSmearModule, SpectralModule};
+use spectral_forge::dsp::modules::{ModuleContext, FreezeModule, PhaseSmearModule, SpectralModule};
 use spectral_forge::params::{FxChannelTarget, StereoLink};
 
 /// Build the curves PhaseSmear consumes: amount, peak hold, mix.
@@ -287,4 +287,144 @@ fn phase_smear_plpv_on_writes_to_unwrapped_only() {
     let any_changed = (1..num_bins - 1)
         .any(|k| (unwrapped[k].get() - initial_unwrapped[k]).abs() > 1e-6);
     assert!(any_changed, "PLPV-on must write to unwrapped[]");
+}
+
+// ── Phase 4.3c — Freeze PLPV routing wiring ───────────────────────────────────
+//
+// Two engine-level tests prove the PLPV-on vs PLPV-off branching writes to the
+// correct destination. End-to-end audible verification (no zipper across hop
+// boundaries, frozen-spectrum stationarity) is deferred to Phase 4.9.
+
+/// Build the curves Freeze consumes: length, threshold, portamento, resistance, mix.
+/// Tuned so the freeze path actually fires and mix is fully wet.
+fn freeze_curves(num_bins: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    (
+        vec![1.0f32; num_bins],   // LENGTH      — neutral (≈500 ms)
+        vec![1.0f32; num_bins],   // THRESHOLD   — neutral (-20 dBFS)
+        vec![1.0f32; num_bins],   // PORTAMENTO  — neutral (≈200 ms)
+        vec![1.0f32; num_bins],   // RESISTANCE  — neutral (≈1.0 normalised excess)
+        vec![1.0f32; num_bins],   // MIX         — fully wet
+    )
+}
+
+#[test]
+fn freeze_plpv_off_writes_to_bins_only() {
+    let num_bins = 1025usize;
+    let mut m = FreezeModule::new();
+    m.reset(48000.0, 2048);
+    m.set_plpv_freeze_enabled(false);
+
+    // Bins: a non-trivial spectrum where dry differs from a frozen snapshot.
+    // First-process call captures the initial bins as the frozen state, so on
+    // subsequent calls a *different* live spectrum will produce a non-trivial
+    // dry/wet mix. We rotate by k between calls to make `dry != frozen`.
+    let initial_bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(1.0 + (k as f32) * 0.001, 0.0))
+        .collect();
+
+    // Unwrapped-phase trajectory exposed through ctx — but since PLPV is OFF,
+    // the module must not touch it.
+    let unwrapped = make_unwrapped(num_bins);
+    let initial_unwrapped: Vec<f32> = unwrapped.iter().map(|c| c.get()).collect();
+
+    let (lg, th, pt, rs, mx) = freeze_curves(num_bins);
+    let curves_vec: Vec<&[f32]> = vec![&lg, &th, &pt, &rs, &mx];
+
+    let mut supp = vec![0.0f32; num_bins];
+
+    let mut ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    ctx.unwrapped_phase = Some(&unwrapped);
+
+    // First hop: captures initial bins as frozen state. Mix=1.0, so output ==
+    // frozen == input — we need at least one more hop with a DIFFERENT input to
+    // observe a change. (If we only ran one hop, output would equal input even
+    // on the working path, masking any bug.)
+    let mut bins = initial_bins.clone();
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves_vec, &mut supp, None, &ctx);
+
+    // Second hop: feed a *different* input. With mix=1.0, output should equal
+    // the frozen snapshot (≈ initial_bins), not the new input.
+    let live_bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(2.0 + (k as f32) * 0.001, 1.0))
+        .collect();
+    let mut bins = live_bins.clone();
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves_vec, &mut supp, None, &ctx);
+
+    // PLPV OFF → unwrapped[] must be byte-identical to initial values across
+    // both hops. (DC and Nyquist are special-case but they are still untouched.)
+    for k in 0..num_bins {
+        assert_eq!(unwrapped[k].get(), initial_unwrapped[k],
+            "PLPV-off must not touch unwrapped[{k}]: got {} expected {}",
+            unwrapped[k].get(), initial_unwrapped[k]);
+    }
+
+    // PLPV OFF → bins must show a freeze effect: mix=1.0 means the output
+    // tracks the frozen snapshot, not the live input. So at least one bin
+    // should differ from the live input.
+    let any_changed = (0..num_bins)
+        .any(|k| (bins[k].re - live_bins[k].re).abs() > 1e-6
+              || (bins[k].im - live_bins[k].im).abs() > 1e-6);
+    assert!(any_changed,
+        "PLPV-off freeze must write a frozen spectrum into bins[] (different from live input)");
+}
+
+#[test]
+fn freeze_plpv_on_writes_to_unwrapped_only() {
+    let num_bins = 1025usize;
+    let mut m = FreezeModule::new();
+    m.reset(48000.0, 2048);
+    m.set_plpv_freeze_enabled(true);
+
+    let initial_bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(1.0 + (k as f32) * 0.001, 0.0))
+        .collect();
+
+    let unwrapped = make_unwrapped(num_bins);
+    let initial_unwrapped: Vec<f32> = unwrapped.iter().map(|c| c.get()).collect();
+
+    let (lg, th, pt, rs, mx) = freeze_curves(num_bins);
+    let curves_vec: Vec<&[f32]> = vec![&lg, &th, &pt, &rs, &mx];
+
+    let mut supp = vec![0.0f32; num_bins];
+
+    let mut ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    ctx.unwrapped_phase = Some(&unwrapped);
+
+    // First hop: captures the initial frozen state and seeds frozen_unwrapped.
+    let mut bins = initial_bins.clone();
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves_vec, &mut supp, None, &ctx);
+
+    // Second hop with a *different* live input. The magnitude path is still
+    // active (frozen ≠ live), so bins[] will be modified — the rewrap test
+    // below cares only about the PLPV phase write, which lives in `unwrapped`.
+    let live_bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(2.0 + (k as f32) * 0.001, 1.0))
+        .collect();
+    let mut bins = live_bins.clone();
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves_vec, &mut supp, None, &ctx);
+
+    // PLPV ON → at least one interior unwrapped[] entry must have changed
+    // (DC at k=0 advances by 0 every hop; everywhere else accumulates the
+    // 2π·k·hop/N step, then the mix=1.0 lerp replaces dry entirely).
+    let any_changed = (1..num_bins - 1)
+        .any(|k| (unwrapped[k].get() - initial_unwrapped[k]).abs() > 1e-6);
+    assert!(any_changed, "PLPV-on Freeze must write to unwrapped[]");
+
+    // The magnitude path still runs end-to-end. With mix=1.0 and a different
+    // live input, bins should differ from the live input (frozen magnitude
+    // wins via the complex-space mix below the PLPV write site).
+    let any_mag_changed = (0..num_bins)
+        .any(|k| (bins[k].norm() - live_bins[k].norm()).abs() > 1e-6);
+    assert!(any_mag_changed,
+        "PLPV-on Freeze magnitude path must still affect bin magnitudes");
 }
