@@ -19,6 +19,7 @@ fn run_mode(mode: LifeMode, bins_template: &[Complex<f32>], hops: usize) -> Vec<
     let thresh = vec![0.5_f32; num_bins];
     let speed = vec![1.0_f32; num_bins];
     let reach = vec![1.0_f32; num_bins];
+    // mix=2.0 saturates to fully wet so the kernel's output drives the test, not the dry mix.
     let mix = vec![2.0_f32; num_bins];
     let curves: Vec<&[f32]> = vec![&amount, &thresh, &speed, &reach, &mix];
 
@@ -72,6 +73,7 @@ fn surface_tension_conserves_magnitude_within_tolerance() {
     let wet_mag: f32 = wet.iter().map(|b| b.norm()).sum();
 
     let loss_pct = (dry_mag - wet_mag).abs() / dry_mag;
+    // 10% slack: coalescence redistributes magnitude unevenly across the band.
     assert!(loss_pct < 0.10,
         "SurfaceTension lost {}% of magnitude (>10% violates conservation)", loss_pct * 100.0);
 }
@@ -87,6 +89,7 @@ fn capillary_conserves_magnitude_within_tolerance() {
     let wet_mag: f32 = wet.iter().map(|b| b.norm()).sum();
 
     let loss_pct = (dry_mag - wet_mag).abs() / dry_mag;
+    // 15% slack: harmonic wicking carries energy across larger gaps than diffusion.
     assert!(loss_pct < 0.15,
         "Capillary lost {}% of magnitude (>15% violates conservation)", loss_pct * 100.0);
 }
