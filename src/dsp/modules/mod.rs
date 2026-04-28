@@ -1,6 +1,7 @@
 use nih_plug_egui::egui::Color32;
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use crate::params::{FxChannelTarget, StereoLink};
 use crate::dsp::amp_modes::{AmpMode, AmpCellParams};
 
@@ -102,7 +103,13 @@ pub struct ModuleContext<'block> {
     pub delta_monitor:     bool,
 
     // Optional infra fields — populated by later phases. None by default.
-    pub unwrapped_phase:      Option<&'block [f32]>,      // Phase 4.1
+    /// Phase 4.1 — per-bin unwrapped phase trajectory exposed as a slice of
+    /// `Cell<f32>` so PLPV-aware modules (PhaseSmear, Freeze, MidSide) can both
+    /// read AND write through the same field while `ModuleContext` stays
+    /// `Copy + Clone`. The Pipeline's re-wrap stage reads the underlying
+    /// `Vec<f32>` directly after the FxMatrix pass — modules' `set()` writes
+    /// through the Cell mutate the same memory the Pipeline will re-wrap.
+    pub unwrapped_phase:      Option<&'block [Cell<f32>]>, // Phase 4.1 / 4.3b
     pub peaks:                Option<&'block [PeakInfo]>, // Phase 4.2
     pub instantaneous_freq:   Option<&'block [f32]>,      // Phase 6.1
     pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
@@ -255,9 +262,16 @@ pub trait SpectralModule: Send {
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 
-    /// Toggle the per-module PLPV peak-locked path on Dynamics modules.
-    /// Default no-op for all other types — only DynamicsModule overrides.
-    fn set_plpv_enabled(&mut self, _: bool) {}
+    /// Toggle the per-module PLPV peak-locked ducking path. Default no-op
+    /// for everything except DynamicsModule. Mirrors the per-mode setter
+    /// convention (`set_gain_mode`, `set_future_mode`, etc.) so each module
+    /// owns its own toggle and a global setter can fire all of them without
+    /// cross-talk.
+    fn set_plpv_dynamics_enabled(&mut self, _: bool) {}
+
+    /// Toggle the per-module PLPV unwrapped-phase randomization path on
+    /// PhaseSmearModule. Default no-op for all other types.
+    fn set_plpv_phase_smear_enabled(&mut self, _: bool) {}
 
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.

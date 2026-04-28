@@ -419,6 +419,7 @@ impl Pipeline {
         let enable_heavy_modules = params.enable_heavy_modules.value();
         let plpv_enable = params.plpv_enable.value();
         let plpv_dynamics_enable = params.plpv_dynamics_enable.value();
+        let plpv_phase_smear_enable = params.plpv_phase_smear_enable.value();
         let plpv_phase_noise_floor_db = params.plpv_phase_noise_floor_db.smoothed.next_step(block_size);
         // Phase 4.2: control-rate peak-detection params. Read once per block.
         let max_peaks_capped: usize = (params.plpv_max_peaks.value() as usize).min(MAX_PEAKS);
@@ -587,6 +588,10 @@ impl Pipeline {
         // (no-op for everything except DynamicsModule).
         self.fx_matrix.set_plpv_dynamics_enable(plpv_dynamics_enable);
 
+        // Phase 4.3b — propagate the PhaseSmear-PLPV enable flag each block. Same
+        // pattern as 4.3a; trait default is a no-op for non-PhaseSmear modules.
+        self.fx_matrix.set_plpv_phase_smear_enable(plpv_phase_smear_enable);
+
         // Build route matrix from automatable params each block.
         // virtual_rows + amp_mode + amp_params are not exposed as automation
         // targets, so we read them from the Mutex — but never block waiting for it.
@@ -735,9 +740,15 @@ impl Pipeline {
                 );
                 hop_ctx.peaks = Some(&peak_buf_ref[ch][..n_peaks]);
 
-                // Expose unwrapped phase to modules. Re-borrow via the rebound local so the
-                // closure does not need a second &mut self borrow.
-                hop_ctx.unwrapped_phase = Some(&unwrapped_phase_ref[ch][..num_bins]);
+                // Expose unwrapped phase to modules. Phase 4.3b: hand out a slice of
+                // `Cell<f32>` (alloc-free, unsafe-free) so PLPV-aware modules can both
+                // read AND write through the same field while ModuleContext stays Copy.
+                // The Pipeline's re-wrap stage below reads `unwrapped_phase_ref` directly
+                // as `&[f32]`, which sees the same memory the Cell-slice writes through.
+                hop_ctx.unwrapped_phase = Some(
+                    std::cell::Cell::from_mut(&mut unwrapped_phase_ref[ch][..num_bins])
+                        .as_slice_of_cells(),
+                );
             }
 
             // Run all modules through the fx_matrix slot chain.

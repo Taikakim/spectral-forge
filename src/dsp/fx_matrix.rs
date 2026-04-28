@@ -304,13 +304,25 @@ impl FxMatrix {
     }
 
     /// Phase 4.3a — propagate the global Dynamics-PLPV enable flag to every
-    /// slot. The trait's default `set_plpv_enabled` is a no-op for non-Dynamics
-    /// modules, so calling it on every slot is safe and cheap (one cmp + branch
-    /// per slot). Called once per audio block (before process_hop).
+    /// slot. The trait's default `set_plpv_dynamics_enabled` is a no-op for
+    /// non-Dynamics modules, so calling it on every slot is safe and cheap
+    /// (one cmp + branch per slot). Called once per audio block (before
+    /// process_hop).
     pub fn set_plpv_dynamics_enable(&mut self, enabled: bool) {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
-                m.set_plpv_enabled(enabled);
+                m.set_plpv_dynamics_enabled(enabled);
+            }
+        }
+    }
+
+    /// Phase 4.3b — propagate the global PhaseSmear-PLPV enable flag to every
+    /// slot. The trait's default `set_plpv_phase_smear_enabled` is a no-op for
+    /// non-PhaseSmear modules. Called once per audio block (before process_hop).
+    pub fn set_plpv_phase_smear_enable(&mut self, enabled: bool) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_plpv_phase_smear_enabled(enabled);
             }
         }
     }

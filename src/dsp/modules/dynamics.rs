@@ -137,7 +137,7 @@ impl SpectralModule for DynamicsModule {
             smoothing_semitones: ctx.suppression_width,
             // Phase 4.3a — peak-locked ducking. ctx.peaks is populated by the
             // Pipeline only when global plpv_enable is true; the per-module flag
-            // (self.plpv_enabled) is set per-block via set_plpv_enabled().
+            // (self.plpv_enabled) is set per-block via set_plpv_dynamics_enabled().
             // Engine ignores both unless plpv_dynamics_enabled && peaks.is_some().
             peaks:                 ctx.peaks,
             plpv_dynamics_enabled: self.plpv_enabled,
@@ -180,7 +180,7 @@ impl SpectralModule for DynamicsModule {
     fn num_curves(&self) -> usize { 6 }
 
     /// Phase 4.3a — propagated each block by `FxMatrix::set_plpv_dynamics_enable`.
-    fn set_plpv_enabled(&mut self, enabled: bool) {
+    fn set_plpv_dynamics_enabled(&mut self, enabled: bool) {
         self.plpv_enabled = enabled;
     }
 

@@ -1,11 +1,13 @@
-//! Engine-level unit tests for Phase 4.3a — Dynamics PLPV peak-locked ducking.
+//! Engine-level unit tests for Phase 4.3a — Dynamics PLPV peak-locked ducking
+//! and Phase 4.3b — PhaseSmear PLPV unwrapped-phase randomization wiring.
 //!
-//! These exercise `SpectralCompressorEngine::process_bins` directly with the
-//! new `BinParams.peaks` / `BinParams.plpv_dynamics_enabled` fields. A full
-//! Pipeline-level harness is out of scope (Spectral Forge has no public
-//! `Pipeline::run_probe` helper today). Engine-level coverage is sufficient
-//! because the lock lives inside the engine — the wiring around it is a
-//! single `if let` that BinParams already gates.
+//! 4.3a tests exercise `SpectralCompressorEngine::process_bins` directly with the
+//! new `BinParams.peaks` / `BinParams.plpv_dynamics_enabled` fields.
+//!
+//! 4.3b tests exercise `PhaseSmearModule::process` directly to prove the routing
+//! decision: PLPV-on writes `ctx.unwrapped_phase` only (Pipeline rewrap stage
+//! propagates to bins); PLPV-off writes `bins[k]` only (legacy complex-space mix).
+//! End-to-end audible correctness is verified at Phase 4.9.
 
 use num_complex::Complex;
 use spectral_forge::dsp::engines::{
@@ -163,4 +165,126 @@ fn dynamics_engine_plpv_on_locks_skirt_to_peak() {
     let far_supp = supp[800];
     assert!(far_supp < peak_supp * 0.1,
         "out-of-skirt bin should not be locked to peak GR: far={far_supp}, peak={peak_supp}");
+}
+
+// ── Phase 4.3b — PhaseSmear PLPV routing wiring ───────────────────────────────
+//
+// Two engine-level tests prove the PLPV-on vs PLPV-off branching writes to the
+// correct destination. The Pipeline-level smoothness test from the plan (boundary
+// RMS measurement) is deferred to Phase 4.9.
+
+use std::cell::Cell;
+use spectral_forge::dsp::modules::{ModuleContext, PhaseSmearModule, SpectralModule};
+use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+/// Build the curves PhaseSmear consumes: amount, peak hold, mix.
+/// `amount = 1.0 → ±π scale`, `mix = 1.0 → fully wet`.
+fn phase_smear_curves(num_bins: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    (
+        vec![1.0f32; num_bins],   // AMOUNT — full ±π scale
+        vec![1.0f32; num_bins],   // PEAK HOLD — neutral
+        vec![1.0f32; num_bins],   // MIX — fully wet
+    )
+}
+
+/// Synthesize an unwrapped-phase trajectory for tests: `[k * 0.1; n]`.
+/// Returned as a `Vec<Cell<f32>>` so the slice form `&[Cell<f32>]` matches the
+/// `ModuleContext.unwrapped_phase` field type.
+fn make_unwrapped(num_bins: usize) -> Vec<Cell<f32>> {
+    (0..num_bins).map(|k| Cell::new(k as f32 * 0.1)).collect()
+}
+
+#[test]
+fn phase_smear_plpv_off_writes_to_bins_only() {
+    let num_bins = 1025usize;
+    let mut m = PhaseSmearModule::new();
+    m.reset(48000.0, 2048);
+    m.set_plpv_phase_smear_enabled(false);
+
+    // Bins: a non-trivial spectrum so a phase change is detectable. Real-only
+    // initial bins → arg() == 0 for k != Nyquist; any phase write shows up as
+    // a non-zero imaginary component.
+    let initial_bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|_| Complex::new(1.0, 0.0)).collect();
+    let mut bins = initial_bins.clone();
+
+    // Unwrapped-phase trajectory exposed through ctx — but since PLPV is OFF,
+    // the module must not touch it.
+    let unwrapped = make_unwrapped(num_bins);
+    let initial_unwrapped: Vec<f32> = unwrapped.iter().map(|c| c.get()).collect();
+
+    let (am, pk, mx) = phase_smear_curves(num_bins);
+    let curves_vec: Vec<&[f32]> = vec![&am, &pk, &mx];
+
+    let mut supp = vec![0.0f32; num_bins];
+
+    let mut ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    ctx.unwrapped_phase = Some(&unwrapped);
+
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves_vec, &mut supp, None, &ctx);
+
+    // PLPV OFF → unwrapped[] must be byte-identical to initial values.
+    for k in 0..num_bins {
+        assert_eq!(unwrapped[k].get(), initial_unwrapped[k],
+            "PLPV-off must not touch unwrapped[{k}]: got {} expected {}",
+            unwrapped[k].get(), initial_unwrapped[k]);
+    }
+
+    // PLPV OFF → bins must show some phase change (non-zero imaginary part on
+    // at least some bin, since the input was real and amount=1.0). The DC and
+    // Nyquist bins are skipped, so check the interior.
+    let any_changed = (1..num_bins - 1).any(|k| (bins[k].im - initial_bins[k].im).abs() > 1e-6);
+    assert!(any_changed, "PLPV-off must apply random phase to bins[]");
+}
+
+#[test]
+fn phase_smear_plpv_on_writes_to_unwrapped_only() {
+    let num_bins = 1025usize;
+    let mut m = PhaseSmearModule::new();
+    m.reset(48000.0, 2048);
+    m.set_plpv_phase_smear_enabled(true);
+
+    let initial_bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|_| Complex::new(1.0, 0.0)).collect();
+    let mut bins = initial_bins.clone();
+
+    let unwrapped = make_unwrapped(num_bins);
+    let initial_unwrapped: Vec<f32> = unwrapped.iter().map(|c| c.get()).collect();
+
+    let (am, pk, mx) = phase_smear_curves(num_bins);
+    let curves_vec: Vec<&[f32]> = vec![&am, &pk, &mx];
+
+    let mut supp = vec![0.0f32; num_bins];
+
+    let mut ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    ctx.unwrapped_phase = Some(&unwrapped);
+
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves_vec, &mut supp, None, &ctx);
+
+    // PLPV ON → bins must be byte-identical to the input. The Pipeline's rewrap
+    // stage (not run in this test) is what produces the audible effect; the
+    // module itself must NOT write bins on this path.
+    for k in 0..num_bins {
+        assert_eq!(bins[k].re, initial_bins[k].re,
+            "PLPV-on must not write bins[{k}].re: got {} expected {}",
+            bins[k].re, initial_bins[k].re);
+        assert_eq!(bins[k].im, initial_bins[k].im,
+            "PLPV-on must not write bins[{k}].im: got {} expected {}",
+            bins[k].im, initial_bins[k].im);
+    }
+
+    // PLPV ON → at least one interior unwrapped[] entry must have changed
+    // (DC at k=0 and Nyquist at k=num_bins-1 are skipped; everywhere else
+    // sees a non-zero random phase × mix).
+    let any_changed = (1..num_bins - 1)
+        .any(|k| (unwrapped[k].get() - initial_unwrapped[k]).abs() > 1e-6);
+    assert!(any_changed, "PLPV-on must write to unwrapped[]");
 }
