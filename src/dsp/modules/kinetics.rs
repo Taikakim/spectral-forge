@@ -469,20 +469,85 @@ impl KineticsModule {
         }
     }
 
-    /// Inertial mass — per-bin mass from static curve or sidechain rate-of-change.
-    /// Reads dry mag from `self.dry_mag_scratch[channel]`. Implemented in Task 7.
+    /// Inertial mass — writes `physics.mass` per bin; `bins` are **not** modified.
+    ///
+    /// Two sources (selected by `self.mass_source`):
+    /// - `Static`:   `physics.mass[k]` = MASS_curve[k], MIX-blended with current value.
+    /// - `Sidechain`: broadband SC envelope rate-of-change drives mass UP when the
+    ///   sidechain is changing fast and DOWN when steady. Formula:
+    ///   `mass = clamp((1 + 5 * rate) * MASS_curve[k], 0.01, 1000)`.
+    ///
+    /// Returns immediately (no-op) when `physics` is `None`.
     #[allow(clippy::too_many_arguments)]
     fn apply_inertial_mass(
         &mut self,
-        _channel: usize,
+        channel: usize,
         _bins: &mut [Complex<f32>],
-        _dt: f32,
-        _num_bins: usize,
-        _sidechain: Option<&[f32]>,
+        dt: f32,
+        num_bins: usize,
+        sidechain: Option<&[f32]>,
         _ctx: &ModuleContext<'_>,
-        _physics: Option<&mut BinPhysics>,
+        physics: Option<&mut BinPhysics>,
     ) {
-        // Implemented in Task 7.
+        // Bind local slice refs — avoids triple-indexing through self inside the inner
+        // loop and keeps borrows disjoint from the physics write below.
+        let mass_curve = &self.smoothed_curves[channel][1][..num_bins];
+        let mix_curve  = &self.smoothed_curves[channel][4][..num_bins];
+
+        // No physics writer → nothing to do.
+        let physics = match physics {
+            Some(p) => p,
+            None => return,
+        };
+
+        match self.mass_source {
+            MassSource::Static => {
+                // Direct write: physics.mass[k] = MASS_curve[k] (clamped), MIX-blended.
+                for k in 0..num_bins {
+                    let target = mass_curve[k].clamp(0.01, 1000.0);
+                    let mix    = mix_curve[k].clamp(0.0, 1.0);
+                    let cur    = physics.mass[k];
+                    physics.mass[k] = cur * (1.0 - mix) + target * mix;
+                }
+            }
+            MassSource::Sidechain => {
+                // -- Compute broadband SC magnitude for this hop. --
+                let sc_now = if let Some(sc) = sidechain {
+                    let n = sc.len().min(num_bins);
+                    if n == 0 {
+                        0.0
+                    } else {
+                        sc[..n].iter().map(|x| x.abs()).sum::<f32>() / n as f32
+                    }
+                } else {
+                    0.0
+                };
+
+                // -- 1-pole envelope smoother (tau = SC_ENVELOPE_TAU_HOPS hops). --
+                // alpha = 1 - exp(-1 / tau_hops). Read → compute → write, so the
+                // immutable borrow of mass_curve/mix_curve and the mutable physics write
+                // below use only local scalars, not self-borrows.
+                let alpha_env = 1.0 - (-(1.0 / SC_ENVELOPE_TAU_HOPS)).exp();
+                let env_prev  = self.sc_env_smoothed[channel];
+                let env       = env_prev + alpha_env * (sc_now - env_prev);
+                self.sc_env_smoothed[channel] = env;
+
+                // -- Rate of change (absolute delta per second). --
+                let prev = self.sc_env_prev[channel];
+                let rate = (env - prev).abs() / dt.max(1e-6);
+                self.sc_env_prev[channel] = env;
+
+                // -- Per-bin mass write: high rate → heavier mass. --
+                for k in 0..num_bins {
+                    let target = ((1.0 + 5.0 * rate) * mass_curve[k].clamp(0.01, 100.0))
+                        .clamp(0.01, 1000.0);
+                    let mix    = mix_curve[k].clamp(0.0, 1.0);
+                    let cur    = physics.mass[k];
+                    physics.mass[k] = cur * (1.0 - mix) + target * mix;
+                }
+            }
+        }
+        // bins are not modified — InertialMass only writes physics.mass.
     }
 
     /// Orbital phase rotation of each bin around its neighbour. Implemented in Task 8.

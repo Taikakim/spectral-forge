@@ -1687,3 +1687,158 @@ fn kinetics_gravity_well_midi_no_op_without_ctx_midi() {
         assert!(diff < 0.02, "MIDI well leaked motion when ctx.midi_notes=None (bin {} drifted by {})", k, diff);
     }
 }
+
+#[test]
+fn kinetics_inertial_mass_static_writes_bin_physics_mass() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, MassSource};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::InertialMass);
+    module.set_mass_source(MassSource::Static);
+
+    let num_bins = 1025usize;
+
+    // MASS curve: ramp from 0.5 to 3.0 across all bins.
+    let mass_curve: Vec<f32> = (0..num_bins)
+        .map(|k| 0.5 + 2.5 * k as f32 / (num_bins - 1) as f32)
+        .collect();
+    // MIX curve: full wet (1.0) so the static write lands immediately.
+    let mix_curve = vec![1.0_f32; num_bins];
+    // Other curves (STRENGTH, REACH, DAMPING) at neutral.
+    let neutral = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&neutral, &mass_curve, &neutral, &neutral, &mix_curve];
+
+    let mut bins = vec![Complex::new(0.5_f32, 0.0); num_bins];
+    let mut suppression = vec![0.0_f32; num_bins];
+
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    // Run several hops so the 1-pole curve smoother converges.
+    for _ in 0..30 {
+        module.process(
+            0,
+            StereoLink::Linked,
+            FxChannelTarget::All,
+            &mut bins,
+            None,
+            &curves,
+            &mut suppression,
+            Some(&mut physics),
+            &ctx,
+        );
+    }
+
+    // Verify: physics.mass should track the MASS curve closely (MIX=1 → direct write).
+    // Check a few representative bins.
+    for &k in &[0usize, 256, 512, 768, 1024] {
+        let expected = mass_curve[k].clamp(0.01, 1000.0);
+        let actual   = physics.mass[k];
+        assert!(
+            (actual - expected).abs() < 0.05,
+            "Static: physics.mass[{}] = {} (expected ~{})",
+            k, actual, expected
+        );
+    }
+
+    // Bins must NOT be modified by InertialMass.
+    for k in 0..num_bins {
+        assert!(
+            (bins[k].re - 0.5).abs() < 1e-4 && bins[k].im.abs() < 1e-4,
+            "InertialMass (Static) must not modify bins (bin {} re={} im={})",
+            k, bins[k].re, bins[k].im
+        );
+    }
+}
+
+#[test]
+fn kinetics_inertial_mass_sidechain_high_when_sc_changing_fast() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, MassSource};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::InertialMass);
+    module.set_mass_source(MassSource::Sidechain);
+
+    let num_bins = 1025usize;
+
+    // MASS curve at 1.0 (neutral), MIX at 1.0 (full wet).
+    let neutral    = vec![1.0_f32; num_bins];
+    let mix_curve  = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&neutral, &neutral, &neutral, &neutral, &mix_curve];
+
+    let mut bins       = vec![Complex::new(0.5_f32, 0.0); num_bins];
+    let mut suppression = vec![0.0_f32; num_bins];
+
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    // -- Phase 1: quiescent SC (zero signal). Let envelope fully decay.
+    let sc_silent = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    for _ in 0..20 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, Some(&sc_silent), &curves,
+            &mut suppression, Some(&mut physics), &ctx,
+        );
+    }
+    let steady_mass = physics.mass[512];
+
+    // -- Phase 2: sudden large SC burst — rate of change should spike mass.
+    let sc_burst: Vec<f32> = vec![1.0_f32; num_bins];
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, Some(&sc_burst), &curves,
+        &mut suppression, Some(&mut physics), &ctx,
+    );
+    let burst_mass = physics.mass[512];
+
+    assert!(
+        burst_mass > steady_mass * 1.5,
+        "Sidechain burst should raise mass (steady={}, burst={})",
+        steady_mass, burst_mass
+    );
+
+    // -- Phase 3: SC returns to silence; mass should decay back toward steady-state.
+    for _ in 0..30 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, Some(&sc_silent), &curves,
+            &mut suppression, Some(&mut physics), &ctx,
+        );
+    }
+    let recovered_mass = physics.mass[512];
+    assert!(
+        recovered_mass < burst_mass * 0.5,
+        "Sidechain mass should decay after burst (burst={}, recovered={})",
+        burst_mass, recovered_mass
+    );
+
+    // Bins must NOT be modified by InertialMass.
+    for k in 0..num_bins {
+        assert!(
+            (bins[k].re - 0.5).abs() < 1e-4 && bins[k].im.abs() < 1e-4,
+            "InertialMass (Sidechain) must not modify bins (bin {} re={} im={})",
+            k, bins[k].re, bins[k].im
+        );
+    }
+}
