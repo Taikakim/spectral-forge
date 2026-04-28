@@ -293,9 +293,35 @@ impl PastModule {
     }
 
     fn apply_reverse(
-        &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
-        _amount: &[f32], _time: &[f32], _threshold: &[f32], _mix: &[f32], _ctx: &ModuleContext<'_>,
-    ) {}
+        &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
+        amount: &[f32], time: &[f32], threshold: &[f32], mix: &[f32], ctx: &ModuleContext<'_>,
+    ) {
+        let n = bins.len().min(ctx.num_bins);
+        let max_age = hist.capacity_frames() as f32;
+        // Median TIME picks the window length — TIME is per-bin but the read
+        // pointer is per-channel. Picking the average avoids per-bin pointer drift.
+        let window = {
+            let t_avg = if n == 0 { 0.0 } else {
+                time.iter().take(n).copied().sum::<f32>() / n as f32
+            };
+            ((t_avg.clamp(0.0, 1.0) * max_age).round() as u32).max(1)
+        };
+        let st = &mut self.channels[ch];
+        let age = (st.reverse_read_offset % window) as usize;
+        st.reverse_read_offset = (st.reverse_read_offset + 1) % window;
+
+        let frame = match hist.read_frame(ch, age) { Some(f) => f, None => return };
+        for k in 0..n {
+            let mag_sq = bins[k].norm_sqr();
+            let thr = threshold.get(k).copied().unwrap_or(0.0);
+            if mag_sq < thr * thr { continue; }
+            if k >= frame.len() { continue; }
+            let bin_amount = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            let value = frame[k] * bin_amount;
+            let m_val = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            bins[k] = bins[k] * (1.0 - m_val) + value * m_val;
+        }
+    }
 
     fn apply_stretch(
         &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
