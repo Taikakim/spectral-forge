@@ -50,7 +50,6 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
     }
 
     let current_mode = params.slot_past_mode.lock()[slot];
-    let current_key  = params.slot_past_sort_key.lock()[slot];
 
     let mut new_state = state.clone();
     let mut consumed = false;
@@ -81,18 +80,23 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
                 }
 
                 // Sort key sub-picker — only visible when mode is DecaySorter.
-                if current_mode == PastMode::DecaySorter {
+                // Re-read both fields here so a mode click on this same frame
+                // (entering or leaving DecaySorter) takes effect immediately
+                // without a one-frame flicker.
+                let mode_now = params.slot_past_mode.lock()[slot];
+                if mode_now == PastMode::DecaySorter {
+                    let current_key = params.slot_past_sort_key.lock()[slot];
                     ui.separator();
                     ui.label(
                         egui::RichText::new("Sort Key")
                             .color(th::LABEL_DIM)
                             .size(th::scaled(th::FONT_SIZE_LABEL, scale))
                     );
-                    for &(key, label) in SORT_KEYS {
-                        let selected = current_key == key;
+                    for &(sort_key, label) in SORT_KEYS {
+                        let selected = current_key == sort_key;
                         let resp = ui.selectable_label(selected, label);
                         if resp.clicked() && !selected {
-                            params.slot_past_sort_key.lock()[slot] = key;
+                            params.slot_past_sort_key.lock()[slot] = sort_key;
                             consumed = true;
                         }
                     }
