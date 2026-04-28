@@ -7,6 +7,7 @@ pub mod fx_matrix_grid;
 pub mod module_popup;
 pub mod amp_popup;
 pub mod life_popup;
+pub mod past_popup;
 pub mod preset_menu;
 pub use preset_menu::{PresetMenuState, preset_menu_ui};
 pub mod mod_ring;
