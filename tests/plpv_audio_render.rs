@@ -12,10 +12,12 @@
 //!   PLPV-on locks all bins in a skirt to the peak's GR → near-zero
 //!   within-skirt variance; PLPV-off applies per-bin GR independently
 //!   → nonzero variance. This is the real "no smearing" discriminator.
-//! * **Time-domain RMS variance at hop boundaries** — for the Freeze path,
-//!   measures hop-to-hop RMS of the iFFT output after phase rewrap.
-//!   PLPV-on writes a smooth phase trajectory → stable RMS. PLPV-off
-//!   allows phase jumps at retrigger points → RMS spikes.
+//! * **Inter-frame phase coherence** — for the Freeze path, measures
+//!   `Re(S_{h+1}[k] · conj(S_h[k]) · exp(-jω_k)) / (|S_h[k]| + ε)` summed
+//!   across interior bins and adjacent hop pairs, where `ω_k = 2π·k·hop/N`
+//!   is the canonical PV phase advance. PLPV-on locks phase to the canonical
+//!   advance (coherence near 1); PLPV-off freezes phase across hops so
+//!   `Δφ ≠ ω_k`, driving coherence near 0 or negative.
 //!
 //! Each test runs the same input through a freshly constructed PLPV-off
 //! and PLPV-on module (identical PRNG seed; difference is the PLPV flag
@@ -367,7 +369,6 @@ fn drum_loop_through_dynamics_no_smearing() {
 /// Mean inter-frame phase coherence for PLPV-on > PLPV-off with margin ≥ 1.5×.
 #[test]
 fn sustained_chord_through_freeze_no_boundary_clicks() {
-    use realfft::RealFftPlanner;
     use std::f32::consts::PI;
 
     // A3 major triad: A3 root (220 Hz) + major third + perfect fifth.
@@ -379,13 +380,6 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
     // Canonical PV phase advance per bin per hop: ω_k = 2π·k·hop/N
     let hop_size = FFT_SIZE / 4; // OVERLAP=4
     let two_pi_hop_over_n = 2.0 * PI * hop_size as f32 / FFT_SIZE as f32;
-
-    // Allocate iFFT planner and scratch ONCE — no allocation inside the hop loop.
-    let mut planner   = RealFftPlanner::<f32>::new();
-    let ifft          = planner.plan_fft_inverse(FFT_SIZE);
-    let mut scratch   = ifft.make_scratch_vec();
-    let mut time_buf  = ifft.make_output_vec(); // length = FFT_SIZE
-    let ola_norm      = 2.0_f32 / (3.0 * FFT_SIZE as f32);
 
     // Persistent unwrapped-phase cells, shared across hops.
     // FreezeModule reads and writes these; PLPV-off leaves them untouched.
@@ -406,10 +400,6 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
     let mut bins_off = vec![Complex::new(0.0f32, 0.0); NUM_BINS];
     let mut bins_on  = vec![Complex::new(0.0f32, 0.0); NUM_BINS];
     let mut supp     = vec![0.0f32; NUM_BINS];
-
-    // Track per-hop iFFT RMS (with OLA norm) for the report.
-    let mut rms_off = Vec::with_capacity(num_hops);
-    let mut rms_on  = Vec::with_capacity(num_hops);
 
     // Previous-hop spectra for inter-frame coherence.
     let mut prev_off: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); NUM_BINS];
@@ -446,11 +436,6 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
         mod_off.process(0, StereoLink::Linked, FxChannelTarget::All,
                         &mut bins_off, None, &curves, &mut supp, None, &ctx_off);
         // No rewrap for PLPV-off: use raw frozen complex output.
-        let mut ifft_in_off = bins_off.clone();
-        ifft_in_off[0].im = 0.0;
-        ifft_in_off[NUM_BINS - 1].im = 0.0;
-        ifft.process_with_scratch(&mut ifft_in_off, &mut time_buf, &mut scratch).unwrap();
-        rms_off.push(rms_of(&time_buf, ola_norm));
 
         // ── PLPV on ──────────────────────────────────────────────────────────
         bins_on.copy_from_slice(&input_bins);
@@ -464,11 +449,6 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
             let p = spectral_forge::dsp::plpv::principal_arg(unwrapped_on[k].get());
             bins_on[k] = Complex::from_polar(m, p);
         }
-        let mut ifft_in_on = bins_on.clone();
-        ifft_in_on[0].im = 0.0;
-        ifft_in_on[NUM_BINS - 1].im = 0.0;
-        ifft.process_with_scratch(&mut ifft_in_on, &mut time_buf, &mut scratch).unwrap();
-        rms_on.push(rms_of(&time_buf, ola_norm));
 
         // ── Inter-frame coherence (skip first hop — no prev frame yet) ────
         // C_h[k] = Re( S_{h+1}[k] · conj(S_h[k]) · exp(-j·ω_k) )
@@ -503,9 +483,6 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
         first_hop = false;
     }
 
-    let var_off = common::variance(&rms_off);
-    let var_on  = common::variance(&rms_on);
-
     let mean_coh_off = if coh_count > 0 { (coh_sum_off / coh_count as f64) as f32 } else { 0.0 };
     let mean_coh_on  = if coh_count > 0 { (coh_sum_on  / coh_count as f64) as f32 } else { 0.0 };
     // Margin: ratio of PLPV-on coherence to the absolute value of PLPV-off coherence.
@@ -514,10 +491,6 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
     let coh_ref   = mean_coh_off.abs().max(1e-9);
     let coh_ratio = mean_coh_on / coh_ref;
 
-    println!(
-        "freeze hop-RMS variance: PLPV-off={:.6e}  PLPV-on={:.6e}",
-        var_off, var_on,
-    );
     println!(
         "freeze inter-frame coherence: PLPV-off={:.4}  PLPV-on={:.4}  ratio={:.2}x",
         mean_coh_off, mean_coh_on, coh_ratio,
@@ -540,13 +513,3 @@ fn sustained_chord_through_freeze_no_boundary_clicks() {
     );
 }
 
-/// Compute the RMS of a time-domain slice, scaled by `ola_norm`.
-///
-/// `ola_norm = 2.0 / (3.0 * fft_size)` — the Hann² OLA normalisation
-/// constant used by the Pipeline. Applying it here aligns the RMS values
-/// to the same scale the Pipeline produces.
-fn rms_of(samples: &[f32], ola_norm: f32) -> f32 {
-    if samples.is_empty() { return 0.0; }
-    let energy: f32 = samples.iter().map(|s| s * s).sum();
-    (energy / samples.len() as f32).sqrt() * ola_norm
-}
