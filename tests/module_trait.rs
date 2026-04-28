@@ -587,6 +587,63 @@ fn life_viscosity_diffuses_and_conserves() {
 }
 
 #[test]
+fn life_crystallization_writes_bin_physics() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::Crystallization);
+
+    let num_bins = 1025;
+    // Sustained tone at bin 50, magnitude 0.8.
+    let bins_template: Vec<Complex<f32>> = {
+        let mut v = vec![Complex::new(0.0, 0.0); num_bins];
+        v[50] = Complex::new(0.8, 0.0);
+        v
+    };
+
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.5_f32; num_bins]; // low → bin 50's mag (0.8) easily exceeds
+    let speed   = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &speed, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    // 50 hops to let sustain envelope build at bin 50. Re-supply input each hop.
+    let mut bins = bins_template.clone();
+    for _ in 0..50 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, Some(&mut physics), &ctx,
+        );
+        bins = bins_template.clone();
+    }
+
+    assert!(physics.crystallization[50] > 0.5,
+        "crystallization[50] = {} (expected > 0.5 after 50 hops of sustain)",
+        physics.crystallization[50]);
+
+    assert!(physics.crystallization[0]   < 0.1, "quiet bin 0 leaked: {}", physics.crystallization[0]);
+    assert!(physics.crystallization[100] < 0.1, "quiet bin 100 leaked: {}", physics.crystallization[100]);
+
+    for b in &bins {
+        assert!(b.norm().is_finite());
+    }
+}
+
+#[test]
 fn life_surface_tension_coalesces_peaks() {
     use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};

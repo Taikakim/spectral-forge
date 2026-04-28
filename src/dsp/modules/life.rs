@@ -30,7 +30,6 @@ const VISCOSITY_D_MAX: f32 = 0.45;
 
 /// ~50ms time-constant LP alpha at 48k/256-hop.
 /// Used by the Capillary (Task 10) and Crystallization (Task 5) kernels.
-#[allow(dead_code)]
 const SUSTAIN_LP_ALPHA: f32 = 0.05;
 
 /// Surface Tension max steal fraction per hop (5%). Conservative cap so even the
@@ -263,6 +262,54 @@ fn apply_surface_tension(
     }
 }
 
+/// Sustained tonal bins build crystallization. Writes to BinPhysics.crystallization
+/// for downstream readers (Freeze). AMOUNT scales the crystallization growth rate;
+/// THRESHOLD is the magnitude floor above which a bin counts as "sustained";
+/// SPEED scales the LP coefficient (larger = faster build/decay).
+fn apply_crystallization(
+    bins: &mut [Complex<f32>],
+    sustain_envelope: &mut [f32],
+    curves: &[&[f32]],
+    physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let speed_c  = curves[2];
+    let mix_c    = curves[4];
+
+    for k in 0..num_bins {
+        let mag    = bins[k].norm();
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 2.0);
+        let speed  = (speed_c[k]  * 0.5).clamp(0.0, 1.0);
+        let alpha  = SUSTAIN_LP_ALPHA * (1.0 + speed * 4.0); // 0.05 .. 0.25
+
+        let sustained = if mag > thresh { 1.0 } else { 0.0 };
+        sustain_envelope[k] = sustain_envelope[k] * (1.0 - alpha) + sustained * alpha;
+
+        let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let crystal_local = (sustain_envelope[k] * amt).clamp(0.0, 1.0);
+
+        // v1 phase-lock target: real axis (frozen phase = 0). Future revision may
+        // lock to first-observed-phase per slot; keep simple for now.
+        let mix    = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let target = Complex::new(mag, 0.0);
+        let dry    = bins[k];
+        let locked = dry * (1.0 - crystal_local) + target * crystal_local;
+        bins[k]    = dry * (1.0 - mix) + locked * mix;
+    }
+
+    if let Some(p) = physics {
+        // BinPhysics merge rule for `crystallization` is Max (see bin_physics.rs:110).
+        // We apply Max ourselves for additive stacking across multiple Crystallization slots.
+        for k in 0..num_bins {
+            let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+            let crystal_local = (sustain_envelope[k] * amt).clamp(0.0, 1.0);
+            p.crystallization[k] = p.crystallization[k].max(crystal_local);
+        }
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -273,7 +320,7 @@ impl SpectralModule for LifeModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+        physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         ctx: &ModuleContext<'_>,
     ) {
         debug_assert!(channel < 2);
@@ -284,13 +331,20 @@ impl SpectralModule for LifeModule {
 
         match self.mode {
             LifeMode::Viscosity => {
+                let _ = physics;
                 apply_viscosity(bins, scratch_power, scratch_mag, curves);
             }
             LifeMode::SurfaceTension => {
+                let _ = physics;
                 apply_surface_tension(bins, scratch_mag, curves);
             }
+            LifeMode::Crystallization => {
+                let sustain = &mut self.sustain_envelope[channel];
+                apply_crystallization(bins, sustain, curves, physics, ctx.num_bins);
+            }
             _ => {
-                // Filled in Tasks 5–12.
+                let _ = physics;
+                // Filled in Tasks 6–12.
             }
         }
 
