@@ -126,6 +126,10 @@ pub struct KineticsModule {
     /// Per-channel xorshift32 RNG (Diamagnet jitter).
     rng_state: [u32; 2],
 
+    /// Scratch for well count written by apply_gravity_well; read by the probe block in
+    /// process() so the ProbeState reflects the correct mode's well count.
+    last_well_count: [u16; 2],
+
     sample_rate: f32,
     fft_size:    usize,
 
@@ -181,6 +185,7 @@ impl KineticsModule {
             sc_env_prev:     [0.0, 0.0],
             dry_mag_scratch: [Vec::new(), Vec::new()],
             rng_state:       [0xC0FF_EE01, 0xBADD_CAFE],
+            last_well_count: [0; 2],
             sample_rate:     48_000.0,
             fft_size:        2048,
             #[cfg(any(test, feature = "probe"))]
@@ -299,19 +304,155 @@ impl KineticsModule {
         }
     }
 
-    /// Gravity-well attraction toward static/sidechain/MIDI well positions. Implemented in Task 6.
+    /// Gravity-well attraction toward frequency targets.
+    ///
+    /// Three well sources:
+    /// - `Static`:   local maxima above 1.05 in the STRENGTH curve become wells.
+    /// - `Sidechain`: peaks ≥ 40 % of max sidechain amplitude become wells.
+    /// - `MIDI`:     harmonic series per held note; no-op when `ctx.midi_notes` is `None`.
+    ///
+    /// Per-bin force is Newtonian (`sign(d) * w_amp / d²` summed over wells) driven through
+    /// the Velocity-Verlet integrator. MIX curve blends wet/dry.
     #[allow(clippy::too_many_arguments)]
     fn apply_gravity_well(
         &mut self,
-        _channel: usize,
-        _bins: &mut [Complex<f32>],
-        _dt: f32,
-        _num_bins: usize,
-        _sidechain: Option<&[f32]>,
-        _ctx: &ModuleContext<'_>,
+        channel: usize,
+        bins: &mut [Complex<f32>],
+        dt: f32,
+        num_bins: usize,
+        sidechain: Option<&[f32]>,
+        ctx: &ModuleContext<'_>,
         _physics: Option<&BinPhysics>,
     ) {
-        // Implemented in Task 6.
+        // Bind local slice refs for all smoothed curves — avoids triple-indexing through self
+        // inside the inner loop and keeps borrows disjoint from the velocity/displacement writes.
+        let s_strength = &self.smoothed_curves[channel][0][..num_bins];
+        let s_mass     = &self.smoothed_curves[channel][1][..num_bins];
+        let s_reach    = &self.smoothed_curves[channel][2][..num_bins];
+        let s_damping  = &self.smoothed_curves[channel][3][..num_bins];
+        let s_mix      = &self.smoothed_curves[channel][4][..num_bins];
+
+        // -- 1. Determine well positions (bin_index, well_amplitude). --
+        //    SmallVec stays stack-allocated up to MAX_PEAKS = 16 entries; no heap allocation.
+        let mut wells: SmallVec<[(usize, f32); MAX_PEAKS]> = SmallVec::new();
+        match self.well_source {
+            WellSource::Static => {
+                // Local maxima of the STRENGTH curve above the 1.05 baseline become wells.
+                for k in 1..(num_bins - 1) {
+                    if s_strength[k] > 1.05
+                        && s_strength[k] > s_strength[k - 1]
+                        && s_strength[k] > s_strength[k + 1]
+                    {
+                        let amp = s_strength[k] - 1.0; // excess above neutral
+                        if wells.len() < MAX_PEAKS {
+                            wells.push((k, amp));
+                        }
+                    }
+                }
+            }
+            WellSource::Sidechain => {
+                if let Some(sc) = sidechain {
+                    let sc_max = sc.iter().fold(0.0_f32, |a, &b| a.max(b));
+                    let thresh = sc_max * 0.4;
+                    if sc_max > 1e-6 {
+                        let sc_len = sc.len().min(num_bins);
+                        for k in 1..(sc_len.saturating_sub(1)) {
+                            if sc[k] >= thresh && sc[k] > sc[k - 1] && sc[k] > sc[k + 1] {
+                                if wells.len() < MAX_PEAKS {
+                                    wells.push((k, sc[k]));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            WellSource::MIDI => {
+                // Harmonic series per held note. No-op when ctx.midi_notes is None (Phase 6 pending).
+                if let Some(notes) = ctx.midi_notes {
+                    let bin_hz = ctx.sample_rate / ctx.fft_size as f32;
+                    let harmonic_count = (s_reach[0].clamp(0.0, 2.0) * 4.0).round() as usize;
+                    for midi in 0..128_usize {
+                        if !notes[midi] { continue; }
+                        let f_root = 440.0 * 2f32.powf((midi as f32 - 69.0) / 12.0);
+                        for h in 1..=harmonic_count {
+                            let f = f_root * h as f32;
+                            let k = (f / bin_hz).round() as isize;
+                            if k > 0 && (k as usize) < num_bins {
+                                let amp = 1.0 / h as f32;
+                                if wells.len() < MAX_PEAKS {
+                                    wells.push((k as usize, amp));
+                                }
+                            }
+                        }
+                    }
+                }
+                // If ctx.midi_notes is None, wells stays empty → true passthrough.
+            }
+        }
+
+        // Record well count for the probe block in process() before possible early return.
+        self.last_well_count[channel] = wells.len() as u16;
+
+        if wells.is_empty() {
+            return; // No wells → no force → passthrough.
+        }
+
+        // -- 2. Per-bin force + Verlet integration. --
+        //    Read dry mags from the pre-allocated scratch (captured before the kernel call).
+        //    The velocity and displacement vecs are mutated in place.
+        {
+            let velocity     = &mut self.velocity[channel][..num_bins];
+            let displacement = &mut self.displacement[channel][..num_bins];
+            let s_dry        = &self.dry_mag_scratch[channel][..num_bins];
+
+            for k in 0..num_bins {
+                let mass    = s_mass[k].clamp(0.1, 1000.0);
+                let damping = clamp_damping_floor(0.2 * s_damping[k]);
+                let reach   = s_reach[k].clamp(0.1, 4.0);
+
+                let mut force_signed = 0.0_f32;
+                for &(wk, w_amp) in wells.iter() {
+                    let d = wk as isize - k as isize;
+                    if d == 0 {
+                        // Well bin itself: inject positive force so energy accumulates at the well.
+                        force_signed += w_amp;
+                        continue;
+                    }
+                    // Normalise bin distance by REACH-scaled window (20 bins at reach=1).
+                    let d_norm = d as f32 / (reach * 20.0);
+                    let denom  = (d_norm * d_norm).max(1e-3);
+                    // Pull toward well: sign(d) * w_amp / d^2  (Newtonian-ish).
+                    force_signed += (d.signum() as f32) * w_amp / denom;
+                }
+                // Scale force by STRENGTH² at this bin; 0.001 is empirical to keep displacements small.
+                let omega = clamp_for_cfl(50.0 * s_strength[k].max(0.0), dt);
+                let f     = omega * omega * force_signed * 0.001;
+
+                let accel     = (f - damping * velocity[k]) / mass;
+                velocity[k]     += accel * dt;
+                displacement[k] += velocity[k] * dt;
+
+                // Floor: clamp in step 3 via .clamp(0, cap); no velocity zeroing here
+                // (gravity well is a weaker pull than Hooke; cap handles it).
+                let _ = s_dry; // used via dry_mag_scratch in pass 2 below; lint suppression
+            }
+        }
+
+        // -- 3. Translate displacement → magnitude bend; blend with dry via MIX. --
+        let max_mag = {
+            let s_dry = &self.dry_mag_scratch[channel][..num_bins];
+            s_dry.iter().fold(0.0_f32, |a, &b| a.max(b))
+        };
+        let cap = 4.0 * max_mag.max(1e-6);
+
+        for k in 0..num_bins {
+            let mix     = s_mix[k].clamp(0.0, 1.0);
+            let dry_k   = self.dry_mag_scratch[channel][k];
+            let new_mag = (dry_k + self.displacement[channel][k]).clamp(0.0, cap);
+            let scale   = if dry_k > 1e-9 { new_mag / dry_k } else { new_mag.min(1.0) };
+            bins[k].re  = bins[k].re * (1.0 - mix) + bins[k].re * scale * mix;
+            bins[k].im  = bins[k].im * (1.0 - mix) + bins[k].im * scale * mix;
+        }
     }
 
     /// Inertial mass — per-bin mass from static curve or sidechain rate-of-change.
@@ -513,7 +654,7 @@ impl SpectralModule for KineticsModule {
                 displacement_at_probe: self.displacement[channel][probe_bin],
                 velocity_at_probe:     self.velocity[channel][probe_bin],
                 active_mode_idx:       self.mode as u8,
-                well_count:            self.tuning_forks[channel].len() as u16,
+                well_count:            self.last_well_count[channel].max(self.tuning_forks[channel].len() as u16),
             };
         }
     }
@@ -552,6 +693,7 @@ impl SpectralModule for KineticsModule {
             self.dry_mag_scratch[ch].resize(num_bins, 0.0);
         }
         self.rng_state = [0xC0FF_EE01, 0xBADD_CAFE];
+        self.last_well_count = [0; 2];
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::Kinetics }

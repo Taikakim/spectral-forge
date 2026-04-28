@@ -1550,3 +1550,140 @@ fn kinetics_hooke_diffuses_energy_via_springs() {
 
     for b in &bins { assert!(b.norm().is_finite()); }
 }
+
+#[test]
+fn kinetics_gravity_well_static_pulls_energy_toward_curve_peak() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, WellSource};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use realfft::num_complex::Complex;
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::GravityWell);
+    module.set_well_source(WellSource::Static);
+
+    let num_bins = 1025;
+    // Flat-ish noise spectrum.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(((k as f32 * 0.1).sin() + 1.5) * 0.3, 0.0))
+        .collect();
+
+    // STRENGTH curve has a single peak at bin 200 (the well location).
+    // Use a simple Gaussian centred at bin 200, height 2.0.
+    let strength: Vec<f32> = (0..num_bins).map(|k| {
+        let d = (k as f32 - 200.0) / 5.0;
+        1.0 + (-d * d).exp() // ranges from ~1.0 (away) to ~2.0 (at peak)
+    }).collect();
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    let dry: Vec<Complex<f32>> = bins.clone();
+
+    for _ in 0..40 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+
+    // Bin 200 should have higher magnitude than dry (energy gathered from neighbours).
+    let dry_at_200 = dry[200].norm();
+    let wet_at_200 = bins[200].norm();
+    assert!(wet_at_200 > dry_at_200 * 1.05,
+        "GravityWell did not gather energy at well centre (dry={}, wet={})",
+        dry_at_200, wet_at_200);
+    // Energy at distance 30 should have decreased or not grown much.
+    let dry_at_230 = dry[230].norm();
+    let wet_at_230 = bins[230].norm();
+    assert!(wet_at_230 < dry_at_230 * 1.05,
+        "GravityWell did not pull energy from neighbours (dry={}, wet={})",
+        dry_at_230, wet_at_230);
+}
+
+#[test]
+fn kinetics_gravity_well_sidechain_tracks_sc_peak() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, WellSource};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use realfft::num_complex::Complex;
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::GravityWell);
+    module.set_well_source(WellSource::Sidechain);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); num_bins];
+    // Sidechain spectrum has a single peak at bin 400.
+    let mut sc = vec![0.0_f32; num_bins];
+    sc[400] = 5.0;
+
+    let strength = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    let dry: Vec<Complex<f32>> = bins.clone();
+    for _ in 0..40 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, Some(&sc), &curves, &mut suppression, None, &ctx,
+        );
+    }
+    // Bin 400 should have gathered energy.
+    assert!(bins[400].norm() > dry[400].norm() * 1.05,
+        "Sidechain well did not track sc peak (dry={}, wet={})",
+        dry[400].norm(), bins[400].norm());
+}
+
+#[test]
+fn kinetics_gravity_well_midi_no_op_without_ctx_midi() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, WellSource};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use realfft::num_complex::Complex;
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::GravityWell);
+    module.set_well_source(WellSource::MIDI);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); num_bins];
+    let strength = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+    let mut suppression = vec![0.0_f32; num_bins];
+    // ctx.midi_notes left as None → MIDI source must no-op.
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+    let dry: Vec<Complex<f32>> = bins.clone();
+    for _ in 0..10 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+    // No-op: bins must be very close to dry.
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 0.02, "MIDI well leaked motion when ctx.midi_notes=None (bin {} drifted by {})", k, diff);
+    }
+}
