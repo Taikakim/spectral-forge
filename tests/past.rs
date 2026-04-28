@@ -23,15 +23,19 @@ fn phase_rotator_pi_rotation_negates() {
 
 #[test]
 fn phase_rotator_lut_quantum_under_threshold() {
-    // 1024-entry LUT covers 2π. Worst-case quantization is 2π/1024 ≈ 0.006 rad.
-    // sin/cos error at that quantum is ≤ 0.003. The test allows 0.005 slack.
+    // 1024-entry LUT covers 2π with floor-truncation, so the worst-case
+    // angular offset before a LUT step advances is one full step:
+    // 2π/1024 ≈ 0.006135 rad. Max sin/cos error is therefore ≈ 0.006135.
+    // Probe at i + 0.5 — the midpoint between LUT entries — to actually
+    // exercise truncation quantization. Tolerance 0.007 covers the bound
+    // with a small margin.
     let r = PhaseRotator::new();
     let c = Complex::new(1.0_f32, 0.0);
     for i in 0..1024 {
-        let theta = i as f32 / 1024.0; // freq_offset such that 2π·1·θ covers the table
+        let theta = (i as f32 + 0.5) / 1024.0;
         let out = r.rotate(c, theta, 1.0);
         let expected = Complex::from_polar(1.0, theta * std::f32::consts::TAU);
-        assert!((out.re - expected.re).abs() < 0.005, "entry {} re error", i);
-        assert!((out.im - expected.im).abs() < 0.005, "entry {} im error", i);
+        assert!((out.re - expected.re).abs() < 0.007, "entry {} re error", i);
+        assert!((out.im - expected.im).abs() < 0.007, "entry {} im error", i);
     }
 }
