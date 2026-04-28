@@ -1084,7 +1084,16 @@ fn life_sandpaper_emits_sparks_to_higher_bins() {
         &mut bins, None, &curves, &mut suppression, None, &ctx,
     );
 
-    let upper_total: f32 = (110..num_bins).map(|k| bins[k].norm()).sum();
-    assert!(upper_total > 0.01, "No sparks emitted upward (upper_total = {})", upper_total);
+    // For k=100, reach=2.0: log_offset = (1+2) * log2(100) * 1.5 ≈ 29.9 → 29,
+    // so target = 100 + 29 = 129. Pin the assertion to that specific bin so a
+    // regression in the offset formula (or REACH/LOG_OFFSET_BASE constants)
+    // would actually fail the test.
+    assert!(bins[129].norm() > 0.05,
+        "Expected spark at bin 129, got {}", bins[129].norm());
+    // No spurious deposits in the mid-band between source and target.
+    for k in 102..125 {
+        assert!(bins[k].norm() < 1e-3,
+            "Unexpected energy at bin {} (norm = {})", k, bins[k].norm());
+    }
     for b in &bins { assert!(b.norm().is_finite()); }
 }

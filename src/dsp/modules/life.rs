@@ -93,7 +93,8 @@ const SANDPAPER_MAG_FLOOR:    f32 = 1e-6;
 /// Sandpaper — per-hop spark amount: curve * SCALE clamped to [0, MAX].
 const SANDPAPER_AMOUNT_SCALE: f32 = 0.05;
 const SANDPAPER_AMOUNT_MAX:   f32 = 0.1;
-/// Sandpaper — log-offset shaping. log_offset = ((1+reach) * log2(k) * BASE).
+/// Sandpaper — log-offset shaping. log_offset = ((1+reach) * log2(max(k,1)) * BASE);
+/// k=0 and k=1 both produce a zero log term, falling back to SANDPAPER_MIN_OFFSET.
 const SANDPAPER_LOG_OFFSET_BASE: f32 = 1.5;
 /// Sandpaper — minimum upward bin offset (so adjacent sparks never deposit
 /// into themselves or k+1).
@@ -651,6 +652,7 @@ fn apply_sandpaper(
 
     let amount_c = curves[0];
     let thresh_c = curves[1];
+    // curves[2]: SPEED — unused by Sandpaper (sparks are instantaneous per hop).
     let reach_c  = curves[3];
     let mix_c    = curves[4];
 
@@ -680,14 +682,15 @@ fn apply_sandpaper(
         let log_offset = ((1.0 + reach_factor) * (k as f32).max(1.0).log2() * SANDPAPER_LOG_OFFSET_BASE) as usize;
         let target = (k + log_offset.max(SANDPAPER_MIN_OFFSET)).min(num_bins - 1);
 
-        let mix = (mix_c[target].clamp(0.0, 2.0)) * 0.5;
+        let mix = mix_c[target].clamp(0.0, 2.0) * 0.5;
         let cur = bins[target];
         let cur_mag = cur.norm();
         let new_mag = (cur_mag + spark).min(SANDPAPER_SPARK_CAP);
         let wet = if cur_mag > SANDPAPER_SILENT_FLOOR {
             cur * (new_mag / cur_mag)
         } else {
-            Complex::new(spark, 0.0)
+            // Silent target: deposit the (capped) spark on the real axis.
+            Complex::new(new_mag, 0.0)
         };
         bins[target] = cur * (1.0 - mix) + wet * mix;
     }
