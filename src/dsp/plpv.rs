@@ -13,6 +13,8 @@
 
 use std::f32::consts::PI;
 
+use crate::dsp::modules::PeakInfo;
+
 /// Wrap a phase to (-π, π] (the "principal value of arg").
 ///
 /// NaN-in / NaN-out: `rem_euclid` propagates NaN, the comparison is false,
@@ -114,5 +116,66 @@ pub fn damp_low_energy_bins(
         if blend > 0.0 {
             unwrapped[k] = unwrapped[k] * (1.0 - blend) + expected_phase[k] * blend;
         }
+    }
+}
+
+/// Detect local 4-neighbour magnitude peaks above a dB threshold.
+/// Writes up to `max_peaks` peaks into `out_peaks` (sorted by bin index
+/// ascending). Returns the actual number written.
+///
+/// A bin k is a peak if `mags[k]` is strictly greater than `mags[k±1]`
+/// and `mags[k±2]`. `low_k` and `high_k` are filled by `assign_voronoi_skirts`
+/// in a separate pass.
+pub fn detect_peaks(
+    mags:         &[f32],
+    num_bins:     usize,
+    threshold_db: f32,
+    max_peaks:    usize,
+    out_peaks:    &mut [PeakInfo],
+) -> usize {
+    debug_assert!(mags.len()      >= num_bins);
+    debug_assert!(out_peaks.len() >= max_peaks);
+
+    let threshold = 10.0_f32.powf(threshold_db / 20.0);
+    let mut count = 0;
+    // Skip k=0,1 and k=num_bins-1, num_bins-2 (no 2-neighbour ranges).
+    for k in 2..num_bins.saturating_sub(2) {
+        if count >= max_peaks { break; }
+        let m = mags[k];
+        if m < threshold { continue; }
+        if m > mags[k - 1] && m > mags[k - 2]
+            && m > mags[k + 1] && m > mags[k + 2]
+        {
+            out_peaks[count] = PeakInfo {
+                k: k as u32,
+                mag: m,
+                low_k: 0,
+                high_k: 0,
+            };
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Assign each peak's skirt as the bins in its Voronoi cell — closer to
+/// it than to the next peak. Updates `low_k` and `high_k` in place.
+/// Peaks must be sorted by `k` ascending.
+pub fn assign_voronoi_skirts(peaks: &mut [PeakInfo], num_bins: usize) {
+    let n = peaks.len();
+    for i in 0..n {
+        let lo = if i == 0 {
+            0
+        } else {
+            // Midpoint between this peak and previous, exclusive.
+            (peaks[i - 1].k + peaks[i].k) / 2 + 1
+        };
+        let hi = if i == n - 1 {
+            num_bins as u32 - 1
+        } else {
+            (peaks[i].k + peaks[i + 1].k) / 2
+        };
+        peaks[i].low_k = lo;
+        peaks[i].high_k = hi;
     }
 }

@@ -2,6 +2,7 @@ use num_complex::Complex;
 use realfft::RealFftPlanner;
 use nih_plug::util::StftHelper;
 use crate::bridge::SharedState;
+use crate::dsp::modules::PeakInfo;
 use crate::params::{FxChannelTarget, ScChannel, StereoLink};
 
 /// Which of the five derived SC magnitude streams a slot should key off.
@@ -40,6 +41,11 @@ pub const NUM_BINS: usize = FFT_SIZE / 2 + 1;
 pub const OVERLAP: usize = 4; // 75% overlap → hop = 512
 pub const MAX_FFT_SIZE: usize = 16384;
 pub const MAX_NUM_BINS: usize = MAX_FFT_SIZE / 2 + 1;
+
+/// Maximum capacity for the per-channel peak buffer used by Phase 4.2 PLPV
+/// peak detection. The runtime `plpv_max_peaks` parameter is clamped to this
+/// when written into `peak_buf`.
+pub const MAX_PEAKS: usize = 256;
 
 /// Maximum block size assumed for the delta monitor dry-delay ring buffer.
 /// nih-plug typically processes in blocks of ≤ 8192 samples.
@@ -92,6 +98,9 @@ pub struct Pipeline {
     scratch_expected: Vec<f32>,
     /// PLPV: mono scratch for per-bin magnitudes used by low-energy phase damping.
     scratch_mags: Vec<f32>,
+    /// PLPV: per-channel pre-allocated peak buffer (Phase 4.2). Capacity MAX_PEAKS;
+    /// `detect_peaks` writes only the first `n_peaks` entries each hop.
+    peak_buf: Vec<Vec<PeakInfo>>,
     /// PLPV: per-channel cumulative hop counter feeding `expected_phase = 2π·k·N·H/F`.
     /// Each channel runs its own STFT closure call per hop, so they grow independently.
     /// `u64` so this never overflows in any realistic session length.
@@ -142,6 +151,9 @@ impl Pipeline {
         let scratch_curr_phase:   Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
         let scratch_expected:     Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
         let scratch_mags:         Vec<f32>      = vec![0.0f32; MAX_NUM_BINS];
+        let peak_buf: Vec<Vec<PeakInfo>> = (0..2)
+            .map(|_| vec![PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 }; MAX_PEAKS])
+            .collect();
 
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
@@ -168,6 +180,7 @@ impl Pipeline {
             scratch_curr_phase,
             scratch_expected,
             scratch_mags,
+            peak_buf,
             total_hops_per_ch: [0; 2],
             sample_rate,
             fft_size,
@@ -210,6 +223,9 @@ impl Pipeline {
         self.scratch_curr_phase.fill(0.0);
         self.scratch_expected.fill(0.0);
         self.scratch_mags.fill(0.0);
+        for ch in &mut self.peak_buf {
+            ch.fill(PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 });
+        }
         self.total_hops_per_ch = [0; 2];
         self.fx_matrix.clear_state();
     }
@@ -252,6 +268,9 @@ impl Pipeline {
         self.scratch_curr_phase.fill(0.0);
         self.scratch_expected.fill(0.0);
         self.scratch_mags.fill(0.0);
+        for ch in &mut self.peak_buf {
+            ch.fill(PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 });
+        }
         self.total_hops_per_ch = [0; 2];
         // Reset clears all amp-node state — preset load + FFT-size change both warm up from zero.
         self.fx_matrix.reset(sample_rate, fft_size);
@@ -400,6 +419,9 @@ impl Pipeline {
         let enable_heavy_modules = params.enable_heavy_modules.value();
         let plpv_enable = params.plpv_enable.value();
         let plpv_phase_noise_floor_db = params.plpv_phase_noise_floor_db.smoothed.next_step(block_size);
+        // Phase 4.2: control-rate peak-detection params. Read once per block.
+        let max_peaks_capped: usize = (params.plpv_max_peaks.value() as usize).min(MAX_PEAKS);
+        let peak_threshold_db: f32 = params.plpv_peak_threshold_db.smoothed.next_step(block_size);
         let stereo_link = params.stereo_link.value();
         let is_mid_side = stereo_link == StereoLink::MidSide;
 
@@ -609,6 +631,7 @@ impl Pipeline {
         let scratch_curr_phase_ref   = &mut self.scratch_curr_phase;
         let scratch_expected_ref     = &mut self.scratch_expected;
         let scratch_mags_ref         = &mut self.scratch_mags;
+        let peak_buf_ref             = &mut self.peak_buf;
         let total_hops_ref           = &mut self.total_hops_per_ch;
         // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
@@ -689,6 +712,22 @@ impl Pipeline {
                     num_bins,
                 );
                 total_hops_ref[ch] = total_hops_ref[ch].wrapping_add(1);
+
+                // Phase 4.2: detect spectral peaks + assign Voronoi skirts.
+                // Operates on the raw FFT magnitudes already in scratch_mags_ref
+                // (filled above for damping; identical input).
+                let n_peaks = crate::dsp::plpv::detect_peaks(
+                    &scratch_mags_ref[..num_bins],
+                    num_bins,
+                    peak_threshold_db,
+                    max_peaks_capped,
+                    &mut peak_buf_ref[ch][..],
+                );
+                crate::dsp::plpv::assign_voronoi_skirts(
+                    &mut peak_buf_ref[ch][..n_peaks],
+                    num_bins,
+                );
+                hop_ctx.peaks = Some(&peak_buf_ref[ch][..n_peaks]);
 
                 // Expose unwrapped phase to modules. Re-borrow via the rebound local so the
                 // closure does not need a second &mut self borrow.

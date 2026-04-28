@@ -1,4 +1,6 @@
 use spectral_forge::dsp::plpv::{damp_low_energy_bins, unwrap_phase, principal_arg};
+use spectral_forge::dsp::plpv::detect_peaks;
+use spectral_forge::dsp::modules::PeakInfo;
 use std::f32::consts::PI;
 
 #[test]
@@ -107,4 +109,36 @@ fn damp_low_energy_leaves_loud_bins_alone() {
     for k in 0..num_bins {
         assert!((unwrapped[k] - 5.0 * PI).abs() < 1e-3, "loud bin {} was modified", k);
     }
+}
+
+#[test]
+fn detect_peaks_finds_local_4_neighbour_max() {
+    let mut mags = vec![0.0_f32; 100];
+    mags[20] = 0.5;  // small peak
+    mags[50] = 1.0;  // large peak
+    mags[80] = 0.3;  // peak below threshold
+
+    let mut peaks = vec![PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 }; 64];
+    let n = detect_peaks(&mags, 100, -20.0, 64, &mut peaks);
+    // Threshold -20 dB == 0.1 linear, so all three exceed.
+    assert!(n >= 3);
+    let ks: Vec<u32> = peaks[..n].iter().map(|p| p.k).collect();
+    assert!(ks.contains(&20));
+    assert!(ks.contains(&50));
+    assert!(ks.contains(&80));
+}
+
+#[test]
+fn voronoi_assigns_skirts_to_nearest_peak() {
+    use spectral_forge::dsp::plpv::assign_voronoi_skirts;
+    let mut peaks = vec![
+        PeakInfo { k: 20, mag: 0.5, low_k: 0, high_k: 0 },
+        PeakInfo { k: 60, mag: 1.0, low_k: 0, high_k: 0 },
+    ];
+    assign_voronoi_skirts(&mut peaks, 100);
+    // Midpoint between k=20 and k=60 is 40. Skirts split there.
+    assert_eq!(peaks[0].low_k, 0);
+    assert_eq!(peaks[0].high_k, 40);
+    assert_eq!(peaks[1].low_k, 41);
+    assert_eq!(peaks[1].high_k, 99);
 }

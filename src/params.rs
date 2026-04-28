@@ -265,6 +265,10 @@ pub struct SpectralForgeParams {
 
     pub plpv_phase_noise_floor_db: FloatParam,
 
+    pub plpv_max_peaks: IntParam,
+
+    pub plpv_peak_threshold_db: FloatParam,
+
     pub effect_mode: EnumParam<EffectMode>,
 
     pub phase_rand_amount: FloatParam,
@@ -477,6 +481,20 @@ impl Default for SpectralForgeParams {
                 "PLPV Phase Noise Floor",
                 -60.0,
                 FloatRange::Linear { min: -90.0, max: -20.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(1.0),
+
+            plpv_max_peaks: IntParam::new(
+                "PLPV Max Peaks",
+                64,
+                IntRange::Linear { min: 16, max: 256 },
+            ),
+
+            plpv_peak_threshold_db: FloatParam::new(
+                "PLPV Peak Threshold",
+                -40.0,
+                FloatRange::Linear { min: -80.0, max: -10.0 },
             )
             .with_unit(" dB")
             .with_step_size(1.0),
@@ -751,6 +769,8 @@ unsafe impl Params for SpectralForgeParams {
         params.push(("enable_heavy_modules".to_string(), self.enable_heavy_modules.as_ptr(), String::new()));
         params.push(("plpv_enable".to_string(), self.plpv_enable.as_ptr(), String::new()));
         params.push(("plpv_phase_noise_floor_db".to_string(), self.plpv_phase_noise_floor_db.as_ptr(), String::new()));
+        params.push(("plpv_max_peaks".to_string(), self.plpv_max_peaks.as_ptr(), String::new()));
+        params.push(("plpv_peak_threshold_db".to_string(), self.plpv_peak_threshold_db.as_ptr(), String::new()));
 
         params.push(("effect_mode".to_string(),          self.effect_mode.as_ptr(),          String::new()));
         params.push(("phase_rand_amount".to_string(),    self.phase_rand_amount.as_ptr(),    String::new()));
