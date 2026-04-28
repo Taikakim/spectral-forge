@@ -1278,7 +1278,6 @@ fn life_all_modes_finite_and_bounded() {
             physics.velocity[k] = 0.4 + ((k * 13 % 7) as f32) * 0.1;
             physics.temperature[k] = 0.5;
         }
-        let physics_ref: &BinPhysics = &physics;
         let ctx = ModuleContext {
             sample_rate:          48_000.0,
             fft_size:             2048,
@@ -1286,7 +1285,7 @@ fn life_all_modes_finite_and_bounded() {
             attack_ms:            10.0,
             release_ms:           100.0,
             sensitivity:          1.0,
-            suppression_width:    1.0,
+            suppression_width:    0.0,
             auto_makeup:          false,
             delta_monitor:        false,
             bpm:                  120.0,
@@ -1297,10 +1296,10 @@ fn life_all_modes_finite_and_bounded() {
             chromagram:           None,
             midi_notes:           None,
             sidechain_derivative: None,
-            bin_physics:          Some(physics_ref),
+            bin_physics:          Some(&physics),
         };
 
-        // 200 hops × 2 channels.
+        // bins accumulate across 200 hops within a channel — exercises stateful kernels.
         for ch in 0..2 {
             let mut bins = bins_template.clone();
             let mut suppression = vec![0.0_f32; num_bins];
