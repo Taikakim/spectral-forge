@@ -707,6 +707,11 @@ fn apply_sandpaper(
 
 // ── Task 12: Brownian ──────────────────────────────────────────────────────
 
+/// Temperature-driven random walk. Reads `BinPhysics.temperature[k]` (set by
+/// upstream Circuit/Kinetics modules) and applies a small xorshift32-PRNG
+/// complex drift to each bin scaled by AMOUNT × temperature × DRIFT_SCALE.
+/// Without an upstream temperature writer (or `bin_physics = None`), this
+/// mode is a no-op — every bin is "cold" and skipped.
 fn apply_brownian(
     bins: &mut [Complex<f32>],
     rng_state: &mut u32,

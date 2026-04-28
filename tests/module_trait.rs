@@ -1152,7 +1152,16 @@ fn life_brownian_drifts_with_temperature() {
 
     let drift_100 = (bins[100] - bins_template[100]).norm();
     let drift_0   = (bins[0]   - bins_template[0]).norm();
-    assert!(drift_100 > 0.001, "Bin 100 did not drift (drift = {})", drift_100);
-    assert!(drift_0   < 1e-6,  "Bin 0 drifted despite temp=0 (drift = {})", drift_0);
+    // With amt=1.0 (curve=2.0), t=1.0, mix=1.0 the per-hop drift magnitude has
+    // a hard physical bound of BROWNIAN_DRIFT_SCALE * sqrt(2) ≈ 0.1414. Assert
+    // both lower and upper bounds — the lower bound catches accidental scale
+    // shrinks (e.g. DRIFT_SCALE/2), the upper bound catches accidental scale
+    // amplifications.
+    assert!(drift_100 > 0.02,
+        "Bin 100 drift too small — likely DRIFT_SCALE regression (drift = {})", drift_100);
+    assert!(drift_100 < 0.15,
+        "Bin 100 drift exceeds physical bound — likely scale amplification (drift = {})", drift_100);
+    assert!(drift_0 < 1e-6,
+        "Bin 0 drifted despite temp=0 (drift = {})", drift_0);
     for b in &bins { assert!(b.norm().is_finite()); }
 }
