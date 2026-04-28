@@ -37,7 +37,7 @@ fn pipeline_clear_state_is_allocation_free() {
     use spectral_forge::dsp::pipeline::Pipeline;
     use spectral_forge::dsp::modules::ModuleType;
     let slot_types = [ModuleType::Empty; 9];
-    let mut p = Pipeline::new(48000.0, 2, 2048, &slot_types);
+    let mut p = Pipeline::new(48000.0, 2, 2048, &slot_types, 4.0);
     // Must return without panic or allocation.
     p.clear_state();
     // Calling twice is also fine — idempotent.
@@ -119,7 +119,7 @@ fn pipeline_clear_state_with_stateful_slots() {
     slot_types[1] = ModuleType::Freeze;
     slot_types[2] = ModuleType::Contrast;
     slot_types[3] = ModuleType::TransientSustainedSplit;
-    let mut p = Pipeline::new(48000.0, 2, 2048, &slot_types);
+    let mut p = Pipeline::new(48000.0, 2, 2048, &slot_types, 4.0);
     // Must not panic and must touch all four stateful modules' clear_state() impls.
     p.clear_state();
     p.clear_state();

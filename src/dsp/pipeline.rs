@@ -105,12 +105,26 @@ pub struct Pipeline {
     /// Each channel runs its own STFT closure call per hop, so they grow independently.
     /// `u64` so this never overflows in any realistic session length.
     total_hops_per_ch: [u64; 2],
+    /// Per-channel rolling complex-spectrum history. Sized at construction from the
+    /// History Depth param (in seconds). Reallocated by `reset()` if the requested
+    /// capacity changes (allocation OK there — reset is not on the audio thread).
+    history: crate::dsp::history_buffer::HistoryBuffer,
+    history_depth_seconds: f32,
+    /// Scratch pad for one hop's per-channel complex spectrum, copied out of
+    /// the StftHelper closure and drained into `history` after the closure.
+    pending_hop_frames: Vec<Vec<Complex<f32>>>,
     sample_rate: f32,
     num_channels: usize,
 }
 
 impl Pipeline {
-    pub fn new(sample_rate: f32, num_channels: usize, fft_size: usize, slot_types: &[crate::dsp::modules::ModuleType; 9]) -> Self {
+    pub fn new(
+        sample_rate: f32,
+        num_channels: usize,
+        fft_size: usize,
+        slot_types: &[crate::dsp::modules::ModuleType; 9],
+        history_depth_seconds: f32,
+    ) -> Self {
         let num_bins = fft_size / 2 + 1;
         let mut planner = RealFftPlanner::<f32>::new();
         let fft_plan  = planner.plan_fft_forward(fft_size);
@@ -155,6 +169,19 @@ impl Pipeline {
             .map(|_| vec![PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 }; MAX_PEAKS])
             .collect();
 
+        let history_capacity = {
+            let hop = (fft_size / OVERLAP).max(1) as f32;
+            ((history_depth_seconds * sample_rate) / hop).ceil() as usize
+        }.max(1);
+        let history = crate::dsp::history_buffer::HistoryBuffer::new(
+            num_channels.max(1),
+            history_capacity,
+            num_bins,
+        );
+        let pending_hop_frames: Vec<Vec<Complex<f32>>> = (0..2)
+            .map(|_| vec![Complex::new(0.0, 0.0); MAX_NUM_BINS])
+            .collect();
+
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
             fft_plan,
@@ -182,6 +209,9 @@ impl Pipeline {
             scratch_mags,
             peak_buf,
             total_hops_per_ch: [0; 2],
+            history,
+            history_depth_seconds,
+            pending_hop_frames,
             sample_rate,
             fft_size,
             num_channels,
@@ -227,10 +257,12 @@ impl Pipeline {
             ch.fill(PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 });
         }
         self.total_hops_per_ch = [0; 2];
+        for v in &mut self.pending_hop_frames { for c in v { *c = Complex::new(0.0, 0.0); } }
+        self.history.reset();
         self.fx_matrix.clear_state();
     }
 
-    pub fn reset(&mut self, sample_rate: f32, num_channels: usize) {
+    pub fn reset(&mut self, sample_rate: f32, num_channels: usize, history_depth_seconds: f32) {
         let fft_size = self.fft_size;
         let num_bins = fft_size / 2 + 1;
         self.sample_rate = sample_rate;
@@ -272,6 +304,25 @@ impl Pipeline {
             ch.fill(PeakInfo { k: 0, mag: 0.0, low_k: 0, high_k: 0 });
         }
         self.total_hops_per_ch = [0; 2];
+        for v in &mut self.pending_hop_frames { for c in v { *c = Complex::new(0.0, 0.0); } }
+        // History Buffer: rebuild if the depth changed; otherwise reset in place.
+        let new_capacity = {
+            let hop = (fft_size / OVERLAP).max(1) as f32;
+            ((history_depth_seconds * sample_rate) / hop).ceil() as usize
+        }.max(1);
+        let needs_realloc = self.history_depth_seconds != history_depth_seconds
+            || self.history.capacity_frames() != new_capacity
+            || self.history.num_channels() != num_channels.max(1);
+        if needs_realloc {
+            self.history = crate::dsp::history_buffer::HistoryBuffer::new(
+                num_channels.max(1),
+                new_capacity,
+                num_bins,
+            );
+            self.history_depth_seconds = history_depth_seconds;
+        } else {
+            self.history.reset();
+        }
         // Reset clears all amp-node state — preset load + FFT-size change both warm up from zero.
         self.fx_matrix.reset(sample_rate, fft_size);
     }
@@ -296,6 +347,9 @@ impl Pipeline {
 
         let fft_size = self.fft_size;
         let num_bins = fft_size / 2 + 1;
+        // History summary stats are valid only within one block. Modules
+        // reading them get a cache-miss-then-cache-hit pattern; cleared here.
+        self.history.clear_summary_cache();
         let block_size = buffer.samples() as u32;
         let attack_ms_base    = params.attack_ms.smoothed.next_step(block_size);
         let release_ms_base   = params.release_ms.smoothed.next_step(block_size);
@@ -440,6 +494,11 @@ impl Pipeline {
             params.sensitivity.smoothed.next_step(block_size)
         };
 
+        // Immutable borrow of history for ctx — captures the prior block's state.
+        // The mutable write path (pending_hop_frames → history) happens after the
+        // closure via the separate pending_hop_frames field.
+        let history_ref: &crate::dsp::history_buffer::HistoryBuffer = &self.history;
+
         // Build ModuleContext
         let mut ctx = ModuleContext::new(
             self.sample_rate,
@@ -457,6 +516,8 @@ impl Pipeline {
         // default is currently equivalent to "no BPM info available".
         ctx.bpm = transport.tempo.unwrap_or(0.0) as f32;
         ctx.beat_position = transport.pos_beats().unwrap_or(0.0);
+        // Attach history as the *prior* block's snapshot — readers always look back.
+        ctx.history = Some(history_ref);
 
         // Snapshot of slot targets (needed for SC channel resolution in MidSide mode).
         let slot_targets_snap: [FxChannelTarget; 9] = params.slot_targets.try_lock()
@@ -659,6 +720,9 @@ impl Pipeline {
         let scratch_mags_ref         = &mut self.scratch_mags;
         let peak_buf_ref             = &mut self.peak_buf;
         let total_hops_ref           = &mut self.total_hops_per_ch;
+        let pending_hop_frames       = &mut self.pending_hop_frames;
+        let mut pending_hops: usize  = 0;
+        let stft_num_channels        = self.stft.num_channels();
         // Reset peak-hold accumulators.
         for v in spectrum_buf.iter_mut()   { *v = 0.0; }
         for v in suppression_buf.iter_mut() { *v = 0.0; }
@@ -681,6 +745,14 @@ impl Pipeline {
             for (i, c) in complex_buf.iter().enumerate() {
                 let mag = c.norm();
                 if mag > spectrum_buf[i] { spectrum_buf[i] = mag; }
+            }
+
+            // Copy this hop's complex spectrum into the pending pad. Drained into
+            // `history` after the closure completes — the closure cannot mutate
+            // `self.history` while StftHelper holds the &mut on the buffer.
+            pending_hop_frames[channel.min(1)][..num_bins].copy_from_slice(&complex_buf[..num_bins]);
+            if channel + 1 == stft_num_channels {
+                pending_hops += 1;
             }
 
             // Build this hop's per-slot sc_args from the pre-gained slot_sc_input.
@@ -807,6 +879,17 @@ impl Pipeline {
                 *s *= w * norm * output_linear;
             }
         });
+
+        // Drain pending hop frames into history after the StftHelper closure.
+        // Note: StftHelper processes one hop's worth of FFT per channel per block.
+        // For block_size > hop_size, multiple hops may complete; this pad holds only
+        // the LAST hop per block. See plan §5.6 v1 limitation note.
+        if pending_hops > 0 {
+            for ch in 0..stft_num_channels.min(2) {
+                self.history.write_hop(ch, &self.pending_hop_frames[ch][..num_bins]);
+            }
+            self.history.advance_after_all_channels_written();
+        }
 
         // M/S decode: Mid/Side → L/R (after STFT)
         if is_mid_side {

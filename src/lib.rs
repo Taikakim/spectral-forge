@@ -131,7 +131,8 @@ impl Plugin for SpectralForge {
         let max_num_bins = dsp::pipeline::MAX_NUM_BINS;
 
         let slot_types = *self.params.slot_module_types.lock();
-        self.pipeline = Some(dsp::pipeline::Pipeline::new(sr, num_ch, fft_size, &slot_types));
+        let history_depth_seconds = self.params.history_depth.value().seconds();
+        self.pipeline = Some(dsp::pipeline::Pipeline::new(sr, num_ch, fft_size, &slot_types, history_depth_seconds));
         context.set_latency_samples(fft_size as u32);
 
         if let Some(ref sh) = self.shared {
@@ -223,7 +224,8 @@ impl Plugin for SpectralForge {
 
     fn reset(&mut self) {
         if let Some(pipeline) = &mut self.pipeline {
-            pipeline.reset(self.sample_rate, self.num_channels);
+            let history_depth_seconds = self.params.history_depth.value().seconds();
+            pipeline.reset(self.sample_rate, self.num_channels, history_depth_seconds);
         }
     }
 
