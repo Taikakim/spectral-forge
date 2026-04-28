@@ -74,96 +74,70 @@ impl SpectralModule for PhaseSmearModule {
         #[cfg(any(test, feature = "probe"))]
         let mut probe_mix_pct:     f32 = 0.0;
 
-        // Phase 4.3b — PLPV branch: when the unwrapped-phase trajectory is exposed
-        // by the Pipeline AND this module's PLPV flag is on, write the random offset
-        // directly to the unwrapped phase. The Pipeline's re-wrap stage afterwards
-        // recomputes bins[k] = polar(|bins[k]|, principal_arg(unwrapped[k])), so we
-        // MUST NOT also write to bins[k] here — that write would be discarded.
-        //
-        // The mix on this path is implemented as a phase-space lerp:
-        //   wet_phase = unwrapped[k] + rand_phase
-        //   out_phase = (1 - mix)·unwrapped[k] + mix·wet_phase = unwrapped[k] + mix·rand_phase
-        // This differs from the non-PLPV path's complex-space mix (which interpolates
-        // (re, im)). The phase-space lerp keeps magnitude untouched and stays inside
-        // the unwrapped trajectory so future hops continue from the modified phase.
-        if let (Some(unwrapped), true) = (ctx.unwrapped_phase, self.plpv_enabled) {
-            for k in 0..bins.len() {
-                // Always advance PRNG to keep the sequence independent of skipping.
-                let rand = xorshift64(&mut self.rng_state);
-                // DC (k=0) and Nyquist (k=last) must stay real for IFFT correctness.
-                if k == 0 || k == last { continue; }
+        // Phase 4.3b — bind the PLPV trajectory once. When this is `Some`, the
+        // Pipeline's re-wrap stage afterwards recomputes
+        //   bins[k] = polar(|bins[k]|, principal_arg(unwrapped[k]))
+        // so on that path we MUST NOT write bins[k] (it would be discarded);
+        // instead we mutate the unwrapped trajectory directly. When `None`, we
+        // fall through to the legacy wrapped-phase + complex-space mix.
+        // LLVM hoists the per-iteration `match` into a single ptr-or-null check.
+        let plpv = if self.plpv_enabled { ctx.unwrapped_phase } else { None };
 
-                let sc_raw = sidechain.and_then(|s| s.get(k)).copied().unwrap_or(0.0).max(0.0);
-                let hold_c = curves.get(1).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
-                let hold_ms = super::peak_hold_curve_to_ms(hold_c);
-                let rel = (-hop_ms / hold_ms.max(0.1)).exp();
-                if sc_raw > self.peak_env[k] {
-                    self.peak_env[k] = sc_raw;
-                } else {
-                    self.peak_env[k] = rel * self.peak_env[k] + (1.0 - rel) * sc_raw;
+        for k in 0..bins.len() {
+            // Always advance PRNG to keep the sequence independent of skipping.
+            let rand = xorshift64(&mut self.rng_state);
+            // DC (k=0) and Nyquist (k=last) must stay real for IFFT correctness.
+            if k == 0 || k == last { continue; }
+
+            // ── Per-bin compute (shared) ────────────────────────────────────
+            let sc_raw = sidechain.and_then(|s| s.get(k)).copied().unwrap_or(0.0).max(0.0);
+            let hold_c = curves.get(1).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
+            let hold_ms = super::peak_hold_curve_to_ms(hold_c);
+            let rel = (-hop_ms / hold_ms.max(0.1)).exp();
+            if sc_raw > self.peak_env[k] {
+                self.peak_env[k] = sc_raw;
+            } else {
+                self.peak_env[k] = rel * self.peak_env[k] + (1.0 - rel) * sc_raw;
+            }
+            let sc_mod = self.peak_env[k].min(1.0);
+
+            let amount_curve = curves.get(0).and_then(|c| c.get(k))
+                               .copied().unwrap_or(1.0).clamp(0.0, 2.0);
+            let per_bin    = (amount_curve * (1.0 + sc_mod)).clamp(0.0, 2.0);
+            let scale      = per_bin * std::f32::consts::PI;
+            let rand_phase = (rand as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
+            let mix = curves.get(2).and_then(|c| c.get(k))
+                            .copied().unwrap_or(1.0).clamp(0.0, 1.0);
+
+            // ── Write site (PLPV vs. legacy) ────────────────────────────────
+            // PLPV path uses a phase-space lerp:
+            //   out_phase = (1 - mix)·unwrapped[k] + mix·(unwrapped[k] + rand_phase)
+            //             = unwrapped[k] + mix·rand_phase
+            // The legacy path uses a complex-space lerp on (re, im). These are
+            // intentionally different audible algorithms — the phase-space lerp
+            // preserves magnitude exactly and keeps future hops continuing from
+            // the modified phase.
+            match plpv {
+                Some(unwrapped) => {
+                    unwrapped[k].set(unwrapped[k].get() + rand_phase * mix);
                 }
-                let sc_mod = self.peak_env[k].min(1.0);
-
-                let amount_curve = curves.get(0).and_then(|c| c.get(k))
-                                   .copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                let per_bin = (amount_curve * (1.0 + sc_mod)).clamp(0.0, 2.0);
-
-                let scale      = per_bin * std::f32::consts::PI;
-                let rand_phase = (rand as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
-                let mix = curves.get(2).and_then(|c| c.get(k))
-                                .copied().unwrap_or(1.0).clamp(0.0, 1.0);
-
-                // Phase-space lerp; see comment above.
-                let prev = unwrapped[k].get();
-                unwrapped[k].set(prev + rand_phase * mix);
-
-                #[cfg(any(test, feature = "probe"))]
-                if k == probe_k {
-                    probe_amount_pct   = amount_curve * 100.0;
-                    probe_peak_hold_ms = hold_ms;
-                    probe_mix_pct      = mix * 100.0;
+                None => {
+                    let dry = bins[k];
+                    let (mag, phase) = (dry.norm(), dry.arg());
+                    let wet = Complex::from_polar(mag, phase + rand_phase);
+                    bins[k] = Complex::new(
+                        dry.re * (1.0 - mix) + wet.re * mix,
+                        dry.im * (1.0 - mix) + wet.im * mix,
+                    );
                 }
             }
-        } else {
-            // Non-PLPV path — wrapped-phase + complex-space mix. Unchanged from pre-4.3b.
-            for k in 0..bins.len() {
-                let dry = bins[k];
-                // Always advance PRNG to keep the sequence independent of skipping.
-                let rand = xorshift64(&mut self.rng_state);
-                // DC (k=0) and Nyquist (k=last) must stay real for IFFT correctness.
-                if k == 0 || k == last { continue; }
 
-                let sc_raw = sidechain.and_then(|s| s.get(k)).copied().unwrap_or(0.0).max(0.0);
-                let hold_c = curves.get(1).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
-                let hold_ms = super::peak_hold_curve_to_ms(hold_c);
-                let rel = (-hop_ms / hold_ms.max(0.1)).exp();
-                if sc_raw > self.peak_env[k] {
-                    self.peak_env[k] = sc_raw;
-                } else {
-                    self.peak_env[k] = rel * self.peak_env[k] + (1.0 - rel) * sc_raw;
-                }
-                let sc_mod = self.peak_env[k].min(1.0);
-
-                let amount_curve = curves.get(0).and_then(|c| c.get(k))
-                                   .copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                let per_bin = (amount_curve * (1.0 + sc_mod)).clamp(0.0, 2.0);
-
-                let scale      = per_bin * std::f32::consts::PI;
-                let rand_phase = (rand as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
-                let (mag, phase) = (bins[k].norm(), bins[k].arg());
-                let wet = Complex::from_polar(mag, phase + rand_phase);
-                let mix = curves.get(2).and_then(|c| c.get(k)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
-                bins[k] = Complex::new(
-                    dry.re * (1.0 - mix) + wet.re * mix,
-                    dry.im * (1.0 - mix) + wet.im * mix,
-                );
-
-                #[cfg(any(test, feature = "probe"))]
-                if k == probe_k {
-                    probe_amount_pct   = amount_curve * 100.0;
-                    probe_peak_hold_ms = hold_ms;
-                    probe_mix_pct      = mix * 100.0;
-                }
+            // ── Probe (shared) ──────────────────────────────────────────────
+            #[cfg(any(test, feature = "probe"))]
+            if k == probe_k {
+                probe_amount_pct   = amount_curve * 100.0;
+                probe_peak_hold_ms = hold_ms;
+                probe_mix_pct      = mix * 100.0;
             }
         }
 
