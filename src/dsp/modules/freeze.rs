@@ -83,9 +83,16 @@ impl SpectralModule for FreezeModule {
     ) {
         debug_assert_eq!(bins.len(), self.frozen_bins.len(),
             "FreezeModule: bins/buffer size mismatch — call reset() before process()");
+        debug_assert_eq!(bins.len(), self.frozen_unwrapped.len(),
+            "FreezeModule: frozen_unwrapped/bins size mismatch — call reset() before process()");
 
         use crate::dsp::pipeline::OVERLAP;
         let hop_ms = ctx.fft_size as f32 / (OVERLAP as f32 * self.sample_rate) * 1000.0;
+        // Loop-invariant per-hop phase advance (per k=1): matches the constant
+        // used by the Pipeline's unwrap/damp stages — see src/dsp/pipeline.rs.
+        let two_pi_hop_over_n = 2.0 * std::f32::consts::PI
+            * (ctx.fft_size as f32 / OVERLAP as f32)
+            / ctx.fft_size as f32;
 
         // Phase 4.3c — bind the PLPV trajectory once. When this is `Some`, the
         // Pipeline's re-wrap stage afterwards recomputes
@@ -226,10 +233,7 @@ impl SpectralModule for FreezeModule {
                 // Canonical phase-vocoder advance. Matches the Pipeline's
                 // own `two_pi_hop_over_n * k` constant used in the unwrap
                 // damping step (src/dsp/pipeline.rs).
-                let r = (ctx.fft_size / OVERLAP) as f32;          // hop_size in samples
-                let n_fft = ctx.fft_size as f32;
-                self.frozen_unwrapped[k] +=
-                    2.0 * std::f32::consts::PI * (k as f32) * r / n_fft;
+                self.frozen_unwrapped[k] += two_pi_hop_over_n * (k as f32);
                 let dry_p    = unwrapped[k].get();
                 let frozen_p = self.frozen_unwrapped[k];
                 unwrapped[k].set(dry_p * (1.0 - mix) + frozen_p * mix);
