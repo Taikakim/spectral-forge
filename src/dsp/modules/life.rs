@@ -313,6 +313,45 @@ fn apply_crystallization(
     }
 }
 
+/// Volume-conserving ducking. Total spectral magnitude is treated as fluid volume;
+/// when total exceeds capacity (controlled by THRESHOLD), bins are scaled down
+/// proportionally. AMOUNT scales the displacement; THRESHOLD sets the capacity.
+/// MIX blends wet/dry. Does not use BinPhysics directly.
+fn apply_archimedes(
+    bins: &mut [Complex<f32>],
+    curves: &[&[f32]],
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let mix_c    = curves[4];
+
+    let mut total_mag = 0.0_f32;
+    for k in 0..num_bins {
+        total_mag += bins[k].norm();
+    }
+
+    let mut sum_amt = 0.0_f32;
+    let mut sum_thresh = 0.0_f32;
+    for k in 0..num_bins {
+        sum_amt    += amount_c[k];
+        sum_thresh += thresh_c[k];
+    }
+    let avg_amt    = (sum_amt    / num_bins as f32 * 0.5).clamp(0.0, 1.0);
+    let avg_thresh = (sum_thresh / num_bins as f32 * 0.5).clamp(0.0, 2.0);
+
+    let capacity       = (num_bins as f32 * avg_thresh).max(1e-6);
+    let overflow_ratio = (total_mag / capacity - 1.0).max(0.0);
+    let duck_factor    = 1.0 - (overflow_ratio * avg_amt).min(0.95);
+
+    for k in 0..num_bins {
+        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let dry = bins[k];
+        let wet = bins[k] * duck_factor;
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -345,9 +384,13 @@ impl SpectralModule for LifeModule {
                 let sustain = &mut self.sustain_envelope[channel];
                 apply_crystallization(bins, sustain, curves, physics, ctx.num_bins);
             }
+            LifeMode::Archimedes => {
+                let _ = physics;
+                apply_archimedes(bins, curves, ctx.num_bins);
+            }
             _ => {
                 let _ = physics;
-                // Filled in Tasks 6–12.
+                // Filled in Tasks 7–12.
             }
         }
 

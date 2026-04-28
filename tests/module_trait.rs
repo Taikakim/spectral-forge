@@ -700,3 +700,48 @@ fn life_surface_tension_coalesces_peaks() {
         assert!(b.norm().is_finite());
     }
 }
+
+#[test]
+fn life_archimedes_ducks_under_loud_volume() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::Archimedes);
+
+    let num_bins = 1025;
+    // High-volume signal: every bin = 1.0.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+    let dry_total: f32 = bins.iter().map(|b| b.norm()).sum();
+
+    // AMOUNT=2 (max ducking), THRESHOLD=0.5 (low — pool fills easily),
+    // SPEED=neutral, REACH=neutral, MIX=2 (full wet).
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.5_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    let wet_total: f32 = bins.iter().map(|b| b.norm()).sum();
+
+    assert!(wet_total < dry_total * 0.95,
+        "Archimedes did not duck (dry={}, wet={})", dry_total, wet_total);
+
+    for b in &bins {
+        assert!(b.norm().is_finite());
+    }
+}
