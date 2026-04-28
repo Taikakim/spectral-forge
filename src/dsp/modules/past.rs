@@ -327,7 +327,67 @@ impl PastModule {
     }
 
     fn apply_stretch(
-        &mut self, _ch: usize, _bins: &mut [Complex<f32>], _hist: &HistoryBuffer,
-        _amount: &[f32], _time: &[f32], _spread: &[f32], _mix: &[f32], _ctx: &ModuleContext<'_>,
-    ) {}
+        &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
+        amount: &[f32], time: &[f32], spread: &[f32], mix: &[f32], ctx: &ModuleContext<'_>,
+    ) {
+        let n = bins.len().min(ctx.num_bins);
+        // TIME maps [0..1] log-scale to [0.25×..4×] read rate.
+        // 0.0 → 0.25, 0.5 → 1.0, 1.0 → 4.0
+        let t_avg = if n == 0 { 0.0 } else {
+            time.iter().take(n).copied().sum::<f32>() / n as f32
+        };
+        let rate = 4.0_f32.powf(2.0 * t_avg.clamp(0.0, 1.0) - 1.0);
+
+        // −2 because read_fractional reads frame[age_floor] AND frame[age_floor+1];
+        // both must be in range (< frames_used). Using saturating_sub(1) would let
+        // age_floor reach cap-1 and attempt frame cap, which exceeds frames_used.
+        let max_age = hist.capacity_frames().saturating_sub(2) as f32;
+
+        let read_age = self.channels[ch].stretch_read_phase as f32;
+        // Advance read phase for next hop; wrap at capacity.
+        self.channels[ch].stretch_read_phase += rate as f64;
+        if self.channels[ch].stretch_read_phase > max_age as f64 {
+            self.channels[ch].stretch_read_phase = 0.0;
+        }
+
+        // Read the two bracketing frames into the per-channel workspace.
+        // Scope the &mut borrow to just this block so the per-bin loop below
+        // can reborrow self.channels[ch] independently.
+        let ok = {
+            let scratch = &mut self.channels[ch].sort_scratch;
+            scratch[..n].fill(Complex::new(0.0, 0.0));
+            hist.read_fractional(ch, read_age, &mut scratch[..n])
+        };
+        if !ok { return; }
+
+        let if_offset = ctx.if_offset.unwrap_or(&[]);
+        for k in 0..n {
+            let bin_amount = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            if bin_amount < 1e-6 { continue; }
+
+            // Complex<f32> is Copy — read ends immediately, no borrow held.
+            let mut sample = self.channels[ch].sort_scratch[k];
+
+            // Phase rotation: 2π · if_offset · (rate - 1) cycles.
+            let if_off = if_offset.get(k).copied().unwrap_or(0.0);
+            let rot = if_off * (rate - 1.0);
+            sample = self.rotator.rotate(sample, rot, 1.0);
+
+            // Per-bin hash dither based on SPREAD curve (xorshift32).
+            let spr = spread.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            if spr > 1e-6 {
+                let s = self.channels[ch].stretch_rng;
+                let mut x = s ^ (k as u32).wrapping_mul(0x9E37_79B9);
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                self.channels[ch].stretch_rng = x;
+                let dither_phase = ((x as f32 / u32::MAX as f32) - 0.5) * spr * 0.05;
+                sample = self.rotator.rotate(sample, dither_phase, 1.0);
+            }
+            let value = sample * bin_amount;
+            let m_val = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            bins[k] = bins[k] * (1.0 - m_val) + value * m_val;
+        }
+    }
 }

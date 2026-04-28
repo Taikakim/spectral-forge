@@ -225,3 +225,77 @@ fn reverse_reads_backward_through_history() {
     assert!((readings[1] - 15.0).abs() < 0.5, "hop 1 = {}", readings[1]);
     assert!((readings[2] - 14.0).abs() < 0.5, "hop 2 = {}", readings[2]);
 }
+
+#[test]
+fn stretch_at_unity_rate_returns_recent_history() {
+    use spectral_forge::dsp::history_buffer::HistoryBuffer;
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut h = HistoryBuffer::new(1, 32, 256);
+    for _ in 0..32 {
+        let mut frame = vec![Complex::new(0.0, 0.0); 256];
+        frame[80] = Complex::new(2.0, 0.0);
+        h.write_hop(0, &frame);
+        h.advance_after_all_channels_written();
+    }
+
+    let mut m = PastModule::new(48000.0, 2048);
+    m.set_mode(PastMode::Stretch);
+
+    let mut bins = vec![Complex::new(0.0, 0.0); 256];
+    let amount    = vec![1.0_f32; 256];
+    let time      = vec![0.5_f32; 256];   // unity rate
+    let threshold = vec![0.0_f32; 256];
+    let spread    = vec![0.0_f32; 256];
+    let mix       = vec![1.0_f32; 256];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
+    let mut supp = vec![0.0_f32; 256];
+    let mut ctx = ModuleContext::new(48000.0, 2048, 256, 10.0, 100.0, 1.0, 0.5, false, false);
+    ctx.history = Some(&h);
+
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+              &mut bins, None, &curves, &mut supp, None, &ctx);
+    assert!((bins[80].norm() - 2.0).abs() < 0.5,
+        "expected ~2.0 at unity rate, got {}", bins[80].norm());
+}
+
+#[test]
+fn stretch_at_half_rate_advances_read_phase_slowly() {
+    use spectral_forge::dsp::history_buffer::HistoryBuffer;
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut h = HistoryBuffer::new(1, 32, 256);
+    for i in 0..32 {
+        let mut frame = vec![Complex::new(0.0, 0.0); 256];
+        frame[80] = Complex::new(i as f32, 0.0);
+        h.write_hop(0, &frame);
+        h.advance_after_all_channels_written();
+    }
+    let mut m = PastModule::new(48000.0, 2048);
+    m.set_mode(PastMode::Stretch);
+
+    let amount    = vec![1.0_f32; 256];
+    let time      = vec![0.25_f32; 256];  // < 0.5 → < 1.0× rate (slower)
+    let threshold = vec![0.0_f32; 256];
+    let spread    = vec![0.0_f32; 256];
+    let mix       = vec![1.0_f32; 256];
+    let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
+
+    let mut readings: Vec<f32> = Vec::new();
+    for _ in 0..4 {
+        let mut bins = vec![Complex::new(0.0, 0.0); 256];
+        let mut supp = vec![0.0_f32; 256];
+        let mut ctx = ModuleContext::new(48000.0, 2048, 256, 10.0, 100.0, 1.0, 0.5, false, false);
+        ctx.history = Some(&h);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+                  &mut bins, None, &curves, &mut supp, None, &ctx);
+        readings.push(bins[80].norm());
+    }
+    // Slower rate ⇒ adjacent readings should be closer together than at unity rate.
+    let delta = (readings[3] - readings[0]).abs();
+    assert!(delta < 4.0, "read_phase should advance slowly at half rate, delta {}", delta);
+}
