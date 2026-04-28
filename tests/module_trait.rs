@@ -585,3 +585,61 @@ fn life_viscosity_diffuses_and_conserves() {
         assert!(b.norm().is_finite());
     }
 }
+
+#[test]
+fn life_surface_tension_coalesces_peaks() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::SurfaceTension);
+
+    let num_bins = 1025;
+    // A "noisy" cluster around bin 200: bins [180..=220] all = 1.0.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    for k in 180..=220 {
+        bins[k] = Complex::new(1.0, 0.0);
+    }
+    let dry_total_mag: f32 = bins.iter().map(|b| b.norm()).sum();
+
+    // AMOUNT=2 (max attract), THRESHOLD=0.5 (low — most cluster bins qualify),
+    // SPEED=neutral, REACH=2 (long reach), MIX=2 (full wet).
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.5_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let reach   = vec![2.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &neutral, &reach, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    // 10 hops — coalescence is gradual.
+    for _ in 0..10 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+
+    let wet_total_mag: f32 = bins.iter().map(|b| b.norm()).sum();
+    let loss_pct = (dry_total_mag - wet_total_mag).abs() / dry_total_mag;
+    assert!(loss_pct < 0.10,
+        "Surface Tension lost {:.2}% of magnitude (>10%)", loss_pct * 100.0);
+
+    // Variance of cluster bins must INCREASE — peaks taller, valleys deeper.
+    let cluster: Vec<f32> = (180..=220).map(|k| bins[k].norm()).collect();
+    let mean: f32 = cluster.iter().sum::<f32>() / cluster.len() as f32;
+    let var:  f32 = cluster.iter().map(|m| (m - mean).powi(2)).sum::<f32>() / cluster.len() as f32;
+    assert!(var > 0.05, "Cluster did not coalesce (variance = {})", var);
+
+    for b in &bins {
+        assert!(b.norm().is_finite());
+    }
+}

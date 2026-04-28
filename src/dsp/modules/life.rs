@@ -177,6 +177,78 @@ fn apply_viscosity(
     }
 }
 
+/// Adjacent peak attraction. Bins above THRESHOLD steal a tiny fraction of the
+/// magnitude of weaker neighbours within ±REACH bins, weighted 1/distance.
+/// Approximately conserves total magnitude (transport, not creation).
+fn apply_surface_tension(
+    bins: &mut [Complex<f32>],
+    scratch_mag: &mut [f32],
+    curves: &[&[f32]],
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let reach_c  = curves[3];
+    let mix_c    = curves[4];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        scratch_mag[k] = bins[k].norm();
+    }
+
+    for k in 0..num_bins {
+        let mag = scratch_mag[k];
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 2.0);
+        if mag <= thresh {
+            continue;
+        }
+
+        let amt = (amount_c[k] * 0.025).clamp(0.0, 0.05); // ≤5% per hop
+        let reach_bins = ((reach_c[k] * 4.0) as i32).clamp(1, 8); // 1..8 bins
+
+        let mut accum = 0.0_f32;
+        for d in 1..=reach_bins {
+            let kl = k as i32 - d;
+            let kr = k as i32 + d;
+            let weight = amt / d as f32;
+            if kl >= 0 {
+                let nb = scratch_mag[kl as usize];
+                if nb <= mag {
+                    let take = nb * weight;
+                    accum += take;
+                    scratch_mag[kl as usize] -= take;
+                }
+            }
+            if (kr as usize) < num_bins {
+                let nb = scratch_mag[kr as usize];
+                if nb <= mag {
+                    let take = nb * weight;
+                    accum += take;
+                    scratch_mag[kr as usize] -= take;
+                }
+            }
+        }
+
+        scratch_mag[k] = mag + accum;
+    }
+
+    for k in 0..num_bins {
+        let old_mag = bins[k].norm();
+        let new_mag = scratch_mag[k].max(0.0);
+        let scale_wet = if old_mag > 1e-9 { new_mag / old_mag } else { 0.0 };
+        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let dry = bins[k];
+        let wet = if old_mag > 1e-9 {
+            dry * scale_wet
+        } else {
+            // Silent bin receiving accumulated mag from neighbour-stealing
+            // would otherwise stay zero — inject as real-valued.
+            Complex::new(new_mag, 0.0)
+        };
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -200,8 +272,11 @@ impl SpectralModule for LifeModule {
             LifeMode::Viscosity => {
                 apply_viscosity(bins, scratch_power, scratch_mag, curves);
             }
+            LifeMode::SurfaceTension => {
+                apply_surface_tension(bins, scratch_mag, curves);
+            }
             _ => {
-                // Filled in Tasks 4–12.
+                // Filled in Tasks 5–12.
             }
         }
 
