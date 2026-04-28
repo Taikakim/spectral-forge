@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics + history-buffer infrastructure (both DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-04-29): IMPLEMENTED** by plan `2026-04-27-phase-5b2-past.md`. Source of truth: [../STATUS.md](../STATUS.md). The shipped module differs from this spec in places (5 modes instead of every variant explored here; UI uses a single Mode-button popup rather than the spec's separate UX); read the plan + code, not this spec, for current behaviour.
 
 # Past Module — Design Spec
 
