@@ -227,6 +227,9 @@ impl Pipeline {
     /// What this does:
     /// - Zeros every stateful f32/complex pre-allocated buffer in Pipeline and FxMatrix.
     /// - Resets the dry-delay write head to 0.
+    /// - Zeros `pending_hop_frames` and calls `HistoryBuffer::reset()` (rewinds the
+    ///   ring write head + frame count + summary cache; allocation-free — same Vec
+    ///   slots, just `fill(Complex::ZERO)`).
     /// - Does NOT reset StftHelper overlap-add ring buffers — those are private to
     ///   nih-plug and cannot be zeroed here. The result is a brief one-hop click, which
     ///   is acceptable for a user-initiated hard reset.
@@ -881,11 +884,17 @@ impl Pipeline {
         });
 
         // Drain pending hop frames into history after the StftHelper closure.
-        // Note: StftHelper processes one hop's worth of FFT per channel per block.
-        // For block_size > hop_size, multiple hops may complete; this pad holds only
-        // the LAST hop per block. See plan §5.6 v1 limitation note.
+        // Multi-hop blocks (block_size > hop_size) overwrite the pad each iteration,
+        // so at most ONE frame lands in history per block — `pending_hops > 0`
+        // guards against block_size < hop_size (no hop completed inside the closure).
+        // The pad and history both top out at the StftHelper's channel count;
+        // bound the loop on `history.num_channels()` so the drain can never write
+        // past whatever HistoryBuffer was sized for at construction.
         if pending_hops > 0 {
-            for ch in 0..stft_num_channels.min(2) {
+            let channels = stft_num_channels
+                .min(self.history.num_channels())
+                .min(self.pending_hop_frames.len());
+            for ch in 0..channels {
                 self.history.write_hop(ch, &self.pending_hop_frames[ch][..num_bins]);
             }
             self.history.advance_after_all_channels_written();
