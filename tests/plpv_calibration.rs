@@ -428,3 +428,226 @@ fn freeze_plpv_on_writes_to_unwrapped_only() {
     assert!(any_mag_changed,
         "PLPV-on Freeze magnitude path must still affect bin magnitudes");
 }
+
+// ── Phase 4.3d — MidSide PLPV peak-aligned decode + J probe ──────────────────
+//
+// Three tests:
+//   1. The Laroche-Dolson-style J helper (inter-channel phase drift) is
+//      exercised by `midside_plpv_does_not_increase_phase_drift_on_tonal_signal`,
+//      which round-trips a synthetic stereo chord through M/S encode → MidSide
+//      module → M/S decode and asserts the PLPV-on path produces strictly less
+//      drift than the per-bin random PLPV-off path.
+//   2. `midside_plpv_off_uses_per_bin_path` verifies the off-path still applies
+//      a per-bin random rotation (different output per bin).
+//   3. `midside_plpv_on_uses_per_peak_path` verifies the on-path applies the
+//      same rotation to every bin in a peak's skirt (skirt bins share an arg).
+
+use spectral_forge::dsp::modules::MidSideModule;
+
+fn inter_channel_phase_drift(
+    in_l: &[Complex<f32>], in_r: &[Complex<f32>],
+    out_l: &[Complex<f32>], out_r: &[Complex<f32>],
+    num_bins: usize,
+    noise_floor: f32,
+) -> f32 {
+    let mut j = 0.0_f32;
+    for k in 0..num_bins {
+        let dphi_in  = in_l[k].arg()  - in_r[k].arg();
+        let dphi_out = out_l[k].arg() - out_r[k].arg();
+        if in_l[k].norm() > noise_floor && in_r[k].norm() > noise_floor {
+            // Use principal_arg to fold into (-π, π] so that ±2π wraps don't
+            // accumulate spurious 2π errors at branch crossings.
+            j += spectral_forge::dsp::plpv::principal_arg(dphi_out - dphi_in).abs();
+        }
+    }
+    j
+}
+
+/// Run the same M/S encode → MidSide.process(0) + .process(1) → M/S decode
+/// pipeline once, with PLPV either on or off, and return the J metric.
+/// Each invocation constructs a fresh `MidSideModule` so PRNG state starts
+/// from the default seed — required so PLPV-on vs PLPV-off are compared
+/// against an apples-to-apples PRNG initial condition.
+fn ms_pipeline_j(
+    in_l: &[Complex<f32>], in_r: &[Complex<f32>],
+    num_bins: usize,
+    peaks: &[PeakInfo],
+    bal: &[f32], exp: &[f32], dec: &[f32], trans: &[f32], pan: &[f32],
+    plpv_on: bool,
+) -> f32 {
+    use std::f32::consts::FRAC_1_SQRT_2;
+
+    let curves: [&[f32]; 5] = [bal, exp, dec, trans, pan];
+    let curves_slice: &[&[f32]] = &curves;
+
+    let mut module = MidSideModule::new();
+    module.reset(48000.0, (num_bins - 1) * 2);
+    module.set_plpv_midside_enabled(plpv_on);
+
+    // L/R → M/S
+    let mut mid: Vec<Complex<f32>> = in_l.iter().zip(in_r.iter())
+        .map(|(l, r)| (l + r) * FRAC_1_SQRT_2).collect();
+    let mut side: Vec<Complex<f32>> = in_l.iter().zip(in_r.iter())
+        .map(|(l, r)| (l - r) * FRAC_1_SQRT_2).collect();
+
+    let mut ctx = ModuleContext::new(
+        48000.0, (num_bins - 1) * 2, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    if plpv_on {
+        ctx.peaks = Some(peaks);
+    }
+
+    let mut supp = vec![0.0_f32; num_bins];
+
+    module.process(0, StereoLink::MidSide, FxChannelTarget::All,
+                   &mut mid, None, curves_slice, &mut supp, None, &ctx);
+    module.process(1, StereoLink::MidSide, FxChannelTarget::All,
+                   &mut side, None, curves_slice, &mut supp, None, &ctx);
+
+    // M/S → L/R
+    let out_l: Vec<Complex<f32>> = mid.iter().zip(side.iter())
+        .map(|(m, s)| (m + s) * FRAC_1_SQRT_2).collect();
+    let out_r: Vec<Complex<f32>> = mid.iter().zip(side.iter())
+        .map(|(m, s)| (m - s) * FRAC_1_SQRT_2).collect();
+
+    inter_channel_phase_drift(in_l, in_r, &out_l, &out_r, num_bins, 1e-3)
+}
+
+#[test]
+fn midside_plpv_does_not_increase_phase_drift_on_tonal_signal() {
+    let num_bins = 1025usize;
+
+    // Synthesize stereo input: tonal energy at four bins with correlated but
+    // slightly different L/R phases. Bins outside the tonal set sit at a tiny
+    // noise floor so the J helper's noise gate excludes them.
+    let mut in_l = vec![Complex::new(1e-9, 0.0); num_bins];
+    let mut in_r = vec![Complex::new(1e-9, 0.0); num_bins];
+    for &k in &[50, 100, 200, 400] {
+        in_l[k] = Complex::from_polar(1.0, 0.3 * k as f32);
+        in_r[k] = Complex::from_polar(1.0, 0.3 * k as f32 + 0.1);
+    }
+
+    // Peaks tile [0, num_bins-1] so every bin lands in some skirt under PLPV.
+    let last = (num_bins - 1) as u32;
+    let peaks = vec![
+        PeakInfo { k: 50,  mag: 1.0, low_k: 0,   high_k: 75 },
+        PeakInfo { k: 100, mag: 1.0, low_k: 76,  high_k: 150 },
+        PeakInfo { k: 200, mag: 1.0, low_k: 151, high_k: 300 },
+        PeakInfo { k: 400, mag: 1.0, low_k: 301, high_k: last },
+    ];
+
+    // Curves: balance neutral, expansion neutral, decorrel = 0.5 (substantial).
+    let bal   = vec![1.0_f32; num_bins];
+    let exp   = vec![1.0_f32; num_bins];
+    let dec   = vec![0.5_f32; num_bins];
+    let trans = vec![1.0_f32; num_bins];
+    let pan   = vec![1.0_f32; num_bins];
+
+    // Two fresh modules → identical PRNG initial seed; difference comes only
+    // from the iteration shape (per-peak vs per-bin).
+    let j_off = ms_pipeline_j(&in_l, &in_r, num_bins, &peaks,
+                              &bal, &exp, &dec, &trans, &pan, false);
+    let j_on  = ms_pipeline_j(&in_l, &in_r, num_bins, &peaks,
+                              &bal, &exp, &dec, &trans, &pan, true);
+
+    // PLPV-on must reduce phase drift relative to PLPV-off — the per-peak
+    // broadcast keeps every bin in a peak's skirt phase-aligned with the
+    // peak, whereas PLPV-off scrambles each bin independently.
+    println!("MidSide J probe: J_off={} J_on={}", j_off, j_on);
+    assert!(j_on < j_off,
+        "PLPV-on should reduce inter-channel phase drift; got J_on={} J_off={}",
+        j_on, j_off);
+}
+
+#[test]
+fn midside_plpv_off_uses_per_bin_path() {
+    // With PLPV off, the side path advances PRNG per non-real bin and applies
+    // an independent rotation to each. Verify by checking that two adjacent
+    // interior bins receive different rotations (statistically certain given
+    // 1e-6 tolerance and a uniform [-π, π] distribution).
+    let num_bins = 1025usize;
+    let mut m = MidSideModule::new();
+    m.reset(48000.0, 2048);
+    m.set_plpv_midside_enabled(false);
+
+    // Real-valued unit input on every bin: input arg is 0 everywhere
+    // (excluding DC/Nyquist sentinels). Any non-zero output arg comes from
+    // the side path's rotation.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+    let bal   = vec![1.0_f32; num_bins];
+    let exp   = vec![1.0_f32; num_bins];
+    let dec   = vec![1.0_f32; num_bins];   // full ±π decorrelation
+    let trans = vec![1.0_f32; num_bins];
+    let pan   = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&bal, &exp, &dec, &trans, &pan];
+
+    let mut supp = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    // ctx.peaks intentionally None — PLPV is off anyway.
+
+    m.process(1, StereoLink::MidSide, FxChannelTarget::All,
+              &mut bins, None, &curves, &mut supp, None, &ctx);
+
+    // Pick a stretch of interior bins. Their rotations must differ — at least
+    // one pair must show a measurable arg difference.
+    let mut any_diff = false;
+    for k in 100..200 {
+        if (bins[k].arg() - bins[k + 1].arg()).abs() > 1e-3 {
+            any_diff = true;
+            break;
+        }
+    }
+    assert!(any_diff,
+        "PLPV-off side path must rotate each bin independently — all bins shared a phase");
+}
+
+#[test]
+fn midside_plpv_on_uses_per_peak_path() {
+    // With PLPV on, every bin in a peak's skirt receives the SAME random
+    // rotation (one PRNG draw per peak). Verify by constructing a peak whose
+    // skirt covers a stretch of interior bins, then asserting all bins in the
+    // skirt share the same arg (within float epsilon).
+    let num_bins = 1025usize;
+    let mut m = MidSideModule::new();
+    m.reset(48000.0, 2048);
+    m.set_plpv_midside_enabled(true);
+
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+    let bal   = vec![1.0_f32; num_bins];
+    let exp   = vec![1.0_f32; num_bins];
+    let dec   = vec![1.0_f32; num_bins];
+    let trans = vec![1.0_f32; num_bins];
+    let pan   = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&bal, &exp, &dec, &trans, &pan];
+
+    // Single peak whose skirt is wholly interior (not touching DC/Nyquist).
+    let peaks = vec![
+        PeakInfo { k: 150, mag: 1.0, low_k: 100, high_k: 200 },
+    ];
+    let mut ctx = ModuleContext::new(
+        48000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+    ctx.peaks = Some(&peaks);
+
+    let mut supp = vec![0.0_f32; num_bins];
+
+    m.process(1, StereoLink::MidSide, FxChannelTarget::All,
+              &mut bins, None, &curves, &mut supp, None, &ctx);
+
+    // Every bin in [100..=200] should share the same arg as bin 100 — the
+    // peak's per-skirt rotation was drawn ONCE.
+    let arg_ref = bins[100].arg();
+    for k in 100..=200 {
+        let diff = (bins[k].arg() - arg_ref).abs();
+        assert!(diff < 1e-4,
+            "PLPV-on per-peak path: bin {k} arg {} should equal peak arg {} (diff {})",
+            bins[k].arg(), arg_ref, diff);
+    }
+}

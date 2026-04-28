@@ -338,6 +338,17 @@ impl FxMatrix {
         }
     }
 
+    /// Phase 4.3d — propagate the global MidSide-PLPV enable flag to every slot.
+    /// The trait's default `set_plpv_midside_enabled` is a no-op for non-MidSide
+    /// modules. Called once per audio block (before process_hop).
+    pub fn set_plpv_midside_enable(&mut self, enabled: bool) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_plpv_midside_enabled(enabled);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn process_hop(
         &mut self,

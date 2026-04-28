@@ -7,6 +7,12 @@ pub struct MidSideModule {
     /// xorshift64 state for phase decorrelation. Must never be zero.
     rng_state: u64,
     num_bins:  usize,
+    /// Phase 4.3d — per-module PLPV peak-aligned mid/side decode enable.
+    /// Mirrors `params.plpv_midside_enable`; written each audio block by the
+    /// Pipeline via `FxMatrix::set_plpv_midside_enable`. Default `true` matches
+    /// the param default so a freshly-constructed module behaves identically
+    /// to one with the param applied.
+    plpv_enabled: bool,
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
 }
@@ -16,6 +22,7 @@ impl MidSideModule {
         Self {
             rng_state: 0xdeadbeefcafebabe,
             num_bins: 0,
+            plpv_enabled: true,
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
@@ -34,6 +41,10 @@ impl SpectralModule for MidSideModule {
         self.rng_state = 0xdeadbeefcafebabe;
     }
 
+    fn set_plpv_midside_enabled(&mut self, enabled: bool) {
+        self.plpv_enabled = enabled;
+    }
+
     fn process(
         &mut self,
         channel:      usize,
@@ -44,7 +55,7 @@ impl SpectralModule for MidSideModule {
         curves:       &[&[f32]],
         suppression_out: &mut [f32],
         _physics:     Option<&mut crate::dsp::bin_physics::BinPhysics>,
-        _ctx:         &ModuleContext<'_>,
+        ctx:          &ModuleContext<'_>,
     ) {
         suppression_out.fill(0.0);
 
@@ -82,42 +93,117 @@ impl SpectralModule for MidSideModule {
             };
         }
 
+        // Phase 4.3d — PLPV-on iff toggle enabled AND the Pipeline supplied a
+        // peak set. Both branches share `self.rng_state`; PRNG sequence
+        // intentionally diverges between the two paths because the iteration
+        // shape differs (per-peak vs per-bin). Documented in the plan.
+        let plpv = if self.plpv_enabled { ctx.peaks } else { None };
+
         match channel {
             0 => {
                 // Mid channel: apply balance (mid scale)
                 // balance curve: 1.0 = neutral, 0.0 = full side (mute mid), 2.0 = double mid
-                for k in 0..n {
-                    let bal = balance.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let mid_scale = bal.sqrt().min(std::f32::consts::SQRT_2);
-                    bins[k] *= mid_scale;
+                match plpv {
+                    Some(peaks) => {
+                        // Per-peak broadcast: sample balance at the peak bin
+                        // and apply it across the entire skirt.
+                        if n == 0 { return; }
+                        let last = n - 1;
+                        for p in peaks {
+                            let pk = (p.k as usize).min(last);
+                            let lo = (p.low_k as usize).min(last);
+                            let hi = (p.high_k as usize).min(last);
+                            let bal = balance.get(pk).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                            let mid_scale = bal.sqrt().min(std::f32::consts::SQRT_2);
+                            for k in lo..=hi {
+                                bins[k] *= mid_scale;
+                            }
+                        }
+                    }
+                    None => {
+                        for k in 0..n {
+                            let bal = balance.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                            let mid_scale = bal.sqrt().min(std::f32::consts::SQRT_2);
+                            bins[k] *= mid_scale;
+                        }
+                    }
                 }
             }
             1 => {
                 // Side channel: balance (side scale) + expansion + decorrelation
-                for k in 0..n {
-                    let bal = balance.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let side_scale = (2.0 - bal).sqrt().min(std::f32::consts::SQRT_2);
+                match plpv {
+                    Some(peaks) => {
+                        // Per-peak broadcast: sample curves at the peak bin,
+                        // draw ONE random rotation per peak, and apply to the
+                        // entire skirt. Bins in the same peak share the rotation
+                        // — this preserves inter-channel phase coherence
+                        // relative to the per-bin random rotation in the off path.
+                        if n == 0 { return; }
+                        let last = n - 1;
+                        for p in peaks {
+                            let pk = (p.k as usize).min(last);
+                            let lo = (p.low_k as usize).min(last);
+                            let hi = (p.high_k as usize).min(last);
 
-                    let exp = expansion.get(k).copied().unwrap_or(1.0).max(0.0);
+                            let bal = balance.get(pk).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                            let side_scale = (2.0 - bal).sqrt().min(std::f32::consts::SQRT_2);
+                            let exp = expansion.get(pk).copied().unwrap_or(1.0).max(0.0);
+                            let dec_amt = decorrel.get(pk).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+                            let scale = side_scale * exp;
 
-                    let dec_amt = decorrel.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
-                    // DC (k=0) and Nyquist (k=n-1) are required by realfft's inverse to
-                    // have zero imaginary part — they represent real-valued components
-                    // and have no meaningful phase. Rotating them panics the IFFT.
-                    let is_real_bin = k == 0 || k == n - 1;
-                    let phase_rot = if dec_amt > 0.001 && !is_real_bin {
-                        let rnd = xorshift64(&mut self.rng_state) as f32 / u64::MAX as f32;
-                        (rnd - 0.5) * 2.0 * std::f32::consts::PI * dec_amt
-                    } else {
-                        0.0
-                    };
+                            // Draw one rotation per peak when decorrel is active.
+                            let phase_rot = if dec_amt > 0.001 {
+                                let rnd = xorshift64(&mut self.rng_state) as f32 / u64::MAX as f32;
+                                (rnd - 0.5) * 2.0 * std::f32::consts::PI * dec_amt
+                            } else {
+                                0.0
+                            };
+                            let (sin_r, cos_r) = phase_rot.sin_cos();
 
-                    let (sin_r, cos_r) = phase_rot.sin_cos();
-                    let rotated = Complex::new(
-                        bins[k].re * cos_r - bins[k].im * sin_r,
-                        bins[k].re * sin_r + bins[k].im * cos_r,
-                    );
-                    bins[k] = rotated * (side_scale * exp);
+                            for k in lo..=hi {
+                                // DC (k=0) and Nyquist (k=last) are required by realfft's
+                                // inverse to have zero imaginary part — never rotate.
+                                let is_real_bin = k == 0 || k == last;
+                                if is_real_bin || phase_rot == 0.0 {
+                                    bins[k] *= scale;
+                                } else {
+                                    let r = bins[k].re;
+                                    let i = bins[k].im;
+                                    bins[k] = Complex::new(
+                                        (r * cos_r - i * sin_r) * scale,
+                                        (r * sin_r + i * cos_r) * scale,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        for k in 0..n {
+                            let bal = balance.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+                            let side_scale = (2.0 - bal).sqrt().min(std::f32::consts::SQRT_2);
+
+                            let exp = expansion.get(k).copied().unwrap_or(1.0).max(0.0);
+
+                            let dec_amt = decorrel.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+                            // DC (k=0) and Nyquist (k=n-1) are required by realfft's inverse to
+                            // have zero imaginary part — they represent real-valued components
+                            // and have no meaningful phase. Rotating them panics the IFFT.
+                            let is_real_bin = k == 0 || k == n - 1;
+                            let phase_rot = if dec_amt > 0.001 && !is_real_bin {
+                                let rnd = xorshift64(&mut self.rng_state) as f32 / u64::MAX as f32;
+                                (rnd - 0.5) * 2.0 * std::f32::consts::PI * dec_amt
+                            } else {
+                                0.0
+                            };
+
+                            let (sin_r, cos_r) = phase_rot.sin_cos();
+                            let rotated = Complex::new(
+                                bins[k].re * cos_r - bins[k].im * sin_r,
+                                bins[k].re * sin_r + bins[k].im * cos_r,
+                            );
+                            bins[k] = rotated * (side_scale * exp);
+                        }
+                    }
                 }
             }
             _ => {} // No more than 2 channels

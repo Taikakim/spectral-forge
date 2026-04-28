@@ -277,6 +277,11 @@ pub trait SpectralModule: Send {
     /// Default no-op for all other types — only FreezeModule overrides.
     fn set_plpv_freeze_enabled(&mut self, _: bool) {}
 
+    /// Toggle the per-module PLPV peak-aligned mid/side decode on MidSide
+    /// modules. Default no-op for all other types — only MidSideModule
+    /// overrides. Phase 4.3d.
+    fn set_plpv_midside_enabled(&mut self, _: bool) {}
+
     /// Zero per-module DSP state without allocating. Called from the audio thread
     /// when the user presses Reset. Default is a no-op for stateless modules.
     /// MUST NOT allocate, lock, or do I/O.
@@ -642,6 +647,7 @@ pub mod ts_split;
 pub mod harmonic;
 pub mod master;
 pub mod mid_side;
+pub use mid_side::MidSideModule;
 pub mod future;
 pub use future::FutureMode;
 pub mod punch;
