@@ -63,6 +63,18 @@ const STICTION_DECAY_MIN: f32 = 0.05;
 /// decay per hop is 0.5, so a bin re-locks in ~2 hops.
 const STICTION_DECAY_RANGE: f32 = 0.45;
 
+/// Yield — minimum per-hop heal rate of `tear_state`. Even at speed=0 a torn
+/// bin heals within ~200 hops after the magnitude drops below the yield threshold.
+const YIELD_HEAL_MIN: f32 = 0.005;
+
+/// Yield — additional heal rate range scaled by speed curve. At speed=1 total
+/// heal rate is 0.05, so a bin heals within ~20 hops.
+const YIELD_HEAL_RANGE: f32 = 0.045;
+
+/// Yield — cumulative bias cap in BinPhysics. Prevents the field from drifting
+/// unbounded during long high-energy passages.
+const YIELD_BIAS_CAP: f32 = 10.0;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,7 +101,6 @@ impl Default for LifeMode {
 
 /// Xorshift32 PRNG step — returns the raw state value.
 /// Used by the Yield (Task 9) and Brownian (Task 12) kernels.
-#[allow(dead_code)]
 #[inline]
 fn xorshift32_step(state: &mut u32) -> u32 {
     let mut x = *state;
@@ -102,7 +113,6 @@ fn xorshift32_step(state: &mut u32) -> u32 {
 
 /// Xorshift32 PRNG step mapped to `[-1.0, 1.0)`.
 /// Used by the Yield (Task 9) and Brownian (Task 12) kernels.
-#[allow(dead_code)]
 #[inline]
 fn xorshift32_signed_unit(state: &mut u32) -> f32 {
     let u = xorshift32_step(state);
@@ -474,6 +484,60 @@ fn apply_stiction(
     }
 }
 
+/// Fabric tearing. When a bin's magnitude exceeds the yield threshold, its phase
+/// is scrambled via xorshift32 PRNG and its magnitude is clamped to the threshold.
+/// `tear_state` persists across hops (1.0 = fully torn; decays toward 0 at heal_rate
+/// when the bin drops below threshold). Writes cumulative stress to BinPhysics.bias
+/// using the ORIGINAL pre-tear magnitude.
+fn apply_yield(
+    bins: &mut [Complex<f32>],
+    tear_state: &mut [f32],
+    rng_state: &mut u32,
+    curves: &[&[f32]],
+    physics_out: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let speed_c  = curves[2];
+    let mix_c    = curves[4];
+
+    let mut physics_out = physics_out;
+    for k in 0..num_bins {
+        let mag    = bins[k].norm();
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
+        let amt    = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let speed  = (speed_c[k]  * 0.5).clamp(0.0, 1.0);
+        let heal_rate = YIELD_HEAL_MIN + speed * YIELD_HEAL_RANGE;
+
+        if mag > thresh {
+            tear_state[k] = 1.0;
+        } else {
+            tear_state[k] = (tear_state[k] - heal_rate).max(0.0);
+        }
+
+        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        if tear_state[k] > 0.0 && mag > 1e-9 {
+            let yield_mag = thresh.min(mag);
+            let phase_scramble = xorshift32_signed_unit(rng_state) * std::f32::consts::PI;
+            let new_re = yield_mag * phase_scramble.cos();
+            let new_im = yield_mag * phase_scramble.sin();
+            let torn_strength = tear_state[k] * amt;
+            let wet    = Complex::new(new_re, new_im);
+            let elastic = bins[k];
+            let result = elastic * (1.0 - torn_strength) + wet * torn_strength;
+            bins[k] = bins[k] * (1.0 - mix) + result * mix;
+        }
+
+        // Physics: stress is the ORIGINAL magnitude overshoot, not post-clamp.
+        if let Some(p) = physics_out.as_deref_mut() {
+            if mag > thresh {
+                p.bias[k] = (p.bias[k] + (mag - thresh)).min(YIELD_BIAS_CAP);
+            }
+        }
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -519,9 +583,14 @@ impl SpectralModule for LifeModule {
                 let is_moving = &mut self.is_moving[channel];
                 apply_stiction(bins, is_moving, curves, velocity, physics, ctx.num_bins);
             }
+            LifeMode::Yield => {
+                let tear = &mut self.tear_state[channel];
+                let rng  = &mut self.rng_state[channel];
+                apply_yield(bins, tear, rng, curves, physics, ctx.num_bins);
+            }
             _ => {
                 let _ = physics;
-                // Filled in Tasks 9–12.
+                // Filled in Tasks 10–12.
             }
         }
 
