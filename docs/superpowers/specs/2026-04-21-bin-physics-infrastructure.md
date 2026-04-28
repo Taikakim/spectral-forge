@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED — not started.** Still a valid design reference. Blocks the Circuit / Life / Kinetics / Harmony / Modulate / Past / Rhythm module specs. Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-04-28): SUPERSEDED by [`../plans/2026-04-27-phase-3-bin-physics.md`](../plans/2026-04-27-phase-3-bin-physics.md).** The Phase 3 plan ships the implementation under a refined architecture (per-field `MergeRule`, opt-in writer/reader split, auto-velocity). This spec is preserved for history; do not follow as written. Source of truth: [../STATUS.md](../STATUS.md).
 
 # BinPhysics Infrastructure — Design Spec
 

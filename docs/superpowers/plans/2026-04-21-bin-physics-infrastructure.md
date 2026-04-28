@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED — not started.** No `BinPhysics` code exists yet. This plan remains a valid design reference and gates the seven physics-driven module specs (Circuit / Life / Kinetics / Harmony / Modulate / Past / Rhythm). Do not treat as implemented. Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-04-28): SUPERSEDED by [`2026-04-27-phase-3-bin-physics.md`](2026-04-27-phase-3-bin-physics.md).** The Phase 3 plan re-derived the architecture (per-field `MergeRule`, opt-in writer/reader split via `writes_bin_physics`, auto-velocity in FxMatrix), shipped the integration test, and added probe slots. This older plan is preserved for history; do not follow as written. Source of truth: [../STATUS.md](../STATUS.md).
 
 # BinPhysics Infrastructure — Implementation Plan
 

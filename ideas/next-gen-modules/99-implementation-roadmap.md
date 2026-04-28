@@ -179,6 +179,9 @@ Order suggestion based on audibility and risk:
 
 ## Phase 3 — BinPhysics infrastructure
 
+> **Status:** IMPLEMENTED (2026-04-28 → release `0.X+1.0`). See plan
+> `docs/superpowers/plans/2026-04-27-phase-3-bin-physics.md`.
+
 **Goal:** unblock the heavy physics modules (Life, Kinetics,
 full Circuit, Modulate's Gravity Phaser).
 

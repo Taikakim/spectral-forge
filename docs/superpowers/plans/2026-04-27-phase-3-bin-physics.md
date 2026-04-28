@@ -1,5 +1,12 @@
 # Phase 3: BinPhysics Infrastructure Implementation Plan
 
+> **Status (2026-04-28): IMPLEMENTED.** Per-bin physics carrier (`BinPhysics`)
+> with per-field merge rules; opt-in writer/reader split via
+> `ModuleSpec.writes_bin_physics` and `ctx.bin_physics`; `FxMatrix` plumbing
+> with auto-velocity; calibration probe slots in `ProbeSnapshot`; integration
+> test in `tests/bin_physics_pipeline.rs` (probe-feature-gated). Supersedes the
+> 2026-04-21 design. Source of truth: [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** add per-bin persistent physics state (`BinPhysics`) that travels through `FxMatrix` between slots, with per-field merge rules, opt-in module read/write access, and calibration probes.
