@@ -69,6 +69,10 @@ const SC_ENVELOPE_TAU_HOPS: f32 = 1.0;
 const TUNING_FORK_MIN_SEP: usize = 4;
 const MAX_PEAKS: usize = 16;
 const ORBITAL_SAT_HALF_WINDOW: usize = 16;
+/// Strength curve must exceed this baseline to register as a static gravity well.
+const STATIC_WELL_BASELINE: f32 = 1.05;
+/// Sidechain peak must reach this fraction of the per-hop max to register as a well.
+const SC_WELL_THRESHOLD_FRAC: f32 = 0.4;
 
 // ── State structs ──────────────────────────────────────────────────────────
 
@@ -307,8 +311,8 @@ impl KineticsModule {
     /// Gravity-well attraction toward frequency targets.
     ///
     /// Three well sources:
-    /// - `Static`:   local maxima above 1.05 in the STRENGTH curve become wells.
-    /// - `Sidechain`: peaks ≥ 40 % of max sidechain amplitude become wells.
+    /// - `Static`:   local maxima above `STATIC_WELL_BASELINE` in the STRENGTH curve become wells.
+    /// - `Sidechain`: peaks ≥ `SC_WELL_THRESHOLD_FRAC` of max sidechain amplitude become wells.
     /// - `MIDI`:     harmonic series per held note; no-op when `ctx.midi_notes` is `None`.
     ///
     /// Per-bin force is Newtonian (`sign(d) * w_amp / d²` summed over wells) driven through
@@ -339,7 +343,7 @@ impl KineticsModule {
             WellSource::Static => {
                 // Local maxima of the STRENGTH curve above the 1.05 baseline become wells.
                 for k in 1..(num_bins - 1) {
-                    if s_strength[k] > 1.05
+                    if s_strength[k] > STATIC_WELL_BASELINE
                         && s_strength[k] > s_strength[k - 1]
                         && s_strength[k] > s_strength[k + 1]
                     {
@@ -353,7 +357,7 @@ impl KineticsModule {
             WellSource::Sidechain => {
                 if let Some(sc) = sidechain {
                     let sc_max = sc.iter().fold(0.0_f32, |a, &b| a.max(b));
-                    let thresh = sc_max * 0.4;
+                    let thresh = sc_max * SC_WELL_THRESHOLD_FRAC;
                     if sc_max > 1e-6 {
                         let sc_len = sc.len().min(num_bins);
                         for k in 1..(sc_len.saturating_sub(1)) {
@@ -372,9 +376,11 @@ impl KineticsModule {
                     let bin_hz = ctx.sample_rate / ctx.fft_size as f32;
                     let harmonic_count = (s_reach[0].clamp(0.0, 2.0) * 4.0).round() as usize;
                     for midi in 0..128_usize {
+                        if wells.len() >= MAX_PEAKS { break; }
                         if !notes[midi] { continue; }
                         let f_root = 440.0 * 2f32.powf((midi as f32 - 69.0) / 12.0);
                         for h in 1..=harmonic_count {
+                            if wells.len() >= MAX_PEAKS { break; }
                             let f = f_root * h as f32;
                             let k = (f / bin_hz).round() as isize;
                             if k > 0 && (k as usize) < num_bins {
@@ -403,7 +409,6 @@ impl KineticsModule {
         {
             let velocity     = &mut self.velocity[channel][..num_bins];
             let displacement = &mut self.displacement[channel][..num_bins];
-            let s_dry        = &self.dry_mag_scratch[channel][..num_bins];
 
             for k in 0..num_bins {
                 let mass    = s_mass[k].clamp(0.1, 1000.0);
@@ -434,24 +439,33 @@ impl KineticsModule {
 
                 // Floor: clamp in step 3 via .clamp(0, cap); no velocity zeroing here
                 // (gravity well is a weaker pull than Hooke; cap handles it).
-                let _ = s_dry; // used via dry_mag_scratch in pass 2 below; lint suppression
             }
         }
 
         // -- 3. Translate displacement → magnitude bend; blend with dry via MIX. --
         let max_mag = {
-            let s_dry = &self.dry_mag_scratch[channel][..num_bins];
-            s_dry.iter().fold(0.0_f32, |a, &b| a.max(b))
+            let dry_mag_scratch = &self.dry_mag_scratch[channel][..num_bins];
+            dry_mag_scratch.iter().fold(0.0_f32, |a, &b| a.max(b))
         };
         let cap = 4.0 * max_mag.max(1e-6);
 
+        let dry_mag_scratch = &self.dry_mag_scratch[channel][..num_bins];
+        let displacement    = &self.displacement[channel][..num_bins];
         for k in 0..num_bins {
-            let mix     = s_mix[k].clamp(0.0, 1.0);
-            let dry_k   = self.dry_mag_scratch[channel][k];
-            let new_mag = (dry_k + self.displacement[channel][k]).clamp(0.0, cap);
-            let scale   = if dry_k > 1e-9 { new_mag / dry_k } else { new_mag.min(1.0) };
-            bins[k].re  = bins[k].re * (1.0 - mix) + bins[k].re * scale * mix;
-            bins[k].im  = bins[k].im * (1.0 - mix) + bins[k].im * scale * mix;
+            let mix    = s_mix[k].clamp(0.0, 1.0);
+            let dry_k  = dry_mag_scratch[k];
+            let new_mag = (dry_k + displacement[k]).clamp(0.0, cap);
+            if dry_k > 1e-9 {
+                let scale  = new_mag / dry_k;
+                let wet_re = bins[k].re * scale;
+                let wet_im = bins[k].im * scale;
+                bins[k].re = bins[k].re * (1.0 - mix) + wet_re * mix;
+                bins[k].im = bins[k].im * (1.0 - mix) + wet_im * mix;
+            } else if new_mag > 1e-9 {
+                // Inject displaced energy into a previously-silent bin as a real-valued tone.
+                bins[k].re = bins[k].re * (1.0 - mix) + new_mag * mix;
+                bins[k].im = bins[k].im * (1.0 - mix);
+            }
         }
     }
 
@@ -654,7 +668,11 @@ impl SpectralModule for KineticsModule {
                 displacement_at_probe: self.displacement[channel][probe_bin],
                 velocity_at_probe:     self.velocity[channel][probe_bin],
                 active_mode_idx:       self.mode as u8,
-                well_count:            self.last_well_count[channel].max(self.tuning_forks[channel].len() as u16),
+                well_count:            match self.mode {
+                    KineticsMode::GravityWell => self.last_well_count[channel],
+                    KineticsMode::TuningFork  => self.tuning_forks[channel].len() as u16,
+                    _ => 0,
+                },
             };
         }
     }
