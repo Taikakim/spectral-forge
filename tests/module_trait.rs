@@ -481,6 +481,46 @@ fn life_module_spec_present() {
 }
 
 #[test]
+fn life_module_constructs_and_passes_through() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{create_module, ModuleContext, ModuleType, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = create_module(ModuleType::Life, 48_000.0, 2048);
+    assert_eq!(module.module_type(), ModuleType::Life);
+    assert_eq!(module.num_curves(), 5);
+
+    let num_bins = 1025usize;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new((k as f32 * 0.013).sin(), (k as f32 * 0.011).cos()))
+        .collect();
+    let dry: Vec<Complex<f32>> = bins.clone();
+
+    let zeros = vec![0.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&zeros, &neutral, &neutral, &neutral, &zeros];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 80.0, 0.5, 0.0, false, false,
+    );
+
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    for k in 0..num_bins {
+        let diff = (bins[k] - dry[k]).norm();
+        assert!(diff < 1e-5, "bin {} drifted by {} (passthrough expected)", k, diff);
+    }
+    for s in &suppression {
+        assert!(s.is_finite() && *s >= 0.0);
+    }
+}
+
+#[test]
 fn module_spec_writes_bin_physics_defaults_false_for_all_modules() {
     use spectral_forge::dsp::modules::{ModuleType, module_spec};
     for ty in [

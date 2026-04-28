@@ -634,7 +634,7 @@ pub fn create_module(
         ModuleType::Geometry               => Box::new(geometry::GeometryModule::new()),
         ModuleType::Modulate               => Box::new(modulate::ModulateModule::new()),
         ModuleType::Circuit                => Box::new(circuit::CircuitModule::new()),
-        ModuleType::Life   => panic!("Life module — implemented in Phase 5a Task 2"),
+        ModuleType::Life   => Box::new(life::LifeModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -671,3 +671,5 @@ pub mod modulate;
 pub use modulate::ModulateMode;
 pub mod circuit;
 pub use circuit::CircuitMode;
+pub mod life;
+pub use life::LifeMode;
