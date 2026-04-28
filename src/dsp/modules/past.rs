@@ -57,6 +57,17 @@ pub struct PastModule {
     /// Current FFT size (used to derive bin-centre frequencies for Stretch).
     fft_size: usize,
     sample_rate: f32,
+
+    #[cfg(any(test, feature = "probe"))]
+    last_probe_amount_pct:          Option<f32>,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe_time_seconds:        Option<f32>,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe_active_mode_idx:     Option<u8>,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe_history_frames_used: Option<u32>,
+    #[cfg(any(test, feature = "probe"))]
+    last_probe_sort_key_idx:        Option<u8>,
 }
 
 struct PastChannelState {
@@ -100,6 +111,16 @@ impl PastModule {
             channels: [PastChannelState::new(), PastChannelState::new()],
             fft_size,
             sample_rate,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe_amount_pct: None,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe_time_seconds: None,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe_active_mode_idx: None,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe_history_frames_used: None,
+            #[cfg(any(test, feature = "probe"))]
+            last_probe_sort_key_idx: None,
         }
     }
 
@@ -157,6 +178,22 @@ impl SpectralModule for PastModule {
 
         let history = match ctx.history { Some(h) => h, None => return };
 
+        #[cfg(any(test, feature = "probe"))]
+        {
+            // hop_size_seconds = (fft_size / 4) / sample_rate
+            // total_seconds_in_history = capacity_frames * hop_size_seconds
+            let hop_size = (ctx.fft_size as f32 / 4.0) / ctx.sample_rate;
+            let total_seconds = history.capacity_frames() as f32 * hop_size;
+            let time_at_bin0 = time.first().copied().unwrap_or(0.0);
+            self.last_probe_amount_pct =
+                Some(amount.first().copied().unwrap_or(0.0) * 100.0);
+            self.last_probe_time_seconds = Some(time_at_bin0 * total_seconds);
+            self.last_probe_active_mode_idx = Some(self.mode as u8);
+            self.last_probe_history_frames_used =
+                Some(history.frames_used() as u32);
+            self.last_probe_sort_key_idx = Some(self.sort_key as u8);
+        }
+
         let ch = channel.min(1);
         match self.mode {
             PastMode::Granular   => self.apply_granular(ch, bins, history, amount, time, threshold, spread, mix, ctx),
@@ -189,6 +226,17 @@ impl SpectralModule for PastModule {
     }
     fn set_past_sort_key(&mut self, key: crate::dsp::modules::past::SortKey) {
         self.set_sort_key(key);
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot {
+        let mut snap = crate::dsp::modules::ProbeSnapshot::default();
+        snap.past_amount_pct           = self.last_probe_amount_pct;
+        snap.past_time_seconds         = self.last_probe_time_seconds;
+        snap.past_active_mode_idx      = self.last_probe_active_mode_idx;
+        snap.past_history_frames_used  = self.last_probe_history_frames_used;
+        snap.past_sort_key_idx         = self.last_probe_sort_key_idx;
+        snap
     }
 }
 

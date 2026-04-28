@@ -208,6 +208,13 @@ pub struct ProbeSnapshot {
     pub bp_phase_momentum:  Option<f32>,
     pub bp_slew:            Option<f32>,
     pub bp_bias:            Option<f32>,
+
+    // Past module probes — populated by PastModule::process() under cfg(probe).
+    pub past_amount_pct:           Option<f32>,
+    pub past_time_seconds:         Option<f32>,
+    pub past_active_mode_idx:      Option<u8>,
+    pub past_history_frames_used:  Option<u32>,
+    pub past_sort_key_idx:         Option<u8>,
 }
 
 // ── SpectralModule trait ───────────────────────────────────────────────────

@@ -37,6 +37,10 @@ required-features = ["probe"]
 name = "bin_physics_pipeline"
 required-features = ["probe"]
 
+[[test]]
+name = "calibration"
+required-features = ["probe"]
+
 [dev-dependencies]
 approx = "0.5"
 tempfile = "3"
