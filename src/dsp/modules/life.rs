@@ -489,6 +489,7 @@ fn apply_stiction(
 /// `tear_state` persists across hops (1.0 = fully torn; decays toward 0 at heal_rate
 /// when the bin drops below threshold). Writes cumulative stress to BinPhysics.bias
 /// using the ORIGINAL pre-tear magnitude.
+/// Curves: [0]=AMOUNT, [1]=THRESHOLD, [2]=SPEED, [3]=unused, [4]=MIX.
 fn apply_yield(
     bins: &mut [Complex<f32>],
     tear_state: &mut [f32],
@@ -516,8 +517,9 @@ fn apply_yield(
             tear_state[k] = (tear_state[k] - heal_rate).max(0.0);
         }
 
-        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
         if tear_state[k] > 0.0 && mag > 1e-9 {
+            // Common case (no tear, no heal-in-progress): skip the mix/trig work.
+            let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
             let yield_mag = thresh.min(mag);
             let phase_scramble = xorshift32_signed_unit(rng_state) * std::f32::consts::PI;
             let new_re = yield_mag * phase_scramble.cos();

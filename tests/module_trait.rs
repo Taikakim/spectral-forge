@@ -898,7 +898,7 @@ fn life_stiction_holds_quiet_bins_then_releases() {
 }
 
 #[test]
-fn life_yield_freezes_at_threshold_and_heals() {
+fn life_yield_clamps_above_threshold_passthrough_below() {
     use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
     use spectral_forge::params::{StereoLink, FxChannelTarget};
@@ -949,7 +949,9 @@ fn life_yield_freezes_at_threshold_and_heals() {
         &mut bins, None, &curves, &mut suppression, None, &ctx,
     );
 
-    assert!(bins[50].norm() <= 0.6, "Bin 50 not clamped at yield (mag = {})", bins[50].norm());
+    // Yield strength = thresh_c[k]*0.5 = 0.5; magnitude is hard-clamped to that.
+    // Allow 2% slack for trig rounding (cos/sin) but no looser.
+    assert!(bins[50].norm() <= 0.51, "Bin 50 not clamped at yield (mag = {})", bins[50].norm());
     assert!((bins[100].norm() - 0.2).abs() < 0.01, "Bin 100 not passthrough (mag = {})", bins[100].norm());
     for b in &bins { assert!(b.norm().is_finite()); }
 }
