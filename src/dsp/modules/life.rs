@@ -301,7 +301,10 @@ fn apply_crystallization(
 
     if let Some(p) = physics {
         // BinPhysics merge rule for `crystallization` is Max (see bin_physics.rs:110).
-        // We apply Max ourselves for additive stacking across multiple Crystallization slots.
+        // Max-merge only: crystallization accumulates and never decays within a
+        // session (reset_active() clears it). Permanent crystallization is the
+        // intended v1 semantic — downstream readers (Freeze) treat it as a
+        // durable latch.
         for k in 0..num_bins {
             let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
             let crystal_local = (sustain_envelope[k] * amt).clamp(0.0, 1.0);
