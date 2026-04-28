@@ -1386,7 +1386,7 @@ fn kinetics_module_spec_present() {
     assert_eq!(spec.curve_labels[2], "REACH");
     assert_eq!(spec.curve_labels[3], "DAMPING");
     assert_eq!(spec.curve_labels[4], "MIX");
-    assert!(spec.supports_sidechain, "Kinetics needs SC for GravityWell-Sidechain + InertialMass-Sidechain");
+    assert!(spec.supports_sidechain, "Kinetics declares supports_sidechain");
     assert!(!spec.wants_sidechain, "Kinetics opt-in via mode/source");
     assert!(spec.writes_bin_physics, "Kinetics writes mass/displacement/velocity/temperature/phase_momentum");
 }

@@ -537,8 +537,6 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget:       None,
         writes_bin_physics: false,
     };
-    // Hooke, TuningFork, and Diamagnet are CPU-heavy modes; they will override
-    // heavy_cpu_for_mode() once KineticsModule gains a mode field in Task 3-4.
     static KIN: ModuleSpec = ModuleSpec {
         display_name: "KINETICS",
         color_lit: Color32::from_rgb(0xc8, 0x80, 0x40),
@@ -699,9 +697,12 @@ pub fn create_module(
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
     m.reset(sample_rate, fft_size);
-    // Skip the invariant check for modules whose real impl has not landed yet
-    // (EmptyModule placeholder returns 0 curves; spec will disagree until Task 3).
-    if ty != ModuleType::Kinetics {
+    // Self-cleaning placeholder exemption: until Task 3 lands KineticsModule, the
+    // create arm above returns EmptyModule (0 curves) which would trip the spec
+    // invariant. Once the real module returns module_type() == Kinetics, this
+    // branch falls through automatically and the assert kicks back in.
+    let placeholder = ty == ModuleType::Kinetics && m.module_type() == ModuleType::Empty;
+    if !placeholder {
         debug_assert_eq!(
             m.num_curves(),
             module_spec(ty).num_curves,

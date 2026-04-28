@@ -97,9 +97,6 @@ pub const LIFE_DOT_COLOR: Color32 = Color32::from_rgb(110, 185, 100);
 pub const PAST_DOT_COLOR: Color32 = Color32::from_rgb(0xa0, 0x80, 0xb0);
 /// Kinetics module — warm orange for "force / momentum" feel.
 pub const KINETICS_DOT_COLOR: Color32 = Color32::from_rgb(0xc8, 0x80, 0x40);
-/// Kinetics sub-source dot (drawn small on the curve, e.g. for WellSource / MassSource).
-/// Slightly cooler than the module dot to read as "configured option".
-pub const KINETICS_SOURCE_DOT_COLOR: Color32 = Color32::from_rgb(0xa8, 0x6c, 0x38);
 
 // ─── Freeze curve colours (4 equidistant, 30°, 120°, 210°, 300°) ─────────────
 
