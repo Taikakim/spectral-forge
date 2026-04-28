@@ -299,6 +299,26 @@ impl FxMatrix {
         }
     }
 
+    /// Propagate per-slot PastMode from params to PastModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_past_modes(&mut self, modes: &[crate::dsp::modules::past::PastMode; MAX_SLOTS]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_past_mode(modes[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot SortKey from params to PastModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_past_sort_keys(&mut self, keys: &[crate::dsp::modules::past::SortKey; MAX_SLOTS]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_past_sort_key(keys[s]);
+            }
+        }
+    }
+
     /// Propagate per-slot RhythmMode + ArpGrid from params to RhythmModule instances.
     /// Called once per audio block (before process_hop).
     pub fn set_rhythm_modes_and_grids(

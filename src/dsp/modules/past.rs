@@ -164,6 +164,13 @@ impl SpectralModule for PastModule {
     fn num_curves(&self) -> usize { 5 }
     fn tail_length(&self) -> u32 { 0 }
     fn set_gain_mode(&mut self, _: GainMode) {}
+
+    fn set_past_mode(&mut self, mode: crate::dsp::modules::past::PastMode) {
+        self.set_mode(mode);
+    }
+    fn set_past_sort_key(&mut self, key: crate::dsp::modules::past::SortKey) {
+        self.set_sort_key(key);
+    }
 }
 
 // ── Mode kernels (stubs — Tasks 5–9 fill them in) ────────────────────────────

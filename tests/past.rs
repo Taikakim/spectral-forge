@@ -303,3 +303,20 @@ fn stretch_at_half_rate_advances_read_phase_slowly() {
     let delta = (readings[3] - readings[0]).abs();
     assert!(delta < 4.0, "read_phase should advance slowly at half rate, delta {}", delta);
 }
+
+#[test]
+fn set_past_mode_changes_dispatch() {
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, SortKey};
+    use spectral_forge::dsp::modules::SpectralModule;
+    let mut m = PastModule::new(48000.0, 2048);
+    // Exercise set_past_mode via the trait method — should not panic.
+    m.set_past_mode(PastMode::Reverse);
+    m.set_past_mode(PastMode::Stretch);
+    m.set_past_mode(PastMode::Granular);
+    m.set_past_mode(PastMode::DecaySorter);
+    m.set_past_mode(PastMode::Convolution);
+    // Exercise set_past_sort_key via the trait method — should not panic.
+    m.set_past_sort_key(SortKey::Stability);
+    m.set_past_sort_key(SortKey::Area);
+    m.set_past_sort_key(SortKey::Decay);
+}

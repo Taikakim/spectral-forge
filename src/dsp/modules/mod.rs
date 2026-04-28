@@ -278,6 +278,11 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Life modules. Default no-op for all other types.
     fn set_life_mode(&mut self, _: crate::dsp::modules::life::LifeMode) {}
 
+    /// Update Past sub-mode. No-op for non-Past modules.
+    fn set_past_mode(&mut self, _: crate::dsp::modules::past::PastMode) {}
+    /// Update Past Decay-Sorter sort key. No-op for non-Past modules.
+    fn set_past_sort_key(&mut self, _: crate::dsp::modules::past::SortKey) {}
+
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 
