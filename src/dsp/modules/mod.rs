@@ -711,18 +711,11 @@ pub fn create_module(
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
     m.reset(sample_rate, fft_size);
-    // Self-cleaning placeholder exemption: until Task 3 lands KineticsModule, the
-    // create arm above returns EmptyModule (0 curves) which would trip the spec
-    // invariant. Once the real module returns module_type() == Kinetics, this
-    // branch falls through automatically and the assert kicks back in.
-    let placeholder = ty == ModuleType::Kinetics && m.module_type() == ModuleType::Empty;
-    if !placeholder {
-        debug_assert_eq!(
-            m.num_curves(),
-            module_spec(ty).num_curves,
-            "module_spec and num_curves() disagree for {:?}", ty
-        );
-    }
+    debug_assert_eq!(
+        m.num_curves(),
+        module_spec(ty).num_curves,
+        "module_spec and num_curves() disagree for {:?}", ty
+    );
     m
 }
 

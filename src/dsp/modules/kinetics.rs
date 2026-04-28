@@ -3,6 +3,10 @@
 //! Velocity-Verlet integrator + CFL clamp + 1-pole curve smoothing + viscous-damping
 //! floor + energy-rise hysteresis safety net live in `crate::dsp::physics_helpers`.
 
+// Per-channel scratch fields, mode constants, and RNG helpers are populated
+// across Tasks 4–12 of phase 5b.3. The skeleton declares them upfront so the
+// integrator and kernels can land in small, focused commits without churning
+// struct shape; until then they read as dead code.
 #![allow(dead_code)]
 
 use num_complex::Complex;
