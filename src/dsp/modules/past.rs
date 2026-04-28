@@ -361,11 +361,17 @@ impl PastModule {
         if !ok { return; }
 
         let if_offset = ctx.if_offset.unwrap_or(&[]);
+        // Need k for parallel indexing into bins / sort_scratch / if_offset; iterator
+        // refactor would not improve readability here.
+        // TODO(v2): RNG state currently only advances on bins where SPREAD>0; if
+        // SPREAD is zero everywhere the per-channel state never updates. Move the
+        // single-step advance out of the per-bin branch when wiring v2 (Laroche-
+        // Dolson). Dither quality is fine for v1.
+        #[allow(clippy::needless_range_loop)]
         for k in 0..n {
             let bin_amount = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
             if bin_amount < 1e-6 { continue; }
 
-            // Complex<f32> is Copy — read ends immediately, no borrow held.
             let mut sample = self.channels[ch].sort_scratch[k];
 
             // Phase rotation: 2π · if_offset · (rate - 1) cycles.

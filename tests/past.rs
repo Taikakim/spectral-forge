@@ -295,6 +295,10 @@ fn stretch_at_half_rate_advances_read_phase_slowly() {
                   &mut bins, None, &curves, &mut supp, None, &ctx);
         readings.push(bins[80].norm());
     }
+    // Sanity: kernel must actually run. With bins seeded to 0 and MIX=1, a no-op
+    // implementation would leave readings all zero, vacuously satisfying delta<4.
+    assert!(readings[0] > 0.5,
+        "kernel did not produce output at hop 0; readings[0] = {}", readings[0]);
     // Slower rate ⇒ adjacent readings should be closer together than at unity rate.
     let delta = (readings[3] - readings[0]).abs();
     assert!(delta < 4.0, "read_phase should advance slowly at half rate, delta {}", delta);
