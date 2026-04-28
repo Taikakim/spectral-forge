@@ -1372,3 +1372,21 @@ fn past_module_spec_present() {
     assert_eq!(spec.curve_labels, &["AMOUNT", "TIME", "THRESHOLD", "SPREAD", "MIX"]);
     assert!(!spec.supports_sidechain, "Past v1 does not consume sidechain");
 }
+
+#[test]
+fn kinetics_module_spec_present() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+
+    let spec = module_spec(ModuleType::Kinetics);
+    assert_eq!(spec.display_name, "KINETICS");
+    assert_eq!(spec.num_curves, 5);
+    assert_eq!(spec.curve_labels.len(), 5);
+    assert_eq!(spec.curve_labels[0], "STRENGTH");
+    assert_eq!(spec.curve_labels[1], "MASS");
+    assert_eq!(spec.curve_labels[2], "REACH");
+    assert_eq!(spec.curve_labels[3], "DAMPING");
+    assert_eq!(spec.curve_labels[4], "MIX");
+    assert!(spec.supports_sidechain, "Kinetics needs SC for GravityWell-Sidechain + InertialMass-Sidechain");
+    assert!(!spec.wants_sidechain, "Kinetics opt-in via mode/source");
+    assert!(spec.writes_bin_physics, "Kinetics writes mass/displacement/velocity/temperature/phase_momentum");
+}

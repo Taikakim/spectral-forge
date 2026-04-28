@@ -33,6 +33,7 @@ pub enum ModuleType {
     Circuit,
     Life,
     Past,
+    Kinetics,
     Master,
 }
 
@@ -536,6 +537,19 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget:       None,
         writes_bin_physics: false,
     };
+    // Hooke, TuningFork, and Diamagnet are CPU-heavy modes; they will override
+    // heavy_cpu_for_mode() once KineticsModule gains a mode field in Task 3-4.
+    static KIN: ModuleSpec = ModuleSpec {
+        display_name: "KINETICS",
+        color_lit: Color32::from_rgb(0xc8, 0x80, 0x40),
+        color_dim: Color32::from_rgb(0x44, 0x2a, 0x14),
+        num_curves: 5,
+        curve_labels: &["STRENGTH", "MASS", "REACH", "DAMPING", "MIX"],
+        supports_sidechain: true,
+        wants_sidechain: false,
+        panel_widget: None,
+        writes_bin_physics: true,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -575,6 +589,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Circuit                => &CIR,
         ModuleType::Life                   => &LIFE,
         ModuleType::Past                   => &PAST,
+        ModuleType::Kinetics               => &KIN,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -678,15 +693,21 @@ pub fn create_module(
         ModuleType::Circuit                => Box::new(circuit::CircuitModule::new()),
         ModuleType::Life   => Box::new(life::LifeModule::new()),
         ModuleType::Past   => Box::new(past::PastModule::new(sample_rate, fft_size)),
+        // TODO(5b3.3): replace with KineticsModule::new() once the real module lands in Task 3.
+        ModuleType::Kinetics => Box::new(master::EmptyModule),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
     m.reset(sample_rate, fft_size);
-    debug_assert_eq!(
-        m.num_curves(),
-        module_spec(ty).num_curves,
-        "module_spec and num_curves() disagree for {:?}", ty
-    );
+    // Skip the invariant check for modules whose real impl has not landed yet
+    // (EmptyModule placeholder returns 0 curves; spec will disagree until Task 3).
+    if ty != ModuleType::Kinetics {
+        debug_assert_eq!(
+            m.num_curves(),
+            module_spec(ty).num_curves,
+            "module_spec and num_curves() disagree for {:?}", ty
+        );
+    }
     m
 }
 
