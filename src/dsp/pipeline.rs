@@ -966,6 +966,35 @@ impl Pipeline {
         }
         shared.sc_envelope_tx.publish();
     }
+
+    /// Test-only snapshot of HistoryBuffer state. Used by `tests/calibration.rs`
+    /// to assert the buffer fills, summary stats stay finite, and depth changes
+    /// take effect.
+    #[cfg(any(test, feature = "probe"))]
+    pub fn history_probe(&self, channel: usize) -> HistoryProbe {
+        let frames_used = self.history.frames_used();
+        let capacity    = self.history.capacity_frames();
+        let decay = self.history.summary_decay_estimate(channel);
+        let rms   = self.history.summary_rms_envelope(channel);
+        let stab  = self.history.summary_if_stability(channel);
+        HistoryProbe {
+            frames_used,
+            capacity,
+            summary_decay_max:        decay.iter().cloned().fold(0.0f32, f32::max),
+            summary_rms_max:          rms.iter().cloned().fold(0.0f32, f32::max),
+            summary_if_stability_max: stab.iter().cloned().fold(0.0f32, f32::max),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "probe"))]
+#[derive(Clone, Copy, Debug)]
+pub struct HistoryProbe {
+    pub frames_used: usize,
+    pub capacity:    usize,
+    pub summary_decay_max:        f32,
+    pub summary_rms_max:          f32,
+    pub summary_if_stability_max: f32,
 }
 
 /// Test-only: run identity processing on a mono signal, return output Vec.
