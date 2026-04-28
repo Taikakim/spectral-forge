@@ -1,3 +1,5 @@
+> **Status (2026-04-28): IMPLEMENTED** — all 8 tasks landed in commits `63a6d60`..`e7c67c6` on `feature/next-gen-modules-plans`. Source of truth for runtime behaviour: source code (`src/dsp/history_buffer.rs`, `src/dsp/pipeline.rs`, `src/params.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
+
 # Phase 5b.1: History Buffer Infrastructure Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
