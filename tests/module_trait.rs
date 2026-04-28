@@ -1033,3 +1033,58 @@ fn life_capillary_wicks_sustained_energy_upward() {
 
     for b in &bins { assert!(b.norm().is_finite()); }
 }
+
+#[test]
+fn life_sandpaper_emits_sparks_to_higher_bins() {
+    use spectral_forge::dsp::modules::life::{LifeModule, LifeMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = LifeModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(LifeMode::Sandpaper);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new( 1.0, 0.0);
+    bins[101] = Complex::new(-1.0, 0.0);
+
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.1_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let reach   = vec![2.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &neutral, &reach, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext {
+        sample_rate:       48_000.0,
+        fft_size:          2048,
+        num_bins,
+        attack_ms:         10.0,
+        release_ms:        100.0,
+        sensitivity:       1.0,
+        suppression_width: 0.0,
+        auto_makeup:       false,
+        delta_monitor:     false,
+        unwrapped_phase:      None,
+        peaks:                None,
+        instantaneous_freq:   None,
+        chromagram:           None,
+        midi_notes:           None,
+        bpm:                  0.0,
+        beat_position:        0.0,
+        sidechain_derivative: None,
+        bin_physics:          None,
+    };
+
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    let upper_total: f32 = (110..num_bins).map(|k| bins[k].norm()).sum();
+    assert!(upper_total > 0.01, "No sparks emitted upward (upper_total = {})", upper_total);
+    for b in &bins { assert!(b.norm().is_finite()); }
+}

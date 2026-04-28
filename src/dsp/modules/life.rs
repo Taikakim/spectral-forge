@@ -88,6 +88,24 @@ const CAPILLARY_REACH_MAX:    i32 = 32;
 /// Capillary: silent-bin threshold for phase-vs-fresh-tone branch.
 const CAPILLARY_SILENT_FLOOR: f32 = 1e-9;
 
+/// Sandpaper — magnitude floor below which a bin is treated as silent.
+const SANDPAPER_MAG_FLOOR:    f32 = 1e-6;
+/// Sandpaper — per-hop spark amount: curve * SCALE clamped to [0, MAX].
+const SANDPAPER_AMOUNT_SCALE: f32 = 0.05;
+const SANDPAPER_AMOUNT_MAX:   f32 = 0.1;
+/// Sandpaper — log-offset shaping. log_offset = ((1+reach) * log2(k) * BASE).
+const SANDPAPER_LOG_OFFSET_BASE: f32 = 1.5;
+/// Sandpaper — minimum upward bin offset (so adjacent sparks never deposit
+/// into themselves or k+1).
+const SANDPAPER_MIN_OFFSET:   usize = 2;
+/// Sandpaper — hard cap on per-bin magnitude after spark deposit. Matches
+/// the volume-conservation philosophy of other Life kernels.
+const SANDPAPER_SPARK_CAP:    f32 = 10.0;
+/// Sandpaper — silent-deposit floor for the wet branch (same role as
+/// CAPILLARY_SILENT_FLOOR; reuse if you'd rather, but keep distinct so
+/// future tuning of one doesn't perturb the other).
+const SANDPAPER_SILENT_FLOOR: f32 = 1e-9;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -621,6 +639,60 @@ fn apply_capillary(
     }
 }
 
+// ── Task 11: Sandpaper ─────────────────────────────────────────────────────
+
+fn apply_sandpaper(
+    bins: &mut [Complex<f32>],
+    scratch_mag: &mut [f32],
+    curves: &[&[f32]],
+    num_bins: usize,
+) {
+    use std::f32::consts::PI;
+
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let reach_c  = curves[3];
+    let mix_c    = curves[4];
+
+    // Pass 1: cache magnitudes (so we don't react to sparks we just wrote).
+    for k in 0..num_bins {
+        scratch_mag[k] = bins[k].norm();
+    }
+
+    // Pass 2: for each adjacent pair, emit a spark if phase differs enough.
+    for k in 0..num_bins - 1 {
+        let m_left  = scratch_mag[k];
+        let m_right = scratch_mag[k + 1];
+        if m_left < SANDPAPER_MAG_FLOOR || m_right < SANDPAPER_MAG_FLOOR { continue; }
+        let phase_left  = bins[k].arg();
+        let phase_right = bins[k + 1].arg();
+        let mut diff = (phase_right - phase_left).abs();
+        if diff > PI { diff = 2.0 * PI - diff; }
+
+        let thresh = (thresh_c[k] * PI * 0.5).clamp(0.0, PI);
+        if diff <= thresh { continue; }
+
+        let amt = (amount_c[k] * SANDPAPER_AMOUNT_SCALE).clamp(0.0, SANDPAPER_AMOUNT_MAX);
+        let mag_avg = 0.5 * (m_left + m_right);
+        let spark = mag_avg * amt * (diff / PI);
+
+        let reach_factor = reach_c[k].clamp(0.0, 2.0);
+        let log_offset = ((1.0 + reach_factor) * (k as f32).max(1.0).log2() * SANDPAPER_LOG_OFFSET_BASE) as usize;
+        let target = (k + log_offset.max(SANDPAPER_MIN_OFFSET)).min(num_bins - 1);
+
+        let mix = (mix_c[target].clamp(0.0, 2.0)) * 0.5;
+        let cur = bins[target];
+        let cur_mag = cur.norm();
+        let new_mag = (cur_mag + spark).min(SANDPAPER_SPARK_CAP);
+        let wet = if cur_mag > SANDPAPER_SILENT_FLOOR {
+            cur * (new_mag / cur_mag)
+        } else {
+            Complex::new(spark, 0.0)
+        };
+        bins[target] = cur * (1.0 - mix) + wet * mix;
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -677,9 +749,13 @@ impl SpectralModule for LifeModule {
                 let wick    = &mut self.wick_carry[channel];
                 apply_capillary(bins, sustain, wick, scratch_mag, curves, ctx.num_bins);
             }
+            LifeMode::Sandpaper => {
+                let _ = physics;
+                apply_sandpaper(bins, scratch_mag, curves, ctx.num_bins);
+            }
             _ => {
                 let _ = physics;
-                // Filled in Tasks 11–12.
+                // Filled in Task 12 (Brownian).
             }
         }
 
