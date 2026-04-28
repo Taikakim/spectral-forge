@@ -33,6 +33,13 @@ const VISCOSITY_D_MAX: f32 = 0.45;
 #[allow(dead_code)]
 const SUSTAIN_LP_ALPHA: f32 = 0.05;
 
+/// Surface Tension max steal fraction per hop (5%). Conservative cap so even the
+/// max-amount, max-reach case can't drain a neighbour in a single hop.
+const SURFACE_TENSION_AMT_MAX: f32 = 0.05;
+
+/// Surface Tension max reach in bins. Curve range maps `[0, 2]` → `[0, 8]`.
+const SURFACE_TENSION_REACH_MAX: i32 = 8;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,6 +203,11 @@ fn apply_surface_tension(
         scratch_mag[k] = bins[k].norm();
     }
 
+    // Streaming steal pass: `scratch_mag` is mutated as we iterate. The
+    // left-to-right asymmetry is intentional — earlier (lower-k) bins are
+    // depleted first by their right neighbours, which then find their left
+    // neighbour already weakened and can steal more aggressively. This drives
+    // coalescence even when the input is locally uniform.
     for k in 0..num_bins {
         let mag = scratch_mag[k];
         let thresh = (thresh_c[k] * 0.5).clamp(0.0, 2.0);
@@ -203,8 +215,10 @@ fn apply_surface_tension(
             continue;
         }
 
-        let amt = (amount_c[k] * 0.025).clamp(0.0, 0.05); // ≤5% per hop
-        let reach_bins = ((reach_c[k] * 4.0) as i32).clamp(1, 8); // 1..8 bins
+        let amt_max = SURFACE_TENSION_AMT_MAX;
+        let amt = (amount_c[k] * (amt_max * 0.5)).clamp(0.0, amt_max);
+        let reach_max = SURFACE_TENSION_REACH_MAX;
+        let reach_bins = ((reach_c[k] * (reach_max as f32 * 0.5)) as i32).clamp(1, reach_max);
 
         let mut accum = 0.0_f32;
         for d in 1..=reach_bins {
