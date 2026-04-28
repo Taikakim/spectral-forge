@@ -38,6 +38,10 @@ pub enum SortKey {
     Area,
 }
 
+/// Decay sorter operates on the lowest 256 bins only. Sorting all
+/// MAX_NUM_BINS (8193 at fft=16384) is O(n log n) per block per channel
+/// and not worth the cost — perceptually significant decay-time
+/// material lives in the lower bands.
 const MAX_SORT_BINS: usize = 256;
 const MAX_NUM_BINS_LOCAL: usize = crate::dsp::pipeline::MAX_NUM_BINS;
 
@@ -118,6 +122,9 @@ impl SpectralModule for PastModule {
         _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         ctx: &ModuleContext<'_>,
     ) {
+        debug_assert_eq!(curves.len(), 5, "Past expects 5 curves");
+        // TODO(5b2.5+): once kernels write to the full read range, decide whether
+        // FxChannelTarget::Mid/Side gating is needed here. Current stubs are no-op.
         // Conservative defaults if curves are missing (should never happen).
         let amount    = curves.get(0).map(|c| &c[..]).unwrap_or(&[]);
         let time      = curves.get(1).map(|c| &c[..]).unwrap_or(&[]);
