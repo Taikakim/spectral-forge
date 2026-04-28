@@ -30,7 +30,7 @@ use crate::dsp::modules::{
 #[allow(dead_code)]
 const VISCOSITY_D_MAX: f32 = 0.45;
 
-/// ~50ms time-constant LP alpha at 48k/256-hop. Used by Capillary + Crystallization.
+/// ~50ms time-constant LP alpha at 48k/256-hop.
 /// Used by the Capillary (Task 10) and Crystallization (Task 5) kernels.
 #[allow(dead_code)]
 const SUSTAIN_LP_ALPHA: f32 = 0.05;
@@ -84,6 +84,7 @@ fn xorshift32_signed_unit(state: &mut u32) -> f32 {
 // ── LifeModule ─────────────────────────────────────────────────────────────
 
 pub struct LifeModule {
+    #[allow(dead_code)]
     mode: LifeMode,
     /// Per-channel per-bin power envelope — Viscosity, Archimedes, NonNewtonian, Stiction, Yield.
     scratch_power: [Vec<f32>; 2],
@@ -120,6 +121,7 @@ impl LifeModule {
     }
 
     /// Set mode directly. Used by Task 13 (per-slot persistence) and tests.
+    #[allow(dead_code)]
     pub(crate) fn set_mode(&mut self, mode: LifeMode) {
         self.mode = mode;
     }
@@ -129,6 +131,10 @@ impl LifeModule {
     pub fn set_mode_for_test(&mut self, mode: LifeMode) {
         self.mode = mode;
     }
+}
+
+impl Default for LifeModule {
+    fn default() -> Self { Self::new() }
 }
 
 impl SpectralModule for LifeModule {

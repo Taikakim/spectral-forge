@@ -483,7 +483,7 @@ fn life_module_spec_present() {
 #[test]
 fn life_module_constructs_and_passes_through() {
     use num_complex::Complex;
-    use spectral_forge::dsp::modules::{create_module, ModuleContext, ModuleType, SpectralModule};
+    use spectral_forge::dsp::modules::{create_module, ModuleContext, ModuleType};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
 
     let mut module = create_module(ModuleType::Life, 48_000.0, 2048);
