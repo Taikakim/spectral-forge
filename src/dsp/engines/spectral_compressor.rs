@@ -209,13 +209,15 @@ impl SpectralEngine for SpectralCompressorEngine {
         if params.plpv_dynamics_enabled {
             if let Some(peaks) = params.peaks {
                 for p in peaks {
+                    // `peaks` is produced by the Phase 4.2 detector with k, low_k, high_k all
+                    // in [0, num_bins). The clamps below are belt-and-brace: they ensure the
+                    // engine cannot panic on the audio thread even if a future caller (test
+                    // probe, alternate detector) passes peaks with stale bin indices.
                     let pk = (p.k as usize).min(n - 1);
                     let peak_gr = self.smooth_buf[pk];
                     let lo = (p.low_k as usize).min(n - 1);
                     let hi = (p.high_k as usize).min(n - 1);
-                    for k in lo..=hi {
-                        self.smooth_buf[k] = peak_gr;
-                    }
+                    self.smooth_buf[lo..=hi].fill(peak_gr);
                 }
             }
         }

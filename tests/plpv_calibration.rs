@@ -44,7 +44,7 @@ fn dynamics_engine_plpv_off_does_not_change_gr() {
     let (th, ra, at, re, kn, mk, mx) = make_params(n, -20.0, 4.0);
 
     // Construct a peak set that *would* be locked if PLPV were on.
-    let mut peaks = vec![
+    let peaks = vec![
         PeakInfo { k: 100, mag: input_mag, low_k: 95,  high_k: 105 },
         PeakInfo { k: 500, mag: input_mag, low_k: 495, high_k: 505 },
     ];
@@ -86,6 +86,8 @@ fn dynamics_engine_plpv_off_does_not_change_gr() {
     engine_b.process_bins(&mut bins_b, None, &params_b, sample_rate, &mut supp_b);
 
     // Bit-equivalent state evolution → bit-equivalent output.
+    // Strict equality, not approx-eq: PLPV-off must be deterministically identical
+    // to a stock run, not merely close.
     for k in 0..n {
         assert_eq!(
             bins_a[k].re, bins_b[k].re,
@@ -98,9 +100,6 @@ fn dynamics_engine_plpv_off_does_not_change_gr() {
         assert_eq!(supp_a[k], supp_b[k],
             "suppression[{k}] differs with PLPV off: {} vs {}", supp_a[k], supp_b[k]);
     }
-
-    // Touch peaks to silence dead_code lints on the local.
-    peaks[0].mag = 0.0;
 }
 
 /// PLPV on must apply the peak bin's gain reduction to every bin in its
