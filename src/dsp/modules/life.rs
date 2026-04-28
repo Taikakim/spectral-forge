@@ -12,9 +12,8 @@
 //! - **Sandpaper**       — granular phase friction sparks (Task 11)
 //! - **Brownian**        — temperature-driven random walk (Task 12)
 //!
-//! This skeleton provides the enum, struct, and stub `process()` that passes
-//! audio through unmodified and zeroes suppression_out. Kernels land in
-//! Tasks 3–12.
+//! Task 3 (Viscosity) is implemented; Tasks 4–12 land per-mode kernels via
+//! the `match self.mode` dispatch in `process()`.
 
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
@@ -150,6 +149,8 @@ fn apply_viscosity(
         scratch_power[k] = mag * mag;
     }
 
+    // Power diffusion reads from `scratch_power` (pre-hop snapshot); `bins` is
+    // written only at index k, so in-place phasor scaling is safe.
     for k in 1..num_bins - 1 {
         let d_k     = (amount_c[k]     * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
         let d_kp1   = (amount_c[k + 1] * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
@@ -167,7 +168,7 @@ fn apply_viscosity(
         let mag_old = scratch_mag[k];
         let dry = bins[k];
         let wet = if mag_old > EPS {
-            bins[k] * (mag_new / mag_old)
+            dry * (mag_new / mag_old)
         } else {
             // Silent bin receiving incoming flux: inject as real-valued (no phase info).
             Complex::new(mag_new, 0.0)
