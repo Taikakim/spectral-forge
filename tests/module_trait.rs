@@ -1435,3 +1435,62 @@ fn kinetics_module_constructs_and_passes_through() {
         assert!(s.is_finite() && *s >= 0.0);
     }
 }
+
+#[test]
+fn kinetics_verlet_stays_bounded_under_unit_impulse() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::Hooke);
+
+    let num_bins = 1025usize;
+
+    // Unit impulse at bin 256; all other bins silent.
+    let make_bins = || -> Vec<Complex<f32>> {
+        let mut v = vec![Complex::new(0.0f32, 0.0f32); num_bins];
+        v[256] = Complex::new(1.0, 0.0);
+        v
+    };
+
+    // STRENGTH=2, MASS=1, REACH=1, DAMPING=1, MIX=1 (full wet).
+    let strength = vec![2.0_f32; num_bins];
+    let neutral  = vec![1.0_f32; num_bins];
+    let mix      = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    let mut max_mag: f32 = 0.0;
+    for _ in 0..200 {
+        let mut bins = make_bins();
+        module.process(
+            0,
+            StereoLink::Linked,
+            FxChannelTarget::All,
+            &mut bins,
+            None,
+            &curves,
+            &mut suppression,
+            None,
+            &ctx,
+        );
+        let hop_max: f32 = bins.iter().map(|c| c.norm()).fold(0.0_f32, f32::max);
+        max_mag = max_mag.max(hop_max);
+        // All bins must be finite every hop.
+        for (k, c) in bins.iter().enumerate() {
+            assert!(c.re.is_finite() && c.im.is_finite(),
+                "non-finite at bin {} after hop", k);
+        }
+    }
+
+    assert!(max_mag < 100.0,
+        "Energy escaped integrator (max_mag = {})", max_mag);
+}
