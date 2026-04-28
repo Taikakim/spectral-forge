@@ -208,6 +208,8 @@ impl PastModule {
         // Bin 10 ≈ 230 Hz at fft 2048 / 48 kHz — first musically useful bin.
         let low_k = 10usize.min(n.saturating_sub(1));
         // Pick top MAX_SORT_BINS bins by current magnitude above THRESHOLD.
+        // TODO(perf): linear min_by is O(n × MAX_SORT_BINS) — acceptable up to
+        // fft=4096 (~330 K cmps/block); revisit before enabling fft=16384.
         let mut candidates: SmallVec<[(u32, f32); MAX_SORT_BINS]> = SmallVec::new();
         for k in 0..n {
             let mag_sq = bins[k].norm_sqr();
@@ -230,17 +232,21 @@ impl PastModule {
             SortKey::Area      => hist.summary_rms_envelope(ch),
         };
         // Sort descending — highest key value first → lowest output slot.
+        // Tie-break: louder bin (higher mag_sq) comes first.
         {
             let key_values: &[f32] = &*key_values_borrow;
             candidates.sort_by(|a, b| {
                 let ka = key_values.get(a.0 as usize).copied().unwrap_or(0.0);
                 let kb = key_values.get(b.0 as usize).copied().unwrap_or(0.0);
-                kb.partial_cmp(&ka).unwrap_or(std::cmp::Ordering::Equal)
+                kb.partial_cmp(&ka)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
             });
         }
         drop(key_values_borrow);
         // Snapshot bins before destructive write.
         let scratch = &mut self.channels[ch].sort_scratch;
+        debug_assert!(n <= scratch.len(), "bins.len() exceeds sort_scratch capacity");
         scratch[..n].copy_from_slice(&bins[..n]);
         let max_dest = (low_k + candidates.len()).min(n);
         for k in low_k..max_dest { bins[k] = Complex::new(0.0, 0.0); }
