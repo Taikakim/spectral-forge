@@ -49,6 +49,12 @@ const ARCHIMEDES_DUCK_FLOOR: f32 = 0.05;
 /// guards a divisor in the *transport ratio*, not a magnitude comparison).
 const ARCHIMEDES_CAPACITY_FLOOR: f32 = 1e-6;
 
+/// Non-Newtonian — accumulated displacement cap. Bounds growth during long
+/// transient streaks so downstream Stiction/Yield see a finite value. Stiction
+/// clamps its own input to ~1.0 anyway, but capping here prevents the field
+/// from drifting unbounded across hours of audio.
+const NON_NEWTONIAN_DISPLACEMENT_CAP: f32 = 10.0;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -380,30 +386,28 @@ fn apply_non_newtonian(
     let thresh_c = curves[1];
     let mix_c    = curves[4];
 
+    // Single pass: scale wet bins above threshold AND accumulate displacement.
+    let mut physics_out = physics_out;
     for k in 0..num_bins {
-        let v = velocity.map(|vs| vs[k]).unwrap_or(0.0);
+        let v      = velocity.map(|vs| vs[k]).unwrap_or(0.0);
         let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
-        let amt    = (amount_c[k] * 0.5).clamp(0.0, 1.0);
-
-        if v > thresh {
-            let excess  = v - thresh;
-            let mag_old = bins[k].norm();
-            let limit   = (mag_old - excess * amt).max(0.0);
-            let scale   = if mag_old > 1e-9 { limit / mag_old } else { 0.0 };
-            let mix     = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
-            let dry     = bins[k];
-            let wet     = bins[k] * scale;
-            bins[k]     = dry * (1.0 - mix) + wet * mix;
+        if v <= thresh {
+            continue; // v <= thresh: bin passes through unchanged.
         }
-    }
 
-    if let Some(p) = physics_out {
-        for k in 0..num_bins {
-            let v      = velocity.map(|vs| vs[k]).unwrap_or(0.0);
-            let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
-            if v > thresh {
-                p.displacement[k] = (p.displacement[k] + (v - thresh)).min(10.0);
-            }
+        let amt    = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let excess = v - thresh;
+
+        let mag_old = bins[k].norm();
+        let limit   = (mag_old - excess * amt).max(0.0);
+        let scale   = if mag_old > 1e-9 { limit / mag_old } else { 0.0 };
+        let mix     = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let dry     = bins[k];
+        let wet     = bins[k] * scale;
+        bins[k]     = dry * (1.0 - mix) + wet * mix;
+
+        if let Some(p) = physics_out.as_deref_mut() {
+            p.displacement[k] = (p.displacement[k] + excess).min(NON_NEWTONIAN_DISPLACEMENT_CAP);
         }
     }
 }

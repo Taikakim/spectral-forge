@@ -811,7 +811,11 @@ fn life_non_newtonian_limits_fast_transients() {
         &mut bins, None, &curves, &mut suppression, Some(&mut physics_write), &ctx,
     );
 
-    assert!(bins[100].norm() < 2.0,
+    // Expected math: amt=1.0, thresh=0.25, v=1.5, excess=1.25, mag_old=2.0,
+    // limit = max(2.0 - 1.25, 0) = 0.75, scale = 0.375, mix=1.0 (full wet) →
+    // bins[100] ends at 0.75. Bound at 1.0 leaves headroom but catches a
+    // regression that fails to apply meaningful attenuation.
+    assert!(bins[100].norm() < 1.0,
         "Non-Newtonian did not limit transient (mag = {})", bins[100].norm());
     assert!(bins[0].norm() < 1e-6,
         "Silent bin 0 was touched (mag = {})", bins[0].norm());
