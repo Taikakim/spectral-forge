@@ -41,6 +41,9 @@ fn past_probe_reports_active_mode_after_dispatch() {
     use spectral_forge::params::{FxChannelTarget, StereoLink};
     use num_complex::Complex;
 
+    // 1 channel × capacity 16 frames × 8 bins. Pre-fill 8 frames so that
+    // frames_used == 8 (still under capacity), proving the probe reports
+    // the live count, not a saturated capacity value.
     let mut h = HistoryBuffer::new(1, 16, 8);
     for _ in 0..8 {
         h.write_hop(0, &vec![Complex::new(0.5, 0.0); 8]);

@@ -59,15 +59,7 @@ pub struct PastModule {
     sample_rate: f32,
 
     #[cfg(any(test, feature = "probe"))]
-    last_probe_amount_pct:          Option<f32>,
-    #[cfg(any(test, feature = "probe"))]
-    last_probe_time_seconds:        Option<f32>,
-    #[cfg(any(test, feature = "probe"))]
-    last_probe_active_mode_idx:     Option<u8>,
-    #[cfg(any(test, feature = "probe"))]
-    last_probe_history_frames_used: Option<u32>,
-    #[cfg(any(test, feature = "probe"))]
-    last_probe_sort_key_idx:        Option<u8>,
+    last_probe: crate::dsp::modules::ProbeSnapshot,
 }
 
 struct PastChannelState {
@@ -112,15 +104,7 @@ impl PastModule {
             fft_size,
             sample_rate,
             #[cfg(any(test, feature = "probe"))]
-            last_probe_amount_pct: None,
-            #[cfg(any(test, feature = "probe"))]
-            last_probe_time_seconds: None,
-            #[cfg(any(test, feature = "probe"))]
-            last_probe_active_mode_idx: None,
-            #[cfg(any(test, feature = "probe"))]
-            last_probe_history_frames_used: None,
-            #[cfg(any(test, feature = "probe"))]
-            last_probe_sort_key_idx: None,
+            last_probe: crate::dsp::modules::ProbeSnapshot::default(),
         }
     }
 
@@ -180,18 +164,22 @@ impl SpectralModule for PastModule {
 
         #[cfg(any(test, feature = "probe"))]
         {
-            // hop_size_seconds = (fft_size / 4) / sample_rate
-            // total_seconds_in_history = capacity_frames * hop_size_seconds
+            // TIME is a normalized [0..1] fraction of the buffer's total temporal
+            // depth; multiplying by `total_seconds` converts it to audible-units
+            // for calibration assertions. AMOUNT is clamped to [0..1] before
+            // scaling to 0..100% to mirror the convention used by other modules.
             let hop_size = (ctx.fft_size as f32 / 4.0) / ctx.sample_rate;
             let total_seconds = history.capacity_frames() as f32 * hop_size;
             let time_at_bin0 = time.first().copied().unwrap_or(0.0);
-            self.last_probe_amount_pct =
-                Some(amount.first().copied().unwrap_or(0.0) * 100.0);
-            self.last_probe_time_seconds = Some(time_at_bin0 * total_seconds);
-            self.last_probe_active_mode_idx = Some(self.mode as u8);
-            self.last_probe_history_frames_used =
-                Some(history.frames_used() as u32);
-            self.last_probe_sort_key_idx = Some(self.sort_key as u8);
+            let amount_at_bin0 = amount.first().copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                past_amount_pct:          Some(amount_at_bin0 * 100.0),
+                past_time_seconds:        Some(time_at_bin0 * total_seconds),
+                past_active_mode_idx:     Some(self.mode as u8),
+                past_history_frames_used: Some(history.frames_used() as u32),
+                past_sort_key_idx:        Some(self.sort_key as u8),
+                ..Default::default()
+            };
         }
 
         let ch = channel.min(1);
@@ -229,15 +217,7 @@ impl SpectralModule for PastModule {
     }
 
     #[cfg(any(test, feature = "probe"))]
-    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot {
-        let mut snap = crate::dsp::modules::ProbeSnapshot::default();
-        snap.past_amount_pct           = self.last_probe_amount_pct;
-        snap.past_time_seconds         = self.last_probe_time_seconds;
-        snap.past_active_mode_idx      = self.last_probe_active_mode_idx;
-        snap.past_history_frames_used  = self.last_probe_history_frames_used;
-        snap.past_sort_key_idx         = self.last_probe_sort_key_idx;
-        snap
-    }
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }
 
 // ── Mode kernels (stubs — Tasks 5–9 fill them in) ────────────────────────────
