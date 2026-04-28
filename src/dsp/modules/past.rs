@@ -308,9 +308,12 @@ impl PastModule {
         };
         let st = &mut self.channels[ch];
         let age = (st.reverse_read_offset % window) as usize;
-        st.reverse_read_offset = (st.reverse_read_offset + 1) % window;
 
+        // Read first; only advance the offset if the read succeeded. Otherwise the
+        // offset would skip positions during cold-start while the ring fills up,
+        // producing a discontinuity once audio finally starts reading.
         let frame = match hist.read_frame(ch, age) { Some(f) => f, None => return };
+        st.reverse_read_offset = (st.reverse_read_offset + 1) % window;
         for k in 0..n {
             let mag_sq = bins[k].norm_sqr();
             let thr = threshold.get(k).copied().unwrap_or(0.0);
