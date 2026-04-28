@@ -1,5 +1,15 @@
 # Phase 4: PLPV Phase Unwrapping & Locking Implementation Plan
 
+> **Status (2026-04-28): IMPLEMENTED.** Per-bin Laroche-Dolson phase unwrap
+> (`src/dsp/plpv.rs`), low-energy bin damping, 4-neighbour peak detection +
+> Voronoi skirts, Pipeline integration via `Cell<f32>`-exposed
+> `ModuleContext.unwrapped_phase`. Per-module integrations land for Dynamics,
+> PhaseSmear, Freeze, MidSide — each behind its own `plpv_<module>_enable`
+> BoolParam (default on). Audio-render regression suite in
+> `tests/plpv_audio_render.rs`; calibration round-trip in
+> `tests/plpv_calibration.rs`. v2 adaptive per-frame coherence policy
+> deferred. Source of truth: [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** add Peak-Locked Phase Vocoder (PLPV) infrastructure to `Pipeline` — per-bin unwrapped phase, low-energy phase damping, peak detection — and integrate it into four shipped modules (Dynamics, PhaseSmear, Freeze, MidSide) for cleaner phase-domain processing.

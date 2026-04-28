@@ -212,6 +212,9 @@ minor bump.
 
 ## Phase 4 — PLPV phase unwrapping
 
+> **Status:** IMPLEMENTED (2026-04-28). See plan
+> `docs/superpowers/plans/2026-04-27-phase-4-plpv-phase.md`.
+
 **Goal:** unlock the cleaner-phase quality across all phase-touching
 modules.
 
