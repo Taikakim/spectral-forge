@@ -209,7 +209,7 @@ fn apply_surface_tension(
     // coalescence even when the input is locally uniform.
     for k in 0..num_bins {
         let mag = scratch_mag[k];
-        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 2.0);
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
         if mag <= thresh {
             continue;
         }
@@ -280,7 +280,7 @@ fn apply_crystallization(
 
     for k in 0..num_bins {
         let mag    = bins[k].norm();
-        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 2.0);
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
         let speed  = (speed_c[k]  * 0.5).clamp(0.0, 1.0);
         let alpha  = SUSTAIN_LP_ALPHA * (1.0 + speed * 4.0); // 0.05 .. 0.25
 
