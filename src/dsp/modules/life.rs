@@ -55,6 +55,14 @@ const ARCHIMEDES_CAPACITY_FLOOR: f32 = 1e-6;
 /// from drifting unbounded across hours of audio.
 const NON_NEWTONIAN_DISPLACEMENT_CAP: f32 = 10.0;
 
+/// Stiction — minimum hop-to-hop decay of `is_moving`. Even at speed=0 a bin
+/// re-locks within ~20 hops after velocity drops below threshold.
+const STICTION_DECAY_MIN: f32 = 0.05;
+
+/// Stiction — additional decay range scaled by speed curve. At speed=1 total
+/// decay per hop is 0.5, so a bin re-locks in ~2 hops.
+const STICTION_DECAY_RANGE: f32 = 0.45;
+
 // ── LifeMode ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -412,6 +420,53 @@ fn apply_non_newtonian(
     }
 }
 
+/// Static + kinetic friction. Bins below THRESHOLD velocity are "stuck" — they
+/// decay to zero. Bins above THRESHOLD are "moving" — passthrough. Once moving,
+/// they stay moving for SPEED hops before re-locking. Writes displacement to
+/// BinPhysics (same cap as Non-Newtonian).
+fn apply_stiction(
+    bins: &mut [Complex<f32>],
+    is_moving: &mut [f32],
+    curves: &[&[f32]],
+    velocity: Option<&[f32]>,
+    physics_out: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+    num_bins: usize,
+) {
+    let amount_c = curves[0];
+    let thresh_c = curves[1];
+    let speed_c  = curves[2];
+    let mix_c    = curves[4];
+
+    for k in 0..num_bins {
+        let v      = velocity.map(|vs| vs[k]).unwrap_or(0.0);
+        let thresh = (thresh_c[k] * 0.5).clamp(0.0, 1.0);
+        let speed  = (speed_c[k]  * 0.5).clamp(0.0, 1.0);
+
+        if v > thresh {
+            is_moving[k] = 1.0;
+        } else {
+            let decay = STICTION_DECAY_MIN + speed * STICTION_DECAY_RANGE;
+            is_moving[k] = (is_moving[k] - decay).max(0.0);
+        }
+
+        let amt         = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let stuck_factor = 1.0 - (1.0 - is_moving[k]) * amt;
+
+        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let dry = bins[k];
+        let wet = bins[k] * stuck_factor;
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+
+    if let Some(p) = physics_out {
+        for k in 0..num_bins {
+            let v    = velocity.map(|vs| vs[k]).unwrap_or(0.0);
+            let stuck = (1.0 - is_moving[k]).clamp(0.0, 1.0);
+            p.displacement[k] = (p.displacement[k] + stuck * v).min(NON_NEWTONIAN_DISPLACEMENT_CAP);
+        }
+    }
+}
+
 impl SpectralModule for LifeModule {
     fn process(
         &mut self,
@@ -452,9 +507,14 @@ impl SpectralModule for LifeModule {
                 let velocity = ctx.bin_physics.map(|bp| &bp.velocity[..ctx.num_bins]);
                 apply_non_newtonian(bins, curves, velocity, physics, ctx.num_bins);
             }
+            LifeMode::Stiction => {
+                let velocity = ctx.bin_physics.map(|bp| &bp.velocity[..ctx.num_bins]);
+                let is_moving = &mut self.is_moving[channel];
+                apply_stiction(bins, is_moving, curves, velocity, physics, ctx.num_bins);
+            }
             _ => {
                 let _ = physics;
-                // Filled in Tasks 8–12.
+                // Filled in Tasks 9–12.
             }
         }
 
