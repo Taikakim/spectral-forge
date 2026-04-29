@@ -2232,3 +2232,58 @@ fn modulate_mode_enum_has_new_variants() {
     assert_eq!(ModulateMode::GravityPhaser as u8, 5);
     assert_eq!(ModulateMode::PllTear       as u8, 6);
 }
+
+// ── Phase 5b4.3 — Curve smoothing infrastructure ──────────────────────────
+
+#[test]
+fn modulate_smoothed_curves_present_for_retrofit_modes() {
+    use spectral_forge::dsp::modules::modulate::ModulateModule;
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+
+    // After reset, smoothed_curves must be allocated to num_bins.
+    let snap = module.smoothed_curves_len();
+    assert_eq!(snap, 1025, "smoothed_curves not allocated to fft_size/2+1");
+}
+
+#[test]
+fn modulate_v1_modes_skip_smoothing_pass() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    // PhasePhaser is v1: smoothing must NOT alter its curve consumption.
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::PhasePhaser);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+    let amount = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let zeros = vec![0.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    // curves: [AMOUNT, REACH, RATE, THRESH, AMPGATE, MIX]
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        1.0, false, false,
+    );
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
+
+    // Magnitudes preserved (Phase Phaser invariant — same as v1).
+    for k in 0..num_bins {
+        let mag = bins[k].norm();
+        assert!((mag - 1.0).abs() < 1e-3,
+            "v1 PhasePhaser invariant violated at bin {}: mag={}", k, mag);
+    }
+}

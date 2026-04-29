@@ -285,6 +285,12 @@ pub struct ModulateModule {
     rms_history: [[f32; 16]; 2],
     /// Current write index into rms_history for each channel.
     rms_idx: [usize; 2],
+    /// Smoothed copies of the 6 input curves, used by retrofit modes
+    /// (GravityPhaser, PllTear) to defend against parametric instability.
+    smoothed_curves: [[Vec<f32>; 6]; 2],
+    /// Per-channel first-touch flag; primes the smoother with a direct copy
+    /// on the first hop after reset (avoids 5-hop ramp-in artefact).
+    smoothed_primed: [bool; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -299,6 +305,11 @@ impl ModulateModule {
             swap_scratch: [Vec::<Complex<f32>>::new(), Vec::<Complex<f32>>::new()],
             rms_history:  [[0.0; 16]; 2],
             rms_idx:      [0; 2],
+            smoothed_curves: [
+                [Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new()],
+                [Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new()],
+            ],
+            smoothed_primed: [false; 2],
             sample_rate:  48_000.0,
             fft_size:     2048,
             #[cfg(any(test, feature = "probe"))]
@@ -320,6 +331,34 @@ impl ModulateModule {
     }
 
     pub fn current_mode(&self) -> ModulateMode { self.mode }
+
+    /// Test helper — returns the first smoothed-curve buffer's length.
+    /// `0` if `reset` has not been called yet.
+    pub fn smoothed_curves_len(&self) -> usize {
+        self.smoothed_curves[0][0].len()
+    }
+
+    /// Refresh `smoothed_curves[channel]` from the raw input curves. Called only
+    /// by retrofit modes; v1 modes consume `curves` directly. On the first hop
+    /// after reset, the smoother is primed by direct copy (otherwise ~5-hop ramp).
+    // removed in Task 5b4.4 when first caller (apply_gravity_phaser) lands
+    #[allow(dead_code)]
+    fn refresh_smoothed(&mut self, channel: usize, curves: &[&[f32]], num_bins: usize) {
+        use crate::dsp::physics_helpers::smooth_curve_one_pole;
+        let dt = self.fft_size as f32 / self.sample_rate / 4.0; // hop = fft/4 (75% overlap)
+        let primed = self.smoothed_primed[channel];
+        let take = curves.len().min(6);
+        for c in 0..take {
+            let src = &curves[c][..num_bins];
+            let dst = &mut self.smoothed_curves[channel][c][..num_bins];
+            if !primed {
+                dst.copy_from_slice(src);
+            } else {
+                smooth_curve_one_pole(dst, src, dt);
+            }
+        }
+        self.smoothed_primed[channel] = true;
+    }
 }
 
 impl SpectralModule for ModulateModule {
@@ -397,6 +436,11 @@ impl SpectralModule for ModulateModule {
             self.swap_scratch[ch].resize(num_bins, Complex::new(0.0, 0.0));
             self.rms_history[ch] = [0.0; 16];
             self.rms_idx[ch]     = 0;
+            for c in 0..6 {
+                self.smoothed_curves[ch][c].clear();
+                self.smoothed_curves[ch][c].resize(num_bins, 0.0);
+            }
+            self.smoothed_primed[ch] = false;
         }
         self.hop_count = [0; 2];
         // self.mode is preserved across reset (user choice survives FFT-size change).
