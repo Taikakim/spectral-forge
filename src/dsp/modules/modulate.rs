@@ -886,9 +886,13 @@ impl SpectralModule for ModulateModule {
                     snap.mod_gp_sc_positioned = Some(self.sc_positioned);
                 }
                 ModulateMode::PllTear => {
-                    let total = self.pll_torn[channel].len().saturating_sub(PLL_MIN_BIN);
+                    // Cap the iteration at the active `bins.len()` so the probe is
+                    // resilient if pll_torn was pre-sized for a larger FFT and a
+                    // smaller block is being processed before the next reset().
+                    let upper = bins.len().min(self.pll_torn[channel].len());
+                    let total = upper.saturating_sub(PLL_MIN_BIN);
                     let locked = if total > 0 {
-                        self.pll_torn[channel][PLL_MIN_BIN..]
+                        self.pll_torn[channel][PLL_MIN_BIN..upper]
                             .iter()
                             .filter(|t| !**t)
                             .count()

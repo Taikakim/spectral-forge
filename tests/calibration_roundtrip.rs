@@ -1386,8 +1386,8 @@ fn modulate_gravity_phaser_probe_reflects_toggles_and_node_count() {
     module.set_modulate_repel(true);
     module.set_modulate_sc_positioned(true);
 
-    // Build a sidechain with a clear peak at bin 200 so the peak finder
-    // detects exactly one node.
+    // Build a sidechain with a clear isolated peak at bin 200 (well above
+    // PLL_MIN_BIN=16, mid-spectrum) so the peak finder detects exactly one node.
     let mut sc = vec![0.0_f32; NUM_BINS];
     sc[200] = 1.0;
 
