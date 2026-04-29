@@ -39,6 +39,7 @@ const ASSIGNABLE: &[ModuleType] = &[
     ModuleType::Modulate,
     ModuleType::Circuit,
     ModuleType::Past,
+    ModuleType::Kinetics,
 ];
 
 /// Render the popup if open. Call every frame from the main UI closure.
