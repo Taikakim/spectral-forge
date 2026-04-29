@@ -4,23 +4,17 @@
 //!         writer→reader cross-slot data path works. A settle loop drives the 1-pole curve
 //!         smoother to steady state before asserting bounds.
 //!
-//! Test 2: Two chained Kinetics slots (InertialMass → OrbitalPhase) run 50 hops without
-//!         numeric explosion (|bin| < 100.0 throughout).
-//!
-//!         Modes are chosen for provable boundedness:
-//!         - InertialMass: only writes BinPhysics.mass; does NOT modify bins.
-//!         - OrbitalPhase: applies complex rotation (preserves per-bin magnitude).
-//!         Together they prove the serial-dispatch trait boundary works without any
-//!         magnitude growth whatsoever. GravityWell→Hooke (the plan's original choice)
-//!         accumulates unbounded internal displacement state when run against a dense
-//!         persistent input spectrum — that is a known single-mode behaviour, not a
-//!         chaining issue, and is separately covered in module_trait.rs.
+//! Test 2: Two chained Kinetics slots (GravityWell → Hooke) run 50 hops without numeric
+//!         explosion (|bin| < 100.0 throughout). This is the plan-specified pair: GravityWell
+//!         injects force toward a static spectral target (Gaussian well at bin 200), Hooke
+//!         then applies a restoring spring to its output. The test exercises the chained-state
+//!         interaction at the serial-dispatch trait boundary.
 
 use num_complex::Complex;
 use spectral_forge::dsp::bin_physics::BinPhysics;
 use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, MassSource};
 use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
-use spectral_forge::params::{StereoLink, FxChannelTarget};
+use spectral_forge::params::{FxChannelTarget, StereoLink};
 
 const SR: f32 = 48_000.0;
 const FFT: usize = 2048;
@@ -86,55 +80,50 @@ fn kinetics_inertial_mass_writes_then_other_module_reads() {
 
 #[test]
 fn kinetics_chained_two_slots_in_serial_does_not_explode() {
-    // Slot 0: InertialMass-Static.  Slot 1: OrbitalPhase.
+    // Slot 0: GravityWell-Static.  Slot 1: Hooke.
     //
-    // InertialMass only writes BinPhysics.mass and leaves bins unchanged.
-    // OrbitalPhase applies a complex rotation to satellite bins around detected peaks,
-    // which preserves per-bin magnitude exactly (|e^{iφ} · z| = |z|).
-    //
-    // The chain is provably bounded: slot 0 is a passthrough for bins; slot 1 is a
-    // unitary (phase-only) transformation. Together they prove the two-slot serial
-    // dispatch at the SpectralModule trait boundary works and doesn't corrupt state.
+    // GravityWell creates a single attraction well at bin 200 (Gaussian STRENGTH peak).
+    // Hooke applies a neighbour-spring restoring force to the GravityWell output.
+    // Running both in serial for 50 hops must not produce |bin| ≥ 100.0.
     let mut s0 = KineticsModule::new();
     s0.reset(SR, FFT);
-    s0.set_mode(KineticsMode::InertialMass);
-    s0.set_mass_source(MassSource::Static);
+    s0.set_mode(KineticsMode::GravityWell);
+    // WellSource::Static is the default — no explicit set needed.
 
     let mut s1 = KineticsModule::new();
     s1.reset(SR, FFT);
-    s1.set_mode(KineticsMode::OrbitalPhase);
+    s1.set_mode(KineticsMode::Hooke);
 
-    // Dense sinusoidal input with several local peaks so OrbitalPhase has targets to rotate.
+    // Dense sinusoidal input: magnitudes in [0.25, 1.25], real-only.
     let mut bins: Vec<Complex<f32>> = (0..NUM_BINS)
         .map(|k| Complex::new(((k as f32 * 0.05).sin() + 1.5) * 0.5, 0.0))
         .collect();
-    let original_max = bins.iter().map(|b| b.norm()).fold(0.0_f32, f32::max);
 
-    // Slot 0 (InertialMass): MASS curve linearly 1→5; MIX clamped to 1.0 → fully wet write.
-    let mass_curve: Vec<f32> = (0..NUM_BINS)
-        .map(|k| 1.0 + 4.0 * (k as f32 / NUM_BINS as f32))
+    // Slot 0 (GravityWell): Gaussian STRENGTH centred on bin 200, σ=5, peak 2.0.
+    // This creates a single static well above the 1.05 threshold at bin 200.
+    let strength_curve: Vec<f32> = (0..NUM_BINS)
+        .map(|k| {
+            let d = (k as f32 - 200.0) / 5.0;
+            1.0 + (-d * d).exp()
+        })
         .collect();
     let neutral = vec![1.0_f32; NUM_BINS];
+    // MIX = 2.0 → clamped to 1.0 inside the kernel → fully wet.
     let mix = vec![2.0_f32; NUM_BINS];
-    let curves0: Vec<&[f32]> = vec![&neutral, &mass_curve, &neutral, &neutral, &mix];
+    let curves0: Vec<&[f32]> = vec![&strength_curve, &neutral, &neutral, &neutral, &mix];
 
-    // Slot 1 (OrbitalPhase): neutral STRENGTH so alpha = 0.5 * 1.0 * dt ≈ 0.0053 rad per
-    // unit-amplitude per bin-distance-squared — a gentle rotation that settles to any phase
-    // without amplitude change.
-    let curves1: Vec<&[f32]> = vec![&neutral, &neutral, &neutral, &neutral, &mix];
+    // Slot 1 (Hooke): uniform STRENGTH = 2.0, fully wet.
+    let strength_curve_high = vec![2.0_f32; NUM_BINS];
+    let curves1: Vec<&[f32]> = vec![&strength_curve_high, &neutral, &neutral, &neutral, &mix];
 
-    let mut physics = BinPhysics::new();
-    physics.reset_active(NUM_BINS, SR, FFT);
     let mut suppression = vec![0.0_f32; NUM_BINS];
     let ctx = make_ctx();
 
     for hop in 0..50 {
-        // Slot 0: write physics.mass, bins pass through unchanged.
         s0.process(
             0, StereoLink::Linked, FxChannelTarget::All,
-            &mut bins, None, &curves0, &mut suppression, Some(&mut physics), &ctx,
+            &mut bins, None, &curves0, &mut suppression, None, &ctx,
         );
-        // Slot 1: rotate phases only — magnitudes must not change.
         s1.process(
             0, StereoLink::Linked, FxChannelTarget::All,
             &mut bins, None, &curves1, &mut suppression, None, &ctx,
@@ -142,18 +131,9 @@ fn kinetics_chained_two_slots_in_serial_does_not_explode() {
         for (k, b) in bins.iter().enumerate() {
             assert!(
                 b.norm().is_finite() && b.norm() < 100.0,
-                "Chain blew up at hop {} bin {}: |b| = {} (original_max = {})",
-                hop, k, b.norm(), original_max,
+                "Chain blew up at hop {} bin {}: |b| = {}",
+                hop, k, b.norm(),
             );
         }
     }
-
-    // Sanity: output magnitudes should equal input magnitudes (both kernels are magnitude-
-    // preserving), within float rounding.
-    let output_max = bins.iter().map(|b| b.norm()).fold(0.0_f32, f32::max);
-    assert!(
-        (output_max - original_max).abs() < 1e-3,
-        "Magnitude changed unexpectedly: original_max={} output_max={}",
-        original_max, output_max,
-    );
 }
