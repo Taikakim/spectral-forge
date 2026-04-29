@@ -1,12 +1,11 @@
 //! MIDI held-note bookkeeping helpers.
 //!
-//! Pure functions: no allocation, no branching beyond a single bounds check.
-//! Called from `SpectralForge::process()` (`apply_note_on`/`apply_note_off`)
-//! and `Pipeline::reset` (`clear_midi_state`).
+//! Pure functions: no heap allocation. Called from `SpectralForge::process()`
+//! (`apply_note_on`/`apply_note_off`) and `Pipeline::reset` (`clear_midi_state`).
 
 /// Number of distinct MIDI notes (0..=127).
 pub const NUM_MIDI_NOTES: usize = 128;
-/// Number of pitch classes (C..B).
+/// Number of pitch classes (C through B).
 pub const NUM_PITCH_CLASSES: usize = 12;
 
 /// Mark `note` held; set its pitch-class bit.
@@ -34,15 +33,15 @@ pub fn apply_note_off(
 ) {
     let n = note as usize;
     if n >= NUM_MIDI_NOTES { return; }
+    // Stale note-off (note already released): nothing to update — the
+    // pitch-class bit is already correct for the current held set, so we
+    // skip the stride scan entirely.
+    if !held[n] { return; }
     held[n] = false;
     let pc = n % NUM_PITCH_CLASSES;
-    let mut still_held = false;
-    let mut k = pc;
-    while k < NUM_MIDI_NOTES {
-        if held[k] { still_held = true; break; }
-        k += NUM_PITCH_CLASSES;
-    }
-    classes[pc] = still_held;
+    classes[pc] = (pc..NUM_MIDI_NOTES)
+        .step_by(NUM_PITCH_CLASSES)
+        .any(|k| held[k]);
 }
 
 /// Reset both arrays to all-false. Called on `Pipeline::reset()`.

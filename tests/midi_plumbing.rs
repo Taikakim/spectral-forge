@@ -1,4 +1,4 @@
-use spectral_forge::dsp::midi::{apply_note_on, apply_note_off};
+use spectral_forge::dsp::midi::{apply_note_off, apply_note_on, clear_midi_state};
 
 #[test]
 fn note_on_sets_held_note_and_pitch_class() {
@@ -51,4 +51,16 @@ fn out_of_range_note_does_not_panic() {
     apply_note_off(255, &mut held, &mut classes);
     assert!(held.iter().all(|&h| !h));
     assert!(classes.iter().all(|&c| !c));
+}
+
+#[test]
+fn clear_midi_state_zeroes_both_arrays() {
+    let mut held    = [false; 128];
+    let mut classes = [false; 12];
+    apply_note_on(60, &mut held, &mut classes);
+    apply_note_on(67, &mut held, &mut classes);
+    apply_note_on(72, &mut held, &mut classes);
+    clear_midi_state(&mut held, &mut classes);
+    assert!(held.iter().all(|&h| !h),    "clear_midi_state must zero held[]");
+    assert!(classes.iter().all(|&c| !c), "clear_midi_state must zero classes[]");
 }
