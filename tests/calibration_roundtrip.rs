@@ -1340,3 +1340,35 @@ fn life_probe_reports_active_mode() {
     assert_eq!(probe.recent_sustain_max, 0.0);
     assert_eq!(probe.recent_tear_count, 0);
 }
+
+#[test]
+fn kinetics_calibration_probes_round_trip() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+
+    let mut m = KineticsModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(KineticsMode::Hooke);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new((k as f32 * 0.013).sin(), (k as f32 * 0.011).cos()))
+        .collect();
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&neutral, &neutral, &neutral, &neutral, &mix];
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = make_ctx();
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    let p = m.last_probe();
+    assert_eq!(p.kinetics_active_mode_idx, Some(KineticsMode::Hooke as u8));
+    assert!(p.kinetics_strength.unwrap().is_finite());
+    assert!(p.kinetics_mass.unwrap().is_finite());
+    assert!(p.kinetics_displacement.unwrap().is_finite());
+    assert!(p.kinetics_velocity.unwrap().is_finite());
+    assert_eq!(p.kinetics_well_count, Some(0)); // Hooke uses no fork list
+}
