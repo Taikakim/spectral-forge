@@ -531,12 +531,23 @@ fn module_spec_writes_bin_physics_defaults_false_for_non_writers() {
         ModuleType::Contrast, ModuleType::Gain, ModuleType::MidSide,
         ModuleType::TransientSustainedSplit, ModuleType::Harmonic,
         ModuleType::Future, ModuleType::Punch, ModuleType::Rhythm,
-        ModuleType::Geometry, ModuleType::Circuit,
+        ModuleType::Geometry,
         ModuleType::Master, ModuleType::Empty,
     ] {
         assert!(!module_spec(ty).writes_bin_physics,
             "{:?}: writes_bin_physics must be false for non-writer modules", ty);
     }
+}
+
+#[test]
+fn circuit_spec_has_5_curves_with_spread_and_writes_bin_physics() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+    let spec = module_spec(ModuleType::Circuit);
+    assert_eq!(spec.num_curves, 5);
+    assert_eq!(spec.curve_labels, &["AMOUNT", "THRESH", "SPREAD", "RELEASE", "MIX"]);
+    assert!(spec.writes_bin_physics, "Phase 5c retrofit opts into BinPhysics writer schedule");
+    assert!(!spec.supports_sidechain, "Circuit v1 has no sidechain modes");
+    assert!(!spec.wants_sidechain);
 }
 
 #[test]

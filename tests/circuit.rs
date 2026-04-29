@@ -4,9 +4,9 @@ use spectral_forge::dsp::modules::{module_spec, ModuleType};
 fn circuit_module_spec_present() {
     let spec = module_spec(ModuleType::Circuit);
     assert_eq!(spec.display_name, "Circuit");
-    assert_eq!(spec.num_curves, 4);
-    assert_eq!(spec.curve_labels.len(), 4);
-    assert_eq!(spec.curve_labels, &["AMOUNT", "THRESH", "RELEASE", "MIX"]);
+    assert_eq!(spec.num_curves, 5);
+    assert_eq!(spec.curve_labels.len(), 5);
+    assert_eq!(spec.curve_labels, &["AMOUNT", "THRESH", "SPREAD", "RELEASE", "MIX"]);
     assert!(!spec.supports_sidechain, "Circuit v1 has no sidechain modes");
     assert!(!spec.wants_sidechain);
 }
@@ -19,17 +19,17 @@ fn circuit_module_constructs_and_passes_through() {
 
     let mut module = create_module(ModuleType::Circuit, 48_000.0, 2048);
     assert_eq!(module.module_type(), ModuleType::Circuit);
-    assert_eq!(module.num_curves(), 4);
+    assert_eq!(module.num_curves(), 5);
 
     let num_bins = 1025;
     let mut bins: Vec<Complex<f32>> =
         (0..num_bins).map(|k| Complex::new((k as f32 * 0.01).sin(), 0.0)).collect();
     let dry: Vec<Complex<f32>> = bins.clone();
 
-    // AMOUNT=0, MIX=0 → passthrough.
+    // AMOUNT=0, THRESH=1, SPREAD=1, RELEASE=1, MIX=0 → passthrough.
     let zeros = vec![0.0_f32; num_bins];
     let neutral = vec![1.0_f32; num_bins];
-    let curves: Vec<&[f32]> = vec![&zeros, &neutral, &neutral, &zeros];
+    let curves: Vec<&[f32]> = vec![&zeros, &neutral, &neutral, &neutral, &zeros];
 
     let mut suppression = vec![0.0_f32; num_bins];
     let ctx = ModuleContext::new(
@@ -98,12 +98,14 @@ fn circuit_bbd_delays_and_lowpasses() {
     let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
     bins[100] = Complex::new(4.0, 0.0); // single-bin impulse
 
-    // AMOUNT=2 (max stage-3 gain), THRESHOLD=1 (mild dither), RELEASE=1 (mid LP), MIX=2 (full wet)
+    // AMOUNT=2 (max stage-3 gain), THRESHOLD=1 (mild dither), SPREAD=1 (neutral),
+    // RELEASE=1 (mid LP), MIX=2 (full wet)
     let amount = vec![2.0_f32; num_bins];
     let thresh = vec![1.0_f32; num_bins];
+    let spread = vec![1.0_f32; num_bins];
     let release = vec![1.0_f32; num_bins];
     let mix = vec![2.0_f32; num_bins];
-    let curves: Vec<&[f32]> = vec![&amount, &thresh, &release, &mix];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
 
     let mut suppression = vec![0.0_f32; num_bins];
     let ctx = ModuleContext::new(
@@ -146,13 +148,14 @@ fn circuit_schmitt_hysteresis_latches_above_threshold() {
     bins[100] = Complex::new(2.0, 0.0); // above on-threshold (high = 1.0)
     bins[101] = Complex::new(0.05, 0.0); // far below off-threshold
 
-    // AMOUNT=2 (full attenuation when OFF), THRESHOLD=1 (high=1.0),
+    // AMOUNT=2 (full attenuation when OFF), THRESHOLD=1 (high=1.0), SPREAD=1 (neutral),
     // RELEASE=1 (gap=0.5 → low=0.5), MIX=2 (full wet).
     let amount = vec![2.0_f32; num_bins];
     let thresh = vec![1.0_f32; num_bins];
+    let spread = vec![1.0_f32; num_bins];
     let release = vec![1.0_f32; num_bins];
     let mix = vec![2.0_f32; num_bins];
-    let curves: Vec<&[f32]> = vec![&amount, &thresh, &release, &mix];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
 
     let mut suppression = vec![0.0_f32; num_bins];
     let ctx = ModuleContext::new(
@@ -194,12 +197,13 @@ fn circuit_crossover_smooth_deadzone() {
     bins[50]  = Complex::new(0.15, 0.0); // just above dz (50% above)
     bins[100] = Complex::new(2.0, 0.0);  // well above dz
 
-    // AMOUNT=1 → dz_width = 0.1, MIX=2 → full wet. THRESH/RELEASE unused.
+    // AMOUNT=1 → dz_width = 0.1, MIX=2 → full wet. THRESH/SPREAD/RELEASE unused.
     let amount = vec![1.0_f32; num_bins];
     let thresh = vec![1.0_f32; num_bins];
+    let spread = vec![1.0_f32; num_bins];
     let release = vec![1.0_f32; num_bins];
     let mix = vec![2.0_f32; num_bins];
-    let curves: Vec<&[f32]> = vec![&amount, &thresh, &release, &mix];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
 
     let mut suppression = vec![0.0_f32; num_bins];
     let ctx = ModuleContext::new(
@@ -251,7 +255,8 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
         let amount = vec![1.5_f32; num_bins];
         let mid = vec![1.0_f32; num_bins];
         let mix = vec![1.0_f32; num_bins];
-        let curves: Vec<&[f32]> = vec![&amount, &mid, &mid, &mix];
+        // [AMOUNT, THRESH, SPREAD, RELEASE, MIX] — 5-curve layout post Phase 5c.1
+        let curves: Vec<&[f32]> = vec![&amount, &mid, &mid, &mid, &mix];
 
         let mut suppression = vec![0.0_f32; num_bins];
         let ctx = ModuleContext::new(

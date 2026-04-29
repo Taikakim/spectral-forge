@@ -34,7 +34,7 @@ fn xorshift32_step(state: &mut u32) -> f32 {
 }
 
 /// 4-stage bucket-brigade delay on per-bin magnitudes.
-/// Curves: `[AMOUNT, THRESH, RELEASE, MIX]`.
+/// Curves: `[AMOUNT, THRESH, SPREAD(unused), RELEASE, MIX]`.
 fn apply_bbd(
     bins: &mut [Complex<f32>],
     bbd_mag: &mut [Vec<f32>; BBD_STAGES],
@@ -43,8 +43,9 @@ fn apply_bbd(
 ) {
     let amount_c = curves[0];
     let thresh_c = curves[1];
-    let release_c = curves[2];
-    let mix_c = curves[3];
+    // curves[2] = SPREAD — reserved for Phase 5c.8, unused by v1 BBD kernel.
+    let release_c = curves[3];
+    let mix_c = curves[4];
 
     let num_bins = bins.len();
 
@@ -90,7 +91,7 @@ fn apply_bbd(
 // ── Schmitt helpers ────────────────────────────────────────────────────────
 
 /// Per-bin hysteresis latch (Schmitt trigger).
-/// Curves: `[AMOUNT, THRESH, RELEASE, MIX]`.
+/// Curves: `[AMOUNT, THRESH, SPREAD(unused), RELEASE, MIX]`.
 fn apply_schmitt(
     bins: &mut [Complex<f32>],
     latched: &mut [u8],
@@ -98,8 +99,9 @@ fn apply_schmitt(
 ) {
     let amount_c = curves[0];
     let thresh_c = curves[1];
-    let release_c = curves[2];
-    let mix_c = curves[3];
+    // curves[2] = SPREAD — reserved for Phase 5c.8, unused by v1 Schmitt kernel.
+    let release_c = curves[3];
+    let mix_c = curves[4];
 
     let num_bins = bins.len();
 
@@ -129,10 +131,11 @@ fn apply_schmitt(
 /// output follows `(mag - dz)² / mag`, which is continuous and has a
 /// continuous first derivative at the boundary (no audible click).
 /// Phase is preserved by scaling the original complex bin.
-/// Curves: `[AMOUNT, THRESH(unused), RELEASE(unused), MIX]`.
+/// Curves: `[AMOUNT, THRESH(unused), SPREAD(unused), RELEASE(unused), MIX]`.
 fn apply_crossover(bins: &mut [Complex<f32>], curves: &[&[f32]]) {
     let amount_c = curves[0];
-    let mix_c = curves[3];
+    // curves[1] = THRESH, curves[2] = SPREAD, curves[3] = RELEASE — all unused by v1 Crossover kernel.
+    let mix_c = curves[4];
 
     let num_bins = bins.len();
 
@@ -238,13 +241,13 @@ impl SpectralModule for CircuitModule {
     ) {
         debug_assert!(channel < 2);
 
-        // Probe capture: all three kernels share the same mapping for curves[0] and curves[3].
+        // Probe capture: all three kernels share the same mapping for curves[0] and curves[4].
         // curves[0] (AMOUNT): g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
-        // curves[3] (MIX):   g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
+        // curves[4] (MIX):   g=1.0 → 50%, g=2.0 → 100%  (g.clamp(0,2) * 50.0)
         #[cfg(any(test, feature = "probe"))]
         let probe_amount_pct = curves[0].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
         #[cfg(any(test, feature = "probe"))]
-        let probe_mix_pct = curves[3].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
+        let probe_mix_pct = curves[4].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
 
         match self.mode {
             CircuitMode::BbdBins => {
@@ -298,7 +301,7 @@ impl SpectralModule for CircuitModule {
     }
 
     fn num_curves(&self) -> usize {
-        4
+        5
     }
 
     #[cfg(any(test, feature = "probe"))]

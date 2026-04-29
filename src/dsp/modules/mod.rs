@@ -540,12 +540,12 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         display_name: "Circuit",
         color_lit: crate::editor::theme::CIRCUIT_DOT_COLOR,
         color_dim: Color32::from_rgb(0x40, 0x2c, 0x18),
-        num_curves: 4,
-        curve_labels: &["AMOUNT", "THRESH", "RELEASE", "MIX"],
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "THRESH", "SPREAD", "RELEASE", "MIX"],
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
-        writes_bin_physics: false,
+        writes_bin_physics: true,
     };
     static LIFE: ModuleSpec = ModuleSpec {
         display_name: "LIFE",
