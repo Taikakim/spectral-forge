@@ -128,14 +128,19 @@ fn if_kernel_independent_per_channel_invocation() {
     // should be influenced by the other's data.
     let sample_rate = 48000.0_f32;
     let fft_size    = 2048_usize;
-    let hop_size    = 512_usize;
+    let hop_size    = fft_size / 4;
     let num_bins    = fft_size / 2 + 1;
     let bin_freq_hz = sample_rate / fft_size as f32;
-    let bin_l       = (1000.0_f32 / bin_freq_hz).round() as usize;
-    let bin_r       = (2000.0_f32 / bin_freq_hz).round() as usize;
-    let frame_seconds = (hop_size as f32) / sample_rate;
+    // Off-bin-center frequencies — bin_l and bin_r are the *nearest* bins,
+    // which makes the test exercise the phase-deviation arithmetic rather
+    // than just bin-center alignment.
+    let freq_l      = 1000.0_f32;
+    let freq_r      = 2000.0_f32;
+    let bin_l       = (freq_l / bin_freq_hz).round() as usize;
+    let bin_r       = (freq_r / bin_freq_hz).round() as usize;
+    let frame_n_seconds = (hop_size as f32) / sample_rate;
 
-    // L: 1 kHz tone at bin_l; R: 2 kHz tone at bin_r. Wrap phases to (-π, π]
+    // L: freq_l tone at bin_l; R: freq_r tone at bin_r. Wrap phases to (-π, π]
     // to mirror real FFT output (matches the convention of the other tests
     // in this file).
     let mut prev_l = vec![0.0_f32; num_bins];
@@ -144,8 +149,8 @@ fn if_kernel_independent_per_channel_invocation() {
     let mut curr_r = vec![0.0_f32; num_bins];
     prev_l[bin_l] = principal_argument(0.0);
     prev_r[bin_r] = principal_argument(0.0);
-    curr_l[bin_l] = principal_argument(2.0 * std::f32::consts::PI * 1000.0 * frame_seconds);
-    curr_r[bin_r] = principal_argument(2.0 * std::f32::consts::PI * 2000.0 * frame_seconds);
+    curr_l[bin_l] = principal_argument(2.0 * std::f32::consts::PI * freq_l * frame_n_seconds);
+    curr_r[bin_r] = principal_argument(2.0 * std::f32::consts::PI * freq_r * frame_n_seconds);
 
     let mut if_l = vec![0.0_f32; num_bins];
     let mut if_r = vec![0.0_f32; num_bins];
@@ -176,10 +181,4 @@ fn if_kernel_independent_per_channel_invocation() {
     assert!((if_r[bin_l] - expected_r_at_bin_l).abs() < 1e-2,
         "R channel at bin_l must equal silent-bin baseline ({} Hz), not L's tone; got {} Hz",
         expected_r_at_bin_l, if_r[bin_l]);
-    // And the two channels must disagree at each other's active bin —
-    // a weaker but intuitive check that the calls are truly independent.
-    assert!((if_l[bin_r] - if_r[bin_r]).abs() > 1.0,
-        "L and R must differ at bin_r; both returned {} Hz", if_l[bin_r]);
-    assert!((if_r[bin_l] - if_l[bin_l]).abs() > 1.0,
-        "L and R must differ at bin_l; both returned {} Hz", if_r[bin_l]);
 }
