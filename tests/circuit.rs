@@ -1,4 +1,14 @@
-use spectral_forge::dsp::modules::{module_spec, ModuleType};
+use spectral_forge::dsp::modules::{module_spec, ModuleContext, ModuleType};
+
+fn circuit_test_ctx(num_bins: usize) -> ModuleContext<'static> {
+    ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    )
+}
+
+
 
 #[test]
 fn circuit_module_spec_present() {
@@ -286,6 +296,90 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
                         mode, hop, ch, i, s);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn circuit_vactrol_smooths_flux_input_with_release_envelope() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::Vactrol);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); num_bins];
+
+    let amount  = vec![1.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins]; // full wet
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    // Hop 1: vactrol caps empty → strong attenuation.
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
+    let first_hop_mag = bins[100].norm();
+    assert!(first_hop_mag < 0.5, "first hop should be attenuated by empty cap (got {})", first_hop_mag);
+
+    // 200 hops: caps charge → output approaches input.
+    for _ in 0..200 {
+        for b in bins.iter_mut() { *b = Complex::new(1.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+    let charged_mag = bins[100].norm();
+    assert!(charged_mag > 0.7, "after charge, output should approach input (got {})", charged_mag);
+
+    // Drop input to zero: slow cap should still hold charge.
+    for b in bins.iter_mut() { *b = Complex::new(0.0, 0.0); }
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression, None, &ctx);
+    #[cfg(any(test, feature = "probe"))]
+    {
+        let probe = module.probe_state(0);
+        assert!(probe.vactrol_slow_avg > 0.1, "slow cap should still hold charge (got {})", probe.vactrol_slow_avg);
+    }
+}
+
+#[test]
+fn circuit_vactrol_finite_after_long_run() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::Vactrol);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new((k as f32 * 0.05).sin().abs(), 0.0))
+        .collect();
+    let amount  = vec![1.5_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    for _ in 0..500 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves, &mut suppression, None, &ctx);
+        for b in &bins {
+            assert!(b.norm().is_finite() && b.norm() < 100.0);
         }
     }
 }

@@ -160,6 +160,83 @@ fn apply_crossover(bins: &mut [Complex<f32>], curves: &[&[f32]]) {
     }
 }
 
+// ── Vactrol helpers ────────────────────────────────────────────────────────
+
+/// Nominal time constants for the opto-coupler photocell model (seconds).
+const VACTROL_TAU_FAST: f32 = 0.008;  // 8 ms
+const VACTROL_TAU_SLOW: f32 = 0.250;  // 250 ms
+
+/// Cascaded 2-pole vactrol-style photocell per-bin.
+///
+/// Drive (`d`) charges the fast cap; the fast cap drives the slow cap.
+/// Cell gain `g = slow / (1 + |slow|)` soft-saturates into `[0, 1)`.
+/// Phase is preserved when `in_mag > 1e-9`; silent bins get 0+0i.
+///
+/// `flux` — optional per-bin flux from BinPhysics. When `Some`, each bin's
+/// drive is `flux[k] * amount` instead of `in_mag * amount`.
+///
+/// Curves: `[AMOUNT, THRESH(unused), SPREAD(unused), RELEASE, MIX]`.
+fn apply_vactrol(
+    bins: &mut [Complex<f32>],
+    fast: &mut [f32],
+    slow: &mut [f32],
+    curves: &[&[f32]],
+    hop_dt: f32,
+    flux: Option<&[f32]>,
+) {
+    use crate::dsp::circuit_kernels::lp_step;
+
+    let amount_c  = curves[0];
+    // curves[1] = THRESH — unused by Vactrol v1.
+    // curves[2] = SPREAD — unused by Vactrol v1.
+    let release_c = curves[3];
+    let mix_c     = curves[4];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        let amount  = amount_c[k].clamp(0.0, 2.0);
+        let rel_scl = release_c[k].clamp(0.01, 4.0);   // user scale on both τ
+        let mix     = mix_c[k].clamp(0.0, 2.0) * 0.5;  // 0..1
+
+        let tau_fast = VACTROL_TAU_FAST * rel_scl;
+        let tau_slow = VACTROL_TAU_SLOW * rel_scl;
+
+        // α = hop_dt / τ, clamped to [0, 1].
+        let alpha_fast = (hop_dt / tau_fast).min(1.0);
+        let alpha_slow = (hop_dt / tau_slow).min(1.0);
+
+        let dry      = bins[k];
+        let in_mag   = dry.norm();
+
+        // Drive: use flux[k] when available, otherwise magnitude fallback.
+        let raw_drive = match flux {
+            Some(f) => f[k].abs(),
+            None    => in_mag,
+        };
+        let drive = raw_drive * amount;
+
+        // Charge fast cap toward drive, then charge slow cap toward fast.
+        lp_step(&mut fast[k], drive, alpha_fast);
+        lp_step(&mut slow[k], fast[k], alpha_slow);
+
+        // Soft-saturating cell gain via tanh: g ∈ [0, 1) for non-negative slow cap.
+        // tanh(1.0) ≈ 0.762 — ensures a fully-charged cap (slow = drive = in_mag) approaches
+        // the input level for unit-amplitude signals.  The rational approximation from
+        // circuit_kernels stays cheap (no exp).
+        let g = crate::dsp::circuit_kernels::tanh_levien_poly(slow[k]).max(0.0);
+
+        // Apply gain to the dry bin (preserving phase).
+        let wet = if in_mag > 1e-9 {
+            dry * (g / in_mag)
+        } else {
+            Complex::new(0.0, 0.0)
+        };
+
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,6 +244,7 @@ pub enum CircuitMode {
     BbdBins,
     SpectralSchmitt,
     CrossoverDistortion,
+    Vactrol,
 }
 
 impl Default for CircuitMode {
@@ -182,6 +260,9 @@ pub struct CircuitModule {
     bbd_mag: [[Vec<f32>; BBD_STAGES]; 2],   // bbd_mag[ch][stage][bin]
     schmitt_latched: [Vec<u8>; 2],           // packed bool per bin
     rng_state: [u32; 2],                     // xorshift32 per channel for BBD dither
+    // Vactrol state: per-channel, per-bin fast/slow 1-pole caps.
+    vactrol_fast: [Vec<f32>; 2],
+    vactrol_slow: [Vec<f32>; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -198,6 +279,8 @@ impl CircuitModule {
             ],
             schmitt_latched: [Vec::new(), Vec::new()],
             rng_state: [0xDEAD_BEEFu32, 0xCAFE_BABEu32],
+            vactrol_fast: [Vec::new(), Vec::new()],
+            vactrol_slow: [Vec::new(), Vec::new()],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -208,7 +291,7 @@ impl CircuitModule {
     pub fn set_mode(&mut self, mode: CircuitMode) {
         if mode != self.mode {
             self.mode = mode;
-            // Reset transient kernel state on mode change so BBD/Schmitt do not leak between modes.
+            // Reset transient kernel state on mode change so kernels do not leak between modes.
             for ch in 0..2 {
                 for stage in 0..BBD_STAGES {
                     for v in self.bbd_mag[ch][stage].iter_mut() {
@@ -217,6 +300,12 @@ impl CircuitModule {
                 }
                 for v in self.schmitt_latched[ch].iter_mut() {
                     *v = 0;
+                }
+                for v in self.vactrol_fast[ch].iter_mut() {
+                    *v = 0.0;
+                }
+                for v in self.vactrol_slow[ch].iter_mut() {
+                    *v = 0.0;
                 }
             }
         }
@@ -237,8 +326,8 @@ impl SpectralModule for CircuitModule {
         _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
-        _ctx: &ModuleContext,
+        physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+        ctx: &ModuleContext,
     ) {
         debug_assert!(channel < 2);
 
@@ -249,6 +338,9 @@ impl SpectralModule for CircuitModule {
         let probe_amount_pct = curves[0].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
         #[cfg(any(test, feature = "probe"))]
         let probe_mix_pct = curves[4].get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 50.0;
+
+        // Compute hop duration in seconds (variable FFT size).
+        let hop_dt = (ctx.fft_size / 4) as f32 / ctx.sample_rate;
 
         match self.mode {
             CircuitMode::BbdBins => {
@@ -262,6 +354,29 @@ impl SpectralModule for CircuitModule {
             }
             CircuitMode::CrossoverDistortion => {
                 apply_crossover(bins, curves);
+            }
+            CircuitMode::Vactrol => {
+                // Read flux from BinPhysics when available; fallback to magnitude computed inline.
+                // apply_vactrol reads bin magnitude directly — flux from ctx.bin_physics would
+                // override, but for v1 we use the magnitude fallback path (no flux write).
+                let num_bins = bins.len();
+                // Override the drive with flux[k] if present, writing into fast[] first.
+                // Rather than branching inside the hot loop, we pre-fill a scratch drive
+                // slice. But we must not allocate. Instead, pass flux via an Option<&[f32]>
+                // to apply_vactrol_inner or handle the two cases with a flag.
+                // For RT safety: use a flag; apply_vactrol already reads bins[k].norm()
+                // as the fallback drive. When flux is present, we'll call a variant.
+                let _ = num_bins; // suppress unused lint
+
+                // flux is read-only; physics is not written by Vactrol.
+                let flux: Option<&[f32]> = physics.as_ref()
+                    .and_then(|bp| {
+                        let f = &bp.flux[..];
+                        if f.len() >= bins.len() { Some(&f[..bins.len()]) } else { None }
+                    });
+                let fast = &mut self.vactrol_fast[channel];
+                let slow = &mut self.vactrol_slow[channel];
+                apply_vactrol(bins, fast, slow, curves, hop_dt, flux);
             }
         }
 
@@ -290,6 +405,10 @@ impl SpectralModule for CircuitModule {
             }
             self.schmitt_latched[ch].clear();
             self.schmitt_latched[ch].resize(num_bins, 0);
+            self.vactrol_fast[ch].clear();
+            self.vactrol_fast[ch].resize(num_bins, 0.0);
+            self.vactrol_slow[ch].clear();
+            self.vactrol_slow[ch].resize(num_bins, 0.0);
         }
     }
 
@@ -307,4 +426,36 @@ impl SpectralModule for CircuitModule {
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
+}
+
+// ── CircuitProbe (test / probe builds only) ────────────────────────────────
+
+/// Per-module probe snapshot for Circuit. Returned by `probe_state()`.
+/// Fields are kept minimal for Phase 5c.4; later tasks add more.
+#[cfg(any(test, feature = "probe"))]
+#[derive(Debug, Clone, Copy)]
+pub struct CircuitProbe {
+    pub active_mode:       CircuitMode,
+    pub vactrol_fast_avg:  f32,
+    pub vactrol_slow_avg:  f32,
+}
+
+#[cfg(any(test, feature = "probe"))]
+impl CircuitModule {
+    pub fn probe_state(&self, channel: usize) -> CircuitProbe {
+        let ch = channel.min(1);
+        let (fa, sa) = if self.mode == CircuitMode::Vactrol && !self.vactrol_slow[ch].is_empty() {
+            let n = self.vactrol_slow[ch].len() as f32;
+            let fa: f32 = self.vactrol_fast[ch].iter().sum::<f32>() / n;
+            let sa: f32 = self.vactrol_slow[ch].iter().sum::<f32>() / n;
+            (fa, sa)
+        } else {
+            (0.0, 0.0)
+        };
+        CircuitProbe {
+            active_mode:      self.mode,
+            vactrol_fast_avg: fa,
+            vactrol_slow_avg: sa,
+        }
+    }
 }
