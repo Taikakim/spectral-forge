@@ -2072,7 +2072,7 @@ fn kinetics_tuning_fork_modulates_neighbour_phase() {
     // Peak THRESHOLD via STRENGTH-curve baseline; here STRENGTH=2 (above 1.5 fork cutoff).
     let strength = vec![2.0_f32; num_bins];
     let neutral = vec![1.0_f32; num_bins];
-    let mix = vec![2.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins]; // 2.0 exercises the kernel's MIX clamp; effective mix = 1.0 (full wet).
     let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
 
     let mut suppression = vec![0.0_f32; num_bins];

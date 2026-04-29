@@ -912,7 +912,9 @@ impl KineticsModule {
     ) {
         use std::f32::consts::PI;
 
-        // Hoist curve slice refs before any &mut borrows.
+        // Hoist curve slice refs before the `&mut self.displacement` borrow in pass 2.
+        // (smoothed_curves and tuning_forks are disjoint fields, so the pass-1 mutation
+        // of tuning_forks doesn't conflict with these immutable borrows.)
         let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
         let reach_curve    = &self.smoothed_curves[channel][2][..num_bins];
         let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
