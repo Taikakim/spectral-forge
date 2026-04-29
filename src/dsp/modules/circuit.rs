@@ -349,6 +349,97 @@ fn apply_transformer(
     }
 }
 
+// ── Component Drift helpers ────────────────────────────────────────────────
+
+/// Slow per-bin LFSR drift: pseudo-random gain offset modulates each bin over
+/// many seconds. Reads `temperature` (pass 1) to scale drift amplitude on hot
+/// bins; writes `temperature` (pass 2) so drift activity heats bins for
+/// downstream readers (positive feedback, clamped).
+///
+/// **Single `Option<&mut [f32]>` for both read and write:** both passes target
+/// the same `physics.temperature` vec. Splitting into `temperature_in` +
+/// `temperature_out` would require two mutable borrows of the same slice —
+/// a borrow-checker violation. We use `as_deref()` inside pass 1 and
+/// `as_deref_mut()` inside pass 2, matching the `apply_transformer` pattern.
+///
+/// **`clamp(0.0, 4.0)` not `.min(4.0)` for NaN guard:** `f32::min(x, NaN)`
+/// propagates NaN into `drift_env[k]` via the LP smoother where it sticks
+/// indefinitely. `clamp` routes NaN to the lower bound (zero), isolating
+/// upstream NaN poison (see Phase 5c.6 fix in commit `b281d0a`).
+///
+/// **Shift-by-7 for strict `[-1, 1)` bound:** dividing a 31-bit or 32-bit
+/// integer by `i32::MAX` or `u32::MAX` can round the upper bound up to exactly
+/// 1.0 in f32 (f32 has only 24 mantissa bits). Arithmetic-shifting the
+/// xorshift32 output right by 7 keeps a sign bit and 24 magnitude bits; both
+/// numerator `[-2^24, 2^24)` and divisor `2^24` are exact in f32, so the
+/// half-open upper bound holds strictly (see `SimdRng::next_f32_centered`).
+fn apply_component_drift(
+    bins: &mut [Complex<f32>],
+    drift_env: &mut [f32],
+    drift_rng: &mut crate::dsp::circuit_kernels::SimdRng,
+    mut temperature: Option<&mut [f32]>,
+    curves: &[&[f32]],
+    hop_dt: f32,
+) {
+    use crate::dsp::circuit_kernels::lp_step;
+
+    let amount_c  = curves[0];
+    let thresh_c  = curves[1];
+    // curves[2] = SPREAD — unused by Component Drift.
+    let release_c = curves[3];
+    let mix_c     = curves[4];
+
+    let num_bins = bins.len();
+
+    // Step LFSR once per hop. Per-bin variation via XOR with bin index * Knuth's
+    // golden-ratio constant so bins with close-by indices get uncorrelated targets.
+    let lfsr_step = drift_rng.next_u32();
+
+    // --- Pass 1: compute drift targets and apply gain. ---
+    // Read-only temperature view: hot bins drift further (amplitude scale).
+    {
+        let temp_in: Option<&[f32]> = temperature.as_deref();
+        for k in 0..num_bins {
+            let amount  = amount_c[k].clamp(0.0, 2.0) * 0.06; // 0..0.12 → up to ±12% (~±1 dB)
+            let temp_gate = thresh_c[k].clamp(0.0, 4.0);
+            let release = release_c[k].clamp(0.0, 2.0).max(0.01);
+            let drift_tau = 1.0 + 4.0 * release; // 1..9 s — very slow modulation
+            let alpha = (hop_dt / drift_tau).min(1.0);
+
+            // Per-bin random target: XOR with Knuth's golden-ratio constant so
+            // adjacent bins get statistically independent pseudo-random targets.
+            // shift-by-7 idiom gives strict [-1, 1) range (see doc-comment above).
+            let mixed = lfsr_step ^ (k as u32).wrapping_mul(2_654_435_761);
+            let centered = ((mixed as i32) >> 7) as f32 / ((1u32 << 24) as f32);
+
+            // Hot bins (above temp_gate) drift further — positive feedback from upstream.
+            // clamp(0.0, 4.0) sanitizes any NaN from upstream temperature (see guard doc).
+            let temp = temp_in.map(|t| t[k].abs().clamp(0.0, 4.0)).unwrap_or(0.0);
+            let temp_scale = if temp > temp_gate { 1.0 + (temp - temp_gate) } else { 1.0 };
+
+            let target = centered * amount * temp_scale;
+            lp_step(&mut drift_env[k], target, alpha);
+
+            // Multiplicative gain: drift_env is a signed fractional offset around 1.0.
+            let g = (1.0 + drift_env[k]).max(0.0);
+            let dry = bins[k];
+            let wet = dry * g;
+            let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+            bins[k] = dry * (1.0 - mix) + wet * mix;
+        }
+    }
+
+    // --- Pass 2: write temperature — drift activity heats bins (positive feedback). ---
+    // `0.99` decay keeps the temperature from growing without bound; `clamp(0, 10)`
+    // caps runaway in case many active bins all contribute simultaneously.
+    if let Some(temp_out) = temperature.as_deref_mut() {
+        for k in 0..num_bins {
+            let activity = drift_env[k].abs() * 0.1;
+            temp_out[k] = (temp_out[k] * 0.99 + activity).clamp(0.0, 10.0);
+        }
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 /// Per-channel power-sag envelope — energy rises above threshold drive a scalar
@@ -431,6 +522,7 @@ pub enum CircuitMode {
     Vactrol,
     TransformerSaturation,
     PowerSag,
+    ComponentDrift,
 }
 
 impl Default for CircuitMode {
@@ -455,6 +547,11 @@ pub struct CircuitModule {
     // Power Sag state: per-channel scalar sag depth + per-bin smoothed gain reduction.
     sag_envelope:     [f32; 2],
     sag_gain_reduction: [Vec<f32>; 2],
+    // Component Drift state: per-bin smoothed drift offset + per-channel LFSR.
+    // `drift_rng` is NOT reset on FFT-size change — preserves the pseudo-random
+    // trajectory across host-driven size switches so the drift doesn't restart audibly.
+    drift_env: [Vec<f32>; 2],
+    drift_rng: [crate::dsp::circuit_kernels::SimdRng; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -477,6 +574,11 @@ impl CircuitModule {
             xfmr_workspace: [Vec::new(), Vec::new()],
             sag_envelope:      [0.0, 0.0],
             sag_gain_reduction: [Vec::new(), Vec::new()],
+            drift_env: [Vec::new(), Vec::new()],
+            drift_rng: [
+                crate::dsp::circuit_kernels::SimdRng::new(0xACED_DEAD),
+                crate::dsp::circuit_kernels::SimdRng::new(0xFEED_FACE),
+            ],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -513,6 +615,11 @@ impl CircuitModule {
                 for v in self.sag_gain_reduction[ch].iter_mut() {
                     *v = 1.0;
                 }
+                for v in self.drift_env[ch].iter_mut() {
+                    *v = 0.0;
+                }
+                // drift_rng is intentionally left intact: preserving the LFSR state
+                // across mode changes avoids an audible restart of the drift trajectory.
             }
         }
     }
@@ -610,6 +717,27 @@ impl SpectralModule for CircuitModule {
                     hop_dt,
                 );
             }
+            CircuitMode::ComponentDrift => {
+                // As a writer slot, `physics = Some(&mut mix_phys)` from FxMatrix;
+                // `ctx.bin_physics = None`. We read temperature (pass 1: hot-bin scale)
+                // and write updated temperature (pass 2: drift activity heats bins)
+                // through a single `Option<&mut [f32]>` to avoid a borrow-checker split
+                // on the same Vec — mirrors the `apply_transformer` writer-slot pattern.
+                let nb = ctx.num_bins;
+                let temperature: Option<&mut [f32]> = if let Some(bp) = physics {
+                    if bp.temperature.len() >= nb { Some(&mut bp.temperature[..nb]) } else { None }
+                } else {
+                    None
+                };
+                apply_component_drift(
+                    &mut bins[..nb],
+                    &mut self.drift_env[channel][..nb],
+                    &mut self.drift_rng[channel],
+                    temperature,
+                    curves,
+                    hop_dt,
+                );
+            }
         }
 
         for s in suppression_out.iter_mut() {
@@ -648,6 +776,9 @@ impl SpectralModule for CircuitModule {
             self.sag_envelope[ch] = 0.0;
             self.sag_gain_reduction[ch].clear();
             self.sag_gain_reduction[ch].resize(num_bins, 1.0); // 1.0 = no reduction
+            self.drift_env[ch].clear();
+            self.drift_env[ch].resize(num_bins, 0.0);
+            // drift_rng is NOT reset on FFT-size change (preserves LFSR trajectory).
         }
     }
 
@@ -681,6 +812,8 @@ pub struct CircuitProbe {
     pub xfmr_lp_avg:      f32,
     /// Per-channel scalar sag depth. Non-zero only in `PowerSag` mode.
     pub sag_envelope:     f32,
+    /// Mean absolute drift offset across all bins. Non-zero only in `ComponentDrift` mode.
+    pub drift_env_avg:    f32,
 }
 
 #[cfg(any(test, feature = "probe"))]
@@ -707,12 +840,21 @@ impl CircuitModule {
         } else {
             0.0
         };
+        let drift_env_avg = if self.mode == CircuitMode::ComponentDrift
+            && !self.drift_env[ch].is_empty()
+        {
+            self.drift_env[ch].iter().map(|v| v.abs()).sum::<f32>()
+                / self.drift_env[ch].len() as f32
+        } else {
+            0.0
+        };
         CircuitProbe {
             active_mode:      self.mode,
             vactrol_fast_avg: fa,
             vactrol_slow_avg: sa,
             xfmr_lp_avg,
             sag_envelope,
+            drift_env_avg,
         }
     }
 }

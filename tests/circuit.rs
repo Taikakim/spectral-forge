@@ -508,6 +508,47 @@ fn circuit_power_sag_recovers_when_energy_drops() {
 }
 
 #[test]
+fn circuit_component_drift_modulates_magnitudes_slowly() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::ComponentDrift);
+
+    let num_bins = 1025;
+    let amount  = vec![2.0_f32; num_bins]; // max drift
+    let thresh  = vec![0.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    let baseline = 1.0_f32;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(baseline, 0.0); num_bins];
+
+    let mut max_dev = 0.0_f32;
+    // With release=1: drift_tau=5 s, alpha≈0.00213/hop. Per-bin drift_env grows as a
+    // random walk: std ≈ alpha * amount_scale * sqrt(N). After 500 hops across 1025 bins
+    // the maximum deviation comfortably exceeds the 0.005 bound (analytical std ≈ 0.0057).
+    for _ in 0..500 {
+        for b in bins.iter_mut() { *b = Complex::new(baseline, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+        for b in &bins {
+            let dev = (b.norm() - baseline).abs();
+            if dev > max_dev { max_dev = dev; }
+        }
+    }
+    // ±1 dB ≈ 12% magnitude swing. Deviation should reach a few percent within 500 hops.
+    assert!(max_dev > 0.005, "drift should reach measurable deviation (got {})", max_dev);
+    assert!(max_dev < 0.5,   "drift should remain bounded (got {})", max_dev);
+}
+
+#[test]
 fn circuit_vactrol_finite_after_long_run() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
