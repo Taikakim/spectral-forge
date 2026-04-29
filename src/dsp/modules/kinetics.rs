@@ -122,6 +122,34 @@ const THERMAL_DETUNE_HZ_PER_TEMP: f32 = 5.0;
 /// `p.temperature[k] = (1 - BLEND) * p.temperature[k] + BLEND * temp[k]`.
 const THERMAL_PHYSICS_BLEND: f32 = 0.5;
 
+// ── TuningFork kernel constants ───────────────────────────────────────────────
+
+/// Minimum bin magnitude for a peak candidate to register as a tuning fork.
+/// Bins below this threshold are too quiet to act as resonance drivers.
+const TUNING_FORK_MIN_MAG: f32 = 0.5;
+/// STRENGTH curve must exceed this value at a peak bin for it to register as a fork.
+/// At neutral STRENGTH=1.0 forks are suppressed; user must raise STRENGTH above 1.5
+/// to activate sympathetic modulation at a given frequency region.
+const TUNING_FORK_STRENGTH_THRESHOLD: f32 = 1.5;
+/// STRENGTH curve upper clamp for modulation depth computation.
+/// `modulation_depth = (STRENGTH.clamp(0, STRENGTH_MAX) - 1.0).max(0) * DEPTH_SCALE`.
+const TUNING_FORK_STRENGTH_MAX: f32 = 2.0;
+/// REACH curve upper clamp. Maps REACH (neutral=1.0) to a maximum of 4.0 bin-radius-units.
+const TUNING_FORK_REACH_CLAMP_HI: f32 = 4.0;
+/// Scale from REACH value to reach in bins: `reach_bins = (REACH * REACH_BIN_SCALE).round()`.
+/// At neutral REACH=1.0 → 8 bins radius; at max REACH=4.0 → 32 bins radius.
+const TUNING_FORK_REACH_BIN_SCALE: f32 = 8.0;
+/// Converts (STRENGTH − 1.0) excess to phase modulation depth per unit carrier.
+/// `modulation_depth = (strength - 1.0) * DEPTH_SCALE`. Tuned so that at STRENGTH=2.0
+/// (maximum) the per-neighbour phase excursion stays within ±0.4 rad per hop.
+const TUNING_FORK_DEPTH_SCALE: f32 = 0.4;
+/// Minimum fractional phase advance per hop for the fork carrier.
+/// When `phase_advance rem_euclid(2π)` is exactly zero (bin at an integer-overlap-multiple
+/// frequency), the carrier stalls. Adding this tiny nudge — one quarter of the golden
+/// angle divided by MAX_TUNING_FORKS — prevents degeneracy without audibly colouring the
+/// modulation rate. Each fork gets a distinct nudge via `fork_idx * NUDGE`.
+const TUNING_FORK_CARRIER_NUDGE: f32 = 0.02439_f32; // ≈ π*(√5−1)/2 / MAX_TUNING_FORKS
+
 // ── State structs ──────────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "probe"))]
@@ -863,17 +891,100 @@ impl KineticsModule {
     }
 
     /// Tuning fork resonance — sympathetic frequency clusters.
-    /// Reads dry mag from `self.dry_mag_scratch[channel]`. Implemented in Task 11.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// Each hop:
+    /// 1. Re-detect local-magnitude peaks that exceed `TUNING_FORK_MIN_MAG` and have
+    ///    STRENGTH-curve value > `TUNING_FORK_STRENGTH_THRESHOLD`, spaced at least
+    ///    `TUNING_FORK_MIN_SEP` bins apart, up to `MAX_TUNING_FORKS` (16) total.
+    /// 2. For each detected fork at bin `kf` with frequency `freq`, advance a per-bin
+    ///    phase carrier in `displacement[side]` by `2π·freq·dt` for every neighbour bin
+    ///    `side` within `reach_bins` radius, then apply `sin(carrier)` phase rotation
+    ///    scaled by `modulation_depth · (1/distance) · mix`.
+    ///
+    /// No allocation, no probe write (probe gathered in `process()` Step 6).
     fn apply_tuning_fork(
         &mut self,
-        _channel: usize,
-        _bins: &mut [Complex<f32>],
-        _dt: f32,
-        _num_bins: usize,
+        channel: usize,
+        bins: &mut [Complex<f32>],
+        dt: f32,
+        num_bins: usize,
         _physics: Option<&BinPhysics>,
     ) {
-        // Implemented in Task 11.
+        use std::f32::consts::PI;
+
+        // Hoist curve slice refs before any &mut borrows.
+        let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
+        let reach_curve    = &self.smoothed_curves[channel][2][..num_bins];
+        let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
+
+        // -- 1. Re-detect forks each hop: loud peaks above threshold, with min separation. --
+        self.tuning_forks[channel].clear();
+        let mut last_pick: isize = -(TUNING_FORK_MIN_SEP as isize) - 1;
+        for k in 1..(num_bins - 1) {
+            let m = bins[k].norm();
+            if m < TUNING_FORK_MIN_MAG { continue; }
+            // STRENGTH-curve gating: only bins where STRENGTH is elevated register as forks.
+            if strength_curve[k] < TUNING_FORK_STRENGTH_THRESHOLD { continue; }
+            if m > bins[k - 1].norm() && m > bins[k + 1].norm()
+                && (k as isize - last_pick) >= TUNING_FORK_MIN_SEP as isize
+            {
+                // Convert bin index to Hz using actual sample rate / fft size.
+                let freq = (k as f32) * (self.sample_rate / self.fft_size as f32);
+                if self.tuning_forks[channel].len() < MAX_TUNING_FORKS {
+                    self.tuning_forks[channel].push((k, freq));
+                    last_pick = k as isize;
+                }
+            }
+        }
+
+        if self.tuning_forks[channel].is_empty() { return; }
+
+        // -- 2. For each fork, modulate phase of bins within REACH by sin(carrier). --
+        //    One carrier per fork, stored in displacement[kf] and advanced once per hop.
+        //    Phase advance = 2π·k/overlap (fractional cycles). When k is an integer
+        //    multiple of the overlap (e.g. k=300, overlap=4 → exactly 75 full cycles),
+        //    the advance rem_euclid(2π) is zero and the carrier would stall. A small
+        //    per-fork nudge (TUNING_FORK_CARRIER_NUDGE × fork_idx) prevents this without
+        //    audibly colouring the modulation rate.
+        //    SmallVec stack-only clone (capacity = MAX_TUNING_FORKS = 16) — no heap alloc.
+        let forks = self.tuning_forks[channel].clone();
+        let displacement = &mut self.displacement[channel][..num_bins];
+
+        for (fork_idx, (kf, freq)) in forks.iter().enumerate() {
+            let kf = *kf;
+            let freq = *freq;
+            let reach_bins = (reach_curve[kf].clamp(0.1, TUNING_FORK_REACH_CLAMP_HI)
+                              * TUNING_FORK_REACH_BIN_SCALE)
+                             .round() as usize;
+            let modulation_depth = (strength_curve[kf]
+                                        .clamp(0.0, TUNING_FORK_STRENGTH_MAX) - 1.0)
+                                   .max(0.0) * TUNING_FORK_DEPTH_SCALE;
+            // Carrier phase advance: fractional-cycle part of 2π·freq·dt, plus nudge to
+            // prevent stall when freq·dt is an integer (bin at integer-overlap-multiple).
+            let raw_advance = (2.0 * PI * freq * dt).rem_euclid(2.0 * PI);
+            // Index is 1-based so even the first fork gets a non-zero nudge.
+            let nudge = TUNING_FORK_CARRIER_NUDGE * (fork_idx + 1) as f32;
+            let phase_advance = raw_advance + nudge;
+            // Advance the fork's own carrier (displacement[kf]) once per hop; wrap to (−π, π].
+            displacement[kf] = (displacement[kf] + phase_advance).rem_euclid(2.0 * PI) - PI;
+            let carrier_sin = displacement[kf].sin();
+
+            for d in 1..=reach_bins {
+                let weight = 1.0 / d as f32;
+                // Process both sides: bin at kf+d and bin at kf-d (saturating sub guards ≥0).
+                let sides = [kf.saturating_add(d), kf.saturating_sub(d)];
+                for side in sides {
+                    if side >= num_bins { continue; }
+                    let mix = mix_curve[side].clamp(0.0, 1.0);
+                    let dphi = modulation_depth * weight * carrier_sin * mix;
+                    let (c, s) = (dphi.cos(), dphi.sin());
+                    let re = bins[side].re * c - bins[side].im * s;
+                    let im = bins[side].re * s + bins[side].im * c;
+                    bins[side].re = re;
+                    bins[side].im = im;
+                }
+            }
+        }
     }
 
     /// Diamagnet — repulsion from high-magnitude neighbours + jitter.

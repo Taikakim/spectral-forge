@@ -2051,3 +2051,52 @@ fn kinetics_thermal_expansion_heats_then_detunes() {
     // All bins must remain finite.
     for b in &bins { assert!(b.norm().is_finite()); }
 }
+
+#[test]
+fn kinetics_tuning_fork_modulates_neighbour_phase() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use realfft::num_complex::Complex;
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::TuningFork);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.01, 0.0); num_bins];
+    bins[300] = Complex::new(5.0, 0.0); // loud peak (will become a fork)
+    bins[298] = Complex::new(0.4, 0.0); // neighbour — below TUNING_FORK_MIN_MAG (0.5) so not a fork
+    bins[302] = Complex::new(0.4, 0.0); // neighbour — below TUNING_FORK_MIN_MAG (0.5) so not a fork
+
+    // Peak THRESHOLD via STRENGTH-curve baseline; here STRENGTH=2 (above 1.5 fork cutoff).
+    let strength = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    let dry_phase_l = bins[298].arg();
+    let dry_phase_r = bins[302].arg();
+
+    for _ in 0..30 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+
+    // Neighbours must show *some* phase movement (not necessarily aligned, just modulated).
+    let new_phase_l = bins[298].arg();
+    let new_phase_r = bins[302].arg();
+    assert!((new_phase_l - dry_phase_l).abs() > 0.005, "left neighbour phase did not modulate");
+    assert!((new_phase_r - dry_phase_r).abs() > 0.005, "right neighbour phase did not modulate");
+
+    // All bins must remain finite.
+    for b in &bins { assert!(b.norm().is_finite()); }
+}
