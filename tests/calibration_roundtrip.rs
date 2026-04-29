@@ -1313,6 +1313,307 @@ fn circuit_crossover_distortion_mix_max_probes_100_pct() {
 }
 
 #[test]
+fn circuit_vactrol_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::Vactrol);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "Vactrol AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_vactrol_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::Vactrol);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "Vactrol AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_vactrol_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::Vactrol);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "Vactrol MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_transformer_saturation_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::TransformerSaturation);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "TransformerSaturation AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_transformer_saturation_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::TransformerSaturation);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "TransformerSaturation AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_transformer_saturation_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::TransformerSaturation);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "TransformerSaturation MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_power_sag_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::PowerSag);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "PowerSag AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_power_sag_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::PowerSag);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "PowerSag AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_power_sag_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::PowerSag);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "PowerSag MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_component_drift_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::ComponentDrift);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "ComponentDrift AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_component_drift_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::ComponentDrift);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "ComponentDrift AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_component_drift_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::ComponentDrift);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "ComponentDrift MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_pcb_crosstalk_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::PcbCrosstalk);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "PcbCrosstalk AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_pcb_crosstalk_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::PcbCrosstalk);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "PcbCrosstalk AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_pcb_crosstalk_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::PcbCrosstalk);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "PcbCrosstalk MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_slew_distortion_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::SlewDistortion);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "SlewDistortion AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_slew_distortion_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::SlewDistortion);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "SlewDistortion AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_slew_distortion_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::SlewDistortion);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "SlewDistortion MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_bias_fuzz_amount_default_probes_50_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::BiasFuzz);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 1.0);   // AMOUNT is curves[0]
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 50.0).abs() < 2.0, "BiasFuzz AMOUNT=1.0 → 50%, got {}", observed);
+}
+
+#[test]
+fn circuit_bias_fuzz_amount_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::BiasFuzz);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 0, 2.0);
+    let observed = probe.amount_pct.expect("circuit must probe amount_pct");
+    assert!((observed - 100.0).abs() < 2.0, "BiasFuzz AMOUNT=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_bias_fuzz_mix_max_probes_100_pct() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+    let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
+    m.set_circuit_mode(CircuitMode::BiasFuzz);
+    let nc = m.num_curves();
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
+    let observed = probe.mix_pct.expect("circuit must probe mix_pct");
+    assert!((observed - 100.0).abs() < 2.0, "BiasFuzz MIX=2.0 → 100%, got {}", observed);
+}
+
+#[test]
+fn circuit_probe_state_accumulates_per_mode_physics() {
+    use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let num_bins = 1025;
+
+    for mode in [
+        CircuitMode::Vactrol,
+        CircuitMode::TransformerSaturation,
+        CircuitMode::PowerSag,
+        CircuitMode::ComponentDrift,
+        CircuitMode::BiasFuzz,
+    ] {
+        let mut module = CircuitModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_circuit_mode(mode);
+
+        let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.7, 0.0); num_bins];
+        let amount  = vec![1.5_f32; num_bins];
+        let thresh  = vec![1.0_f32; num_bins];
+        let spread  = vec![0.5_f32; num_bins];
+        let release = vec![1.0_f32; num_bins];
+        let mix     = vec![1.0_f32; num_bins];
+        let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+        let mut suppression = vec![0.0_f32; num_bins];
+        let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+
+        for _ in 0..30 {
+            for b in bins.iter_mut() { *b = Complex::new(0.7, 0.0); }
+            module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                           &mut bins, None, &curves, &mut suppression, None, &ctx);
+        }
+
+        let probe = module.probe_state(0);
+        assert_eq!(probe.active_mode, mode);
+
+        // Mode-specific physics field assertions.
+        match mode {
+            CircuitMode::Vactrol => {
+                // With physics: None, kernel falls back to dry.norm() drive ≈ 0.7;
+                // slow cap charges toward this. After 30 hops it should be > 0.
+                assert!(probe.vactrol_slow_avg > 0.0,
+                    "Vactrol slow cap should charge from fallback drive (got {})", probe.vactrol_slow_avg);
+            }
+            CircuitMode::TransformerSaturation => {
+                // xfmr_lp tracks magnitude over time → > 0 after 30 hops.
+                assert!(probe.xfmr_lp_avg > 0.0,
+                    "Transformer mag LP should accumulate (got {})", probe.xfmr_lp_avg);
+            }
+            CircuitMode::PowerSag => {
+                // sag_envelope is finite and non-negative.
+                assert!(probe.sag_envelope.is_finite() && probe.sag_envelope >= 0.0,
+                    "PowerSag envelope must be finite & non-negative (got {})", probe.sag_envelope);
+            }
+            CircuitMode::ComponentDrift => {
+                // drift_env_avg is finite (may be ~0 if drift hasn't accumulated).
+                assert!(probe.drift_env_avg.is_finite(),
+                    "ComponentDrift env must be finite (got {})", probe.drift_env_avg);
+            }
+            CircuitMode::BiasFuzz => {
+                // bias_lp tracks input magnitude → > 0 with sustained 0.7 input.
+                assert!(probe.bias_lp_avg > 0.0,
+                    "BiasFuzz env should build under sustained input (got {})", probe.bias_lp_avg);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
 fn bin_physics_round_trip_stub() {
     // Phase 5 modules (Life, Kinetics) will fill this in:
     //   1. Set the relevant curve to a known value.
