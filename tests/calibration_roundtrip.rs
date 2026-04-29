@@ -1562,8 +1562,11 @@ fn circuit_probe_state_accumulates_per_mode_physics() {
         module.set_circuit_mode(mode);
 
         let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.7, 0.0); num_bins];
+        // thresh = 0.5: must be < input mag (0.7) so PowerSag's drive
+        // `(energy_norm - thresh).max(0.0) * amount` > 0. With thresh ≥ 0.7 the
+        // sag envelope stays at 0 and any assertion on it would be vacuously true.
         let amount  = vec![1.5_f32; num_bins];
-        let thresh  = vec![1.0_f32; num_bins];
+        let thresh  = vec![0.5_f32; num_bins];
         let spread  = vec![0.5_f32; num_bins];
         let release = vec![1.0_f32; num_bins];
         let mix     = vec![1.0_f32; num_bins];
@@ -1571,7 +1574,12 @@ fn circuit_probe_state_accumulates_per_mode_physics() {
         let mut suppression = vec![0.0_f32; num_bins];
         let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
 
-        for _ in 0..30 {
+        // 200 hops: ComponentDrift's per-bin LP has tau ≈ 5 s at release=1.0
+        // (alpha ≈ 0.0021), so at 30 hops drift_env mean abs is ~0.001 — close
+        // enough to zero that an assertion has to choose between strict (flaky)
+        // or vacuous. 200 hops settles every mode into a clearly-detectable
+        // steady state while staying within their bounded ranges.
+        for _ in 0..200 {
             for b in bins.iter_mut() { *b = Complex::new(0.7, 0.0); }
             module.process(0, StereoLink::Linked, FxChannelTarget::All,
                            &mut bins, None, &curves, &mut suppression, None, &ctx);
@@ -1580,34 +1588,47 @@ fn circuit_probe_state_accumulates_per_mode_physics() {
         let probe = module.probe_state(0);
         assert_eq!(probe.active_mode, mode);
 
-        // Mode-specific physics field assertions.
+        // Mode-specific physics field assertions: each requires the kernel to
+        // have actually accumulated state, so removing the kernel's update would
+        // fail the assertion (no vacuous-truth passes).
         match mode {
             CircuitMode::Vactrol => {
                 // With physics: None, kernel falls back to dry.norm() drive ≈ 0.7;
-                // slow cap charges toward this. After 30 hops it should be > 0.
+                // slow cap charges toward this through the fast cap.
                 assert!(probe.vactrol_slow_avg > 0.0,
                     "Vactrol slow cap should charge from fallback drive (got {})", probe.vactrol_slow_avg);
             }
             CircuitMode::TransformerSaturation => {
-                // xfmr_lp tracks magnitude over time → > 0 after 30 hops.
+                // xfmr_lp tracks magnitude over time → > 0 after 200 hops.
                 assert!(probe.xfmr_lp_avg > 0.0,
                     "Transformer mag LP should accumulate (got {})", probe.xfmr_lp_avg);
             }
             CircuitMode::PowerSag => {
-                // sag_envelope is finite and non-negative.
-                assert!(probe.sag_envelope.is_finite() && probe.sag_envelope >= 0.0,
-                    "PowerSag envelope must be finite & non-negative (got {})", probe.sag_envelope);
+                // energy_norm = 0.7 (input mag) > thresh (0.5), so drive =
+                // (0.7 - 0.5) * amount * 0.5 = 0.15. Sag env charges toward this
+                // on the 50 ms attack (near-instant at hop_dt ≈ 10.67 ms).
+                assert!(probe.sag_envelope > 0.0,
+                    "PowerSag envelope should charge above-threshold (got {})", probe.sag_envelope);
             }
             CircuitMode::ComponentDrift => {
-                // drift_env_avg is finite (may be ~0 if drift hasn't accumulated).
-                assert!(probe.drift_env_avg.is_finite(),
-                    "ComponentDrift env must be finite (got {})", probe.drift_env_avg);
+                // Per-bin LP averages random targets. Steady-state mean abs ≈
+                // 0.00135 (analytical: target var ≈ 0.0027, alpha ≈ 0.0021).
+                // 1e-5 is two orders below the analytical mean — passes today
+                // and trips if a regression freezes alpha to 0 or stops the LFSR.
+                assert!(
+                    probe.drift_env_avg.is_finite() && probe.drift_env_avg.abs() > 1e-5,
+                    "ComponentDrift env should accumulate per-bin random walk (got {})",
+                    probe.drift_env_avg,
+                );
             }
             CircuitMode::BiasFuzz => {
                 // bias_lp tracks input magnitude → > 0 with sustained 0.7 input.
                 assert!(probe.bias_lp_avg > 0.0,
                     "BiasFuzz env should build under sustained input (got {})", probe.bias_lp_avg);
             }
+            // The loop's mode list contains only the 5 physics-state modes
+            // above; the wildcard exists solely because match arms over
+            // CircuitMode must be exhaustive across all 10 variants.
             _ => {}
         }
     }
