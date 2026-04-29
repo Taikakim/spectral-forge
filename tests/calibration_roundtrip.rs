@@ -1471,3 +1471,116 @@ fn modulate_pll_tear_probe_reports_lock_percentage() {
     assert_eq!(probe.mod_gp_repel,         None);
     assert_eq!(probe.mod_gp_sc_positioned, None);
 }
+
+/// Phase 5b4.11 — PLL Tear honours ctx.unwrapped_phase when provided.
+///
+/// Setup A (local unwrap): bins with phase > PLL_TEAR_THRESHOLD (π/2) cause the
+/// PLL to start torn. The local unwrap correctly reports the large phase, and the
+/// PLL integrator needs several hops to converge before it can re-lock.
+///
+/// Setup B (PLPV): the same bins are processed, but ctx.unwrapped_phase provides
+/// 0.0 for every bin — meaning the PLL target == pll_phase (both zero-init) →
+/// error == 0 from hop 0. All bins stay locked throughout the run.
+///
+/// We run 10 hops, short enough that setup A's PLL (settling time ≈ 14 hops)
+/// cannot fully reconverge, but long enough to confirm setup B holds 100% lock.
+#[test]
+fn modulate_pll_tear_uses_provided_unwrapped_phase_when_available() {
+    use std::cell::Cell;
+    use std::f32::consts::PI;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    // bins whose phase (≈ 0.6π ≈ 1.885 rad) exceeds the PLL tear threshold (π/2).
+    // Using a consistent non-zero im/re so arg() > PLL_TEAR_THRESHOLD for every bin.
+    let phase_angle = 0.6 * PI;
+    let bins_template: Vec<Complex<f32>> = (0..NUM_BINS)
+        .map(|_| Complex::new(phase_angle.cos() * 0.5, phase_angle.sin() * 0.5))
+        .collect();
+
+    let amount  = vec![1.0_f32; NUM_BINS];
+    let neutral = vec![1.0_f32; NUM_BINS];
+    let zeros   = vec![0.0_f32; NUM_BINS];
+    let mix     = vec![1.0_f32; NUM_BINS];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    /// Run `provide_unwrapped` selects the path:
+    ///   false → ctx.unwrapped_phase = None  (local-unwrap fallback)
+    ///   true  → ctx.unwrapped_phase = Some([0.0; NUM_BINS])  (PLPV with zero target)
+    ///
+    /// Returns the mod_pll_lock_pct probe value after NUM_HOPS hops.
+    fn run(
+        bins_template: &[Complex<f32>],
+        curves: &[&[f32]],
+        provide_unwrapped: bool,
+    ) -> f32 {
+        const NUM_HOPS: usize = 10;
+
+        let mut module = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+        module.set_modulate_mode(ModulateMode::PllTear);
+
+        let mut bins: Vec<Complex<f32>> = bins_template.to_vec();
+        let mut suppression = vec![0.0_f32; NUM_BINS];
+        let mut physics = BinPhysics::new();
+        physics.reset_active(NUM_BINS, SAMPLE_RATE, FFT_SIZE);
+
+        // PLPV: all-zero target so PLL sees zero error from hop 0 (pll_phase inits to 0).
+        let unwrapped_cells: Vec<Cell<f32>> = vec![Cell::new(0.0_f32); NUM_BINS];
+
+        let mut ctx = ModuleContext::new(
+            SAMPLE_RATE, FFT_SIZE, NUM_BINS,
+            10.0, 100.0, 1.0,
+            1.0, false, false,
+        );
+        if provide_unwrapped {
+            ctx.unwrapped_phase = Some(&unwrapped_cells[..]);
+        }
+
+        for _ in 0..NUM_HOPS {
+            // Restore bins to template each hop — steady-state input.
+            bins.copy_from_slice(bins_template);
+            module.process(
+                0,
+                StereoLink::Linked,
+                FxChannelTarget::All,
+                &mut bins,
+                None,
+                curves,
+                &mut suppression,
+                Some(&mut physics),
+                &ctx,
+            );
+        }
+
+        module.last_probe()
+            .mod_pll_lock_pct
+            .expect("mod_pll_lock_pct must be Some when mode is PllTear")
+    }
+
+    let lock_a = run(&bins_template, &curves, false);
+    let lock_b = run(&bins_template, &curves, true);
+
+    println!("lock_a (local-unwrap) = {:.1}%", lock_a);
+    println!("lock_b (PLPV-fed)     = {:.1}%", lock_b);
+
+    assert!(lock_a >= 0.0 && lock_a <= 100.0, "lock_a out of range: {}", lock_a);
+    assert!(lock_b >= 0.0 && lock_b <= 100.0, "lock_b out of range: {}", lock_b);
+
+    // PLPV provides a zero-phase target matching the PLL's zero-init state → zero
+    // error from hop 0 → all bins stay locked. Local-unwrap reports the large bin
+    // phase (≈ 0.6π > π/2 tear threshold) as the PLL target on hop 0, triggering
+    // tears that need ~14 hops to reconverge — so lock_a is meaningfully lower
+    // after only 10 hops.
+    assert!(
+        lock_b >= 90.0,
+        "PLPV-fed path should be near-fully locked (lock_b={:.1}%)",
+        lock_b,
+    );
+    assert!(
+        lock_b >= lock_a + 20.0,
+        "PLPV-fed path should lock significantly faster than local-unwrap \
+         (lock_b={:.1}% lock_a={:.1}%)",
+        lock_b, lock_a,
+    );
+}
