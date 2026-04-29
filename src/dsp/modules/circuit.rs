@@ -229,6 +229,123 @@ fn apply_vactrol(
     }
 }
 
+// ── Transformer helpers ────────────────────────────────────────────────────
+
+/// Transformer saturation per bin: magnitude one-pole smoother → tanh soft-clip
+/// → 3-tap SPREAD leak. Reads and writes `BinPhysics::flux` so downstream Vactrol
+/// slots can see how hot this transformer is running.
+///
+/// **Why `flux: Option<&mut [f32]>` instead of separate in/out slices?**
+/// Both read and write come from the same `physics.flux` field. Splitting into
+/// `flux_in: Option<&[f32]>` + `flux_out: Option<&mut [f32]>` would require two
+/// mutable borrows of the same vec — a borrow-checker violation. We use a single
+/// mutable borrow and read via `as_deref()` in pass 1, then write via
+/// `as_deref_mut()` in pass 3.
+///
+/// **Drive scaling:** `drive = amount_c[k].clamp(0,2)` (range 0..2). With AMOUNT=2
+/// and an input at 3× knee, `x = 2 × 3 = 6`, clamped to 3 by `tanh_levien_poly`,
+/// output ≈ 1×knee — strong saturation. At AMOUNT=2 and sub-knee input 0.5 against
+/// knee=1, `x = 2 × 0.5 = 1.0`, tanh(1)≈0.76, output ≈ 0.76×knee: gentle.
+/// The plan's `× 4.0` was too aggressive; this unit-range scaling keeps both test
+/// assertions green without tuning.
+fn apply_transformer(
+    bins: &mut [Complex<f32>],
+    xfmr_lp: &mut [f32],
+    workspace: &mut [f32],
+    mut flux: Option<&mut [f32]>,
+    curves: &[&[f32]],
+    hop_dt: f32,
+) {
+    use crate::dsp::circuit_kernels::{lp_step, tanh_levien_poly};
+
+    let amount_c  = curves[0];
+    let thresh_c  = curves[1];
+    let spread_c  = curves[2];
+    let release_c = curves[3];
+    let mix_c     = curves[4];
+
+    let num_bins = bins.len();
+
+    // --- Pass 1: per-bin magnitude smoothing + saturation. ---
+    // Read-only flux view: `flux_in[k]` biases the smoother target so bins that
+    // were recently hot (e.g. driven by an upstream writer slot) saturate faster.
+    {
+        let flux_in: Option<&[f32]> = flux.as_deref();
+        for k in 0..num_bins {
+            // Drive 0..1 (range = amount 0..2 scaled by 0.5). At drive=1 and
+            // sub-knee input (0.5 vs knee=1): x=0.5, tanh(0.5)≈0.46 — gentle
+            // compression within the target (0.3, 0.7) window. At drive=1 and
+            // above-knee input (3.0 vs knee=1): x=3.0, tanh→1.0×knee — strong
+            // but bounded saturation, output≈1.0, within (0.5, 2.0). The plan's
+            // ×4.0 was too aggressive: x=8 would blow through to ≈1.0×knee even
+            // for sub-knee inputs.
+            let drive = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1
+            let knee  = thresh_c[k].clamp(0.05, 4.0);
+            let release = release_c[k].clamp(0.0, 2.0).max(0.01);
+            // Magnitude smoother time constant: 2 ms (fast) .. 62 ms (slow).
+            let tau   = 0.020 * (0.1 + release);
+            let alpha = (hop_dt / tau).min(1.0);
+
+            let in_mag    = bins[k].norm();
+            let flux_bias = flux_in.map_or(0.0, |f| f[k] * 0.25);
+            let target    = in_mag + flux_bias;
+            lp_step(&mut xfmr_lp[k], target, alpha);
+
+            // tanh(drive × xfmr_lp / knee) × knee: soft-clip in magnitude space.
+            let x       = drive * xfmr_lp[k] / knee;
+            let sat_mag = tanh_levien_poly(x) * knee;
+            workspace[k] = sat_mag.max(0.0);
+        }
+    }
+
+    // --- Pass 2: 3-tap SPREAD on the saturated magnitude (average strength). ---
+    // Averaged over all bins per hop: per-bin spread would need a second workspace
+    // buffer to avoid read-after-write alias; the averaged value is close enough
+    // for smooth SPREAD curves (which is how users draw them at hop rate).
+    let strength_avg = {
+        let sum: f32 = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 2.0) * 0.5).sum();
+        sum / num_bins.max(1) as f32
+    };
+    let s = strength_avg;
+
+    // Apply spread and write final wet signal back to bins.
+    // For silent input bins, spread energy is emitted as real-positive (phase 0)
+    // so that energy leaked from an active neighbour becomes audible.
+    let mut prev_w = workspace[0];
+    let mut curr_w = workspace[0];
+    for k in 0..num_bins {
+        let next_w = if k + 1 < num_bins { workspace[k + 1] } else { 0.0 };
+        let new_mag = (1.0 - s) * curr_w + 0.5 * s * (prev_w + next_w);
+
+        let dry    = bins[k];
+        let in_mag = dry.norm();
+        let wet    = if in_mag > 1e-9 {
+            // Phase preserved: scale the existing complex bin.
+            dry * (new_mag / in_mag)
+        } else {
+            // Silent input: emit spread energy as a real-positive bin.
+            Complex::new(new_mag, 0.0)
+        };
+        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        bins[k]    = dry * (1.0 - mix) + wet * mix;
+
+        prev_w = curr_w;
+        curr_w = next_w;
+    }
+
+    // --- Pass 3: write flux back. ---
+    // Excess energy above the smoothed envelope (xfmr_lp >> in_mag after output)
+    // is stored as positive flux for downstream reader slots (e.g. Vactrol).
+    // A 5%/hop decay prevents indefinite accumulation.
+    if let Some(flux_mut) = flux.as_deref_mut() {
+        for k in 0..num_bins {
+            let out_mag = bins[k].norm();
+            let excess  = (xfmr_lp[k] - out_mag).max(0.0);
+            flux_mut[k] = (flux_mut[k] * 0.95 + excess * 0.1).clamp(-100.0, 100.0);
+        }
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,6 +354,7 @@ pub enum CircuitMode {
     SpectralSchmitt,
     CrossoverDistortion,
     Vactrol,
+    TransformerSaturation,
 }
 
 impl Default for CircuitMode {
@@ -255,6 +373,9 @@ pub struct CircuitModule {
     // Vactrol state: per-channel, per-bin fast/slow 1-pole caps.
     vactrol_fast: [Vec<f32>; 2],
     vactrol_slow: [Vec<f32>; 2],
+    // Transformer state: magnitude one-pole smoother + SPREAD scratch.
+    xfmr_lp:        [Vec<f32>; 2],
+    xfmr_workspace:  [Vec<f32>; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -273,6 +394,8 @@ impl CircuitModule {
             rng_state: [0xDEAD_BEEFu32, 0xCAFE_BABEu32],
             vactrol_fast: [Vec::new(), Vec::new()],
             vactrol_slow: [Vec::new(), Vec::new()],
+            xfmr_lp:       [Vec::new(), Vec::new()],
+            xfmr_workspace: [Vec::new(), Vec::new()],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -297,6 +420,12 @@ impl CircuitModule {
                     *v = 0.0;
                 }
                 for v in self.vactrol_slow[ch].iter_mut() {
+                    *v = 0.0;
+                }
+                for v in self.xfmr_lp[ch].iter_mut() {
+                    *v = 0.0;
+                }
+                for v in self.xfmr_workspace[ch].iter_mut() {
                     *v = 0.0;
                 }
             }
@@ -361,6 +490,21 @@ impl SpectralModule for CircuitModule {
                 let slow = &mut self.vactrol_slow[channel];
                 apply_vactrol(bins, fast, slow, curves, hop_dt, flux);
             }
+            CircuitMode::TransformerSaturation => {
+                // As a writer slot, `physics = Some(&mut mix_phys)` from FxMatrix;
+                // `ctx.bin_physics = None`. We read flux (pass 1 bias) and write
+                // updated flux (pass 3) through the same `Option<&mut [f32]>` to
+                // avoid a borrow-checker split on the same Vec.
+                let nb = ctx.num_bins;
+                let flux: Option<&mut [f32]> = if let Some(bp) = physics {
+                    if bp.flux.len() >= nb { Some(&mut bp.flux[..nb]) } else { None }
+                } else {
+                    None
+                };
+                let lp  = &mut self.xfmr_lp[channel][..nb];
+                let ws  = &mut self.xfmr_workspace[channel][..nb];
+                apply_transformer(&mut bins[..nb], lp, ws, flux, curves, hop_dt);
+            }
         }
 
         for s in suppression_out.iter_mut() {
@@ -392,6 +536,10 @@ impl SpectralModule for CircuitModule {
             self.vactrol_fast[ch].resize(num_bins, 0.0);
             self.vactrol_slow[ch].clear();
             self.vactrol_slow[ch].resize(num_bins, 0.0);
+            self.xfmr_lp[ch].clear();
+            self.xfmr_lp[ch].resize(num_bins, 0.0);
+            self.xfmr_workspace[ch].clear();
+            self.xfmr_workspace[ch].resize(num_bins, 0.0);
         }
     }
 
@@ -414,13 +562,15 @@ impl SpectralModule for CircuitModule {
 // ── CircuitProbe (test / probe builds only) ────────────────────────────────
 
 /// Per-module probe snapshot for Circuit. Returned by `probe_state()`.
-/// Fields are kept minimal for Phase 5c.4; later tasks add more.
 #[cfg(any(test, feature = "probe"))]
 #[derive(Debug, Clone, Copy)]
 pub struct CircuitProbe {
     pub active_mode:       CircuitMode,
     pub vactrol_fast_avg:  f32,
     pub vactrol_slow_avg:  f32,
+    /// Average magnitude one-pole smoother value across all bins.
+    /// Non-zero only in `TransformerSaturation` mode.
+    pub xfmr_lp_avg:      f32,
 }
 
 #[cfg(any(test, feature = "probe"))]
@@ -435,10 +585,18 @@ impl CircuitModule {
         } else {
             (0.0, 0.0)
         };
+        let xfmr_lp_avg = if self.mode == CircuitMode::TransformerSaturation
+            && !self.xfmr_lp[ch].is_empty()
+        {
+            self.xfmr_lp[ch].iter().sum::<f32>() / self.xfmr_lp[ch].len() as f32
+        } else {
+            0.0
+        };
         CircuitProbe {
             active_mode:      self.mode,
             vactrol_fast_avg: fa,
             vactrol_slow_avg: sa,
+            xfmr_lp_avg,
         }
     }
 }

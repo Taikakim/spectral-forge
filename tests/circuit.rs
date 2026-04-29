@@ -351,6 +351,86 @@ fn circuit_vactrol_smooths_flux_input_with_release_envelope() {
 }
 
 #[test]
+fn circuit_transformer_saturates_high_magnitudes_softly() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::TransformerSaturation);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(0.5, 0.0);  // sub-knee
+    bins[200] = Complex::new(3.0, 0.0);  // above knee — should saturate
+
+    // AMOUNT=2 (max drive), THRESHOLD=1 (knee at unity), SPREAD=0 (test isolation), RELEASE=1, MIX=2 wet.
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    // Several hops to let the magnitude smoother settle.
+    for _ in 0..40 {
+        bins[100] = Complex::new(0.5, 0.0);
+        bins[200] = Complex::new(3.0, 0.0);
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+
+    // Sub-knee bin: ~unchanged.
+    assert!(bins[100].norm() < 0.7 && bins[100].norm() > 0.3, "bin 100 sub-knee got {}", bins[100].norm());
+    // Above-knee bin: bounded well below input.
+    assert!(bins[200].norm() < 2.0, "bin 200 should saturate (got {})", bins[200].norm());
+    assert!(bins[200].norm() > 0.5, "bin 200 should not collapse to 0 (got {})", bins[200].norm());
+}
+
+#[test]
+fn circuit_transformer_spread_leaks_to_neighbours() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::TransformerSaturation);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[200] = Complex::new(3.0, 0.0);
+
+    // SPREAD = 2 (full leak), drive on, neighbours start at zero.
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![2.0_f32; num_bins]; // 1.0 leak strength after clamp/scale
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    // Settle several hops to let the magnitude smoother + spread reach steady state.
+    for _ in 0..20 {
+        bins[200] = Complex::new(3.0, 0.0);
+        bins[199] = Complex::new(0.0, 0.0);
+        bins[201] = Complex::new(0.0, 0.0);
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+
+    // Neighbours should have *non-zero* magnitude after the leak.
+    assert!(bins[199].norm() > 0.05, "bin 199 should receive leak (got {})", bins[199].norm());
+    assert!(bins[201].norm() > 0.05, "bin 201 should receive leak (got {})", bins[201].norm());
+}
+
+#[test]
 fn circuit_vactrol_finite_after_long_run() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
