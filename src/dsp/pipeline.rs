@@ -119,6 +119,12 @@ pub struct Pipeline {
     /// v1 always fills with zeros (IF == centre); replaced once Phase 4's
     /// per-channel IF lookup is plumbed in.
     if_offset_buf: Vec<f32>,
+    /// Per-channel scratch output for `compute_instantaneous_freq`. Sized at MAX_NUM_BINS.
+    /// Only populated when `any_needs_if` is true for the current block.
+    if_buffer: Vec<Vec<f32>>,
+    /// Previous-frame wrapped phase used by `compute_instantaneous_freq`. Independent of
+    /// PLPV's `prev_phase`. Sized at MAX_NUM_BINS. Reset to zero on `Pipeline::reset()`.
+    if_prev_phase: Vec<Vec<f32>>,
     sample_rate: f32,
     num_channels: usize,
 }
@@ -189,6 +195,10 @@ impl Pipeline {
             .collect();
         let if_offset_buf: Vec<f32> = vec![0.0; MAX_NUM_BINS];
 
+        // IF (instantaneous frequency) per-channel scratch buffers. Independent of PLPV.
+        let if_buffer:     Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+        let if_prev_phase: Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
+
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
             fft_plan,
@@ -220,6 +230,8 @@ impl Pipeline {
             history_depth_seconds,
             pending_hop_frames,
             if_offset_buf,
+            if_buffer,
+            if_prev_phase,
             sample_rate,
             fft_size,
             num_channels,
@@ -270,6 +282,8 @@ impl Pipeline {
         self.total_hops_per_ch = [0; 2];
         for v in &mut self.pending_hop_frames { for c in v { *c = Complex::new(0.0, 0.0); } }
         for v in &mut self.if_offset_buf { *v = 0.0; }
+        for v in &mut self.if_buffer     { v.fill(0.0); }
+        for v in &mut self.if_prev_phase { v.fill(0.0); }
         self.history.reset();
         self.fx_matrix.clear_state();
     }
@@ -318,6 +332,8 @@ impl Pipeline {
         self.total_hops_per_ch = [0; 2];
         for v in &mut self.pending_hop_frames { for c in v { *c = Complex::new(0.0, 0.0); } }
         for v in &mut self.if_offset_buf { *v = 0.0; }
+        for v in &mut self.if_buffer     { v.fill(0.0); }
+        for v in &mut self.if_prev_phase { v.fill(0.0); }
         // History Buffer: rebuild if the depth changed; otherwise reset in place.
         let new_capacity = {
             let hop = (fft_size / OVERLAP).max(1) as f32;
