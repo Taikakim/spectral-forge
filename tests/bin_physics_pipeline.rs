@@ -144,3 +144,134 @@ fn writer_sets_mass_then_reader_observes_it() {
         "MockReader at slot 1 should observe mass={TEST_MASS} written by MockWriter at slot 0; got {observed}"
     );
 }
+
+// ── phase_test_ctx helper ─────────────────────────────────────────────────────
+
+fn phase_test_ctx<'a>(
+    num_bins: usize,
+    bin_physics: Option<&'a BinPhysics>,
+) -> ModuleContext<'a> {
+    let mut ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+    ctx.bin_physics = bin_physics;
+    ctx
+}
+
+// ── Circuit BinPhysics integration tests ─────────────────────────────────────
+
+#[test]
+fn circuit_transformer_writes_flux_visible_to_next_slot() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::StereoLink;
+    use spectral_forge::params::FxChannelTarget;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::TransformerSaturation);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(3.0, 0.0); num_bins];
+
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    let ctx = phase_test_ctx(num_bins, None);
+
+    // Several hops to let xfmr_lp settle and accumulate flux.
+    for _ in 0..40 {
+        for b in bins.iter_mut() { *b = Complex::new(3.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    // Flux should have built up where the magnitude was saturating.
+    let total_flux: f32 = physics.flux[..num_bins].iter().sum();
+    assert!(total_flux > 0.5, "Transformer should write flux; total = {}", total_flux);
+}
+
+#[test]
+fn circuit_vactrol_reads_incoming_flux() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::dsp::modules::circuit::CircuitProbe;
+    use spectral_forge::params::StereoLink;
+    use spectral_forge::params::FxChannelTarget;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::Vactrol);
+
+    let num_bins = 1025;
+
+    let amount  = vec![1.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+    let mut suppression = vec![0.0_f32; num_bins];
+
+    // Build a physics view with a strong flux peak at bin 200.
+    let mut physics_view = BinPhysics::new();
+    physics_view.reset_active(num_bins, 48_000.0, 2048);
+    physics_view.flux[200] = 4.0;
+    let view_ref: &BinPhysics = &physics_view;
+
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); num_bins];
+
+    let ctx = phase_test_ctx(num_bins, Some(view_ref));
+
+    // Several hops: vactrol cap should charge primarily at bin 200 (high flux).
+    for _ in 0..50 {
+        for b in bins.iter_mut() { *b = Complex::new(0.5, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+
+    let probe: CircuitProbe = module.probe_state(0);
+    // The probe averages across all bins; with a single hot bin among 1025 the avg
+    // is small but should still be > 0 (the cap charges with flux drive).
+    assert!(probe.vactrol_slow_avg > 0.0, "vactrol should charge from incoming flux (avg={})", probe.vactrol_slow_avg);
+}
+
+#[test]
+fn circuit_bias_fuzz_roundtrips_bias_field() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::StereoLink;
+    use spectral_forge::params::FxChannelTarget;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::BiasFuzz);
+
+    let num_bins = 1025;
+
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![0.1_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+    let mut suppression = vec![0.0_f32; num_bins];
+
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    let ctx = phase_test_ctx(num_bins, None);
+
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(2.0, 0.0); num_bins];
+    for _ in 0..100 {
+        for b in bins.iter_mut() { *b = Complex::new(2.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    let total_bias: f32 = physics.bias[..num_bins].iter().sum();
+    assert!(total_bias > 0.5, "Bias Fuzz should write bias; total = {}", total_bias);
+}
