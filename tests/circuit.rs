@@ -92,7 +92,43 @@ fn circuit_slew_distortion_writes_bin_physics_slew() {
     }
 }
 
+#[test]
+fn circuit_bias_fuzz_clips_against_top_rail() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
 
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::BiasFuzz);
+
+    let num_bins = 1025;
+    // AMOUNT=2 (max clip), THRESHOLD=1.0 (top rail = 1.0), SPREAD=0, RELEASE=0.1 (fast bias env), MIX=2.
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![1.0_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![0.1_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    // Sustained loud input: builds bias envelope, clips top.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(2.0, 0.0); num_bins];
+    for _ in 0..100 {
+        for b in bins.iter_mut() { *b = Complex::new(2.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+
+    // Output bounded by ~top_rail.
+    for k in 0..num_bins {
+        assert!(bins[k].norm() < 1.5, "bin {} should be clipped (got {})", k, bins[k].norm());
+    }
+    let probe = module.probe_state(0);
+    assert!(probe.bias_lp_avg > 0.1, "bias env should build (got {})", probe.bias_lp_avg);
+}
 
 #[test]
 fn circuit_module_spec_present() {

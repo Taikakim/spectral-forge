@@ -648,6 +648,98 @@ fn apply_slew_distortion(
     }
 }
 
+// ── Bias Fuzz helpers ─────────────────────────────────────────────────────
+
+/// Per-bin DC offset envelope (1-pole magnitude LP) shifts the "zero point",
+/// clips top against `1.0 - bias` via tanh, with optional SPREAD bleed across
+/// neighbouring bins. Reads and writes `BinPhysics::bias`.
+///
+/// **Single `Option<&mut [f32]>` for both read and write:** both passes target
+/// the same `physics.bias` vec — splitting into `bias_in` + `bias_out` would
+/// require two mutable borrows of the same slice. We use `as_deref()` inside
+/// pass 1 and `as_deref_mut()` inside pass 2, matching `apply_transformer` and
+/// `apply_component_drift`.
+///
+/// **`.clamp(0.0, 10.0)` before `.max()`:** `f32::max(x, NaN)` propagates NaN
+/// (NaN >= any is false → returns NaN). `.clamp` routes NaN to the lower bound,
+/// isolating upstream NaN poison (see Phase 5c.6 fix in commit `b281d0a`).
+fn apply_bias_fuzz(
+    bins: &mut [Complex<f32>],
+    bias_lp: &mut [f32],
+    mut bias: Option<&mut [f32]>,
+    curves: &[&[f32]],
+    hop_dt: f32,
+) {
+    use crate::dsp::circuit_kernels::{lp_step, tanh_levien_poly};
+
+    let amount_c  = curves[0];
+    let thresh_c  = curves[1];
+    let spread_c  = curves[2];
+    let release_c = curves[3];
+    let mix_c     = curves[4];
+
+    let num_bins = bins.len();
+
+    // --- Pass 1: per-bin bias envelope update + asymmetric clip. ---
+    // Read-only bias view: seed each bin's LP from upstream bias if available.
+    {
+        let bias_in: Option<&[f32]> = bias.as_deref();
+        for k in 0..num_bins {
+            let amount   = amount_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1
+            let top_rail = thresh_c[k].clamp(0.05, 4.0);
+            let release  = release_c[k].clamp(0.0, 2.0).max(0.01);
+            // Bias envelope tau: 0.05..1.05 sec for release in [0.01, 2].
+            let tau   = 0.05 + 0.5 * release;
+            let alpha = (hop_dt / tau).min(1.0);
+
+            let in_mag = bins[k].norm();
+            // Seed LP from incoming bias (clamped first to sanitize NaN; then max).
+            let prev = match bias_in {
+                Some(b) => bias_lp[k].max(b[k].clamp(0.0, 10.0)),
+                None    => bias_lp[k],
+            };
+            bias_lp[k] = prev;
+            lp_step(&mut bias_lp[k], in_mag, alpha);
+
+            // Effective top rail shrinks with bias buildup.
+            let effective_top = (top_rail - bias_lp[k] * 0.5).max(0.05);
+            // Asymmetric clip: tanh against effective_top × scaled drive.
+            let drive   = (1.0 + amount * 4.0) / effective_top;
+            let new_mag = tanh_levien_poly(in_mag * drive) * effective_top;
+
+            let dry   = bins[k];
+            let scale = if in_mag > 1e-9 { new_mag / in_mag } else { 0.0 };
+            let wet   = dry * scale;
+            let mix   = mix_c[k].clamp(0.0, 2.0) * 0.5;
+            bins[k]   = dry * (1.0 - mix) + wet * mix;
+        }
+    }
+
+    // --- Pass 2: optional SPREAD — bleed bias to neighbours (single-pass rolling). ---
+    // This is one hop behind, matching the established pattern in apply_transformer
+    // (PCB Crosstalk and TransformerSat both use a workspace read before-write).
+    let spread_avg = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 2.0) * 0.5).sum::<f32>()
+        / num_bins.max(1) as f32;
+    if spread_avg > 0.001 && num_bins >= 3 {
+        let mut prev_b = bias_lp[0];
+        let mut curr_b = bias_lp[0];
+        for k in 0..num_bins {
+            let next_b = if k + 1 < num_bins { bias_lp[k + 1] } else { 0.0 };
+            let bleed  = 0.5 * spread_avg * (prev_b + next_b);
+            bias_lp[k] = (1.0 - spread_avg) * curr_b + bleed;
+            prev_b = curr_b;
+            curr_b = next_b;
+        }
+    }
+
+    // --- Pass 3: write bias back — time-averaged proxy for downstream readers. ---
+    if let Some(bias_out) = bias.as_deref_mut() {
+        for k in 0..num_bins {
+            bias_out[k] = (bias_out[k] * 0.95 + bias_lp[k] * 0.05).clamp(-10.0, 10.0);
+        }
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -661,6 +753,7 @@ pub enum CircuitMode {
     ComponentDrift,
     PcbCrosstalk,
     SlewDistortion,
+    BiasFuzz,
 }
 
 impl Default for CircuitMode {
@@ -698,6 +791,8 @@ pub struct CircuitModule {
     // `slew_rng` uses SimdRng for strict [-1, 1) bounds (see circuit_kernels doc).
     slew_prev_mag: [Vec<f32>; 2],
     slew_rng: [crate::dsp::circuit_kernels::SimdRng; 2],
+    // Bias Fuzz state: per-bin 1-pole magnitude LP tracking the DC offset envelope.
+    bias_lp: [Vec<f32>; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -732,6 +827,7 @@ impl CircuitModule {
                 crate::dsp::circuit_kernels::SimdRng::new(0xBADF00D5),
                 crate::dsp::circuit_kernels::SimdRng::new(0x0BADBEEF),
             ],
+            bias_lp: [Vec::new(), Vec::new()],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -777,6 +873,9 @@ impl CircuitModule {
                     *v = 0.0;
                 }
                 // slew_rng is intentionally left intact (same reasoning as drift_rng).
+                for v in self.bias_lp[ch].iter_mut() {
+                    *v = 0.0;
+                }
             }
         }
     }
@@ -927,6 +1026,26 @@ impl SpectralModule for CircuitModule {
                     curves,
                 );
             }
+            CircuitMode::BiasFuzz => {
+                // As a writer slot, `physics = Some(&mut mix_phys)` from FxMatrix;
+                // `ctx.bin_physics = None`. We read bias (pass 1 seed) and write updated
+                // bias (pass 3) through a single `Option<&mut [f32]>` to avoid a
+                // borrow-checker split on the same Vec — mirrors the ComponentDrift and
+                // TransformerSaturation writer-slot pattern.
+                let nb = ctx.num_bins;
+                let bias: Option<&mut [f32]> = if let Some(bp) = physics {
+                    if bp.bias.len() >= nb { Some(&mut bp.bias[..nb]) } else { None }
+                } else {
+                    None
+                };
+                apply_bias_fuzz(
+                    &mut bins[..nb],
+                    &mut self.bias_lp[channel][..nb],
+                    bias,
+                    curves,
+                    hop_dt,
+                );
+            }
         }
 
         for s in suppression_out.iter_mut() {
@@ -975,6 +1094,8 @@ impl SpectralModule for CircuitModule {
             self.slew_prev_mag[ch].clear();
             self.slew_prev_mag[ch].resize(num_bins, 0.0);
             // slew_rng is NOT reset on FFT-size change (preserves PRNG trajectory).
+            self.bias_lp[ch].clear();
+            self.bias_lp[ch].resize(num_bins, 0.0);
         }
     }
 
@@ -1010,6 +1131,8 @@ pub struct CircuitProbe {
     pub sag_envelope:     f32,
     /// Mean absolute drift offset across all bins. Non-zero only in `ComponentDrift` mode.
     pub drift_env_avg:    f32,
+    /// Mean bias LP envelope value across all bins. Non-zero only in `BiasFuzz` mode.
+    pub bias_lp_avg:      f32,
 }
 
 #[cfg(any(test, feature = "probe"))]
@@ -1044,6 +1167,11 @@ impl CircuitModule {
         } else {
             0.0
         };
+        let bias_lp_avg = if self.mode == CircuitMode::BiasFuzz && !self.bias_lp[ch].is_empty() {
+            self.bias_lp[ch].iter().sum::<f32>() / self.bias_lp[ch].len() as f32
+        } else {
+            0.0
+        };
         CircuitProbe {
             active_mode:      self.mode,
             vactrol_fast_avg: fa,
@@ -1051,6 +1179,7 @@ impl CircuitModule {
             xfmr_lp_avg,
             sag_envelope,
             drift_env_avg,
+            bias_lp_avg,
         }
     }
 }
