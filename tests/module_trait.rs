@@ -2119,12 +2119,14 @@ fn kinetics_diamagnet_carves_and_redistributes_energy() {
         .collect();
     let dry_total: f32 = bins.iter().map(|b| b.norm_sqr()).sum();
 
-    // STRENGTH curve creates a "carve zone" centred on bin 400 (Gaussian).
+    // STRENGTH curve creates a "carve zone" centred on bin 400 (Gaussian, sigma = 8 bins,
+    // peaks at strength 2.0 — well above the kernel's STRENGTH_BASELINE = 1.0 onset).
     let strength: Vec<f32> = (0..num_bins).map(|k| {
         let d = (k as f32 - 400.0) / 8.0;
         1.0 + (-d * d).exp() // ranges 1.0 -> 2.0
     }).collect();
     let neutral = vec![1.0_f32; num_bins];
+    // mix=2.0 gets clamped to 1.0 inside the kernel — full wet.
     let mix = vec![2.0_f32; num_bins];
     let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
 
@@ -2138,6 +2140,8 @@ fn kinetics_diamagnet_carves_and_redistributes_energy() {
     let dry_at_far_left  = bins[380].norm();
     let dry_at_far_right = bins[420].norm();
 
+    // 15 hops gives the curve smoother (tau = 4·dt) ~3 time-constants to settle so the
+    // carve fraction reaches steady-state before we measure.
     for _ in 0..15 {
         module.process(
             0, StereoLink::Linked, FxChannelTarget::All,

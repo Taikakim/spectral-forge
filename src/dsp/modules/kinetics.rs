@@ -1001,6 +1001,10 @@ impl KineticsModule {
     const DIAMAGNET_MAX_CARVE_FRAC: f32 = 0.95;
     /// Bins-per-unit-reach factor: reach_curve value of 1.0 → 16 neighbour bins.
     const DIAMAGNET_REACH_SCALE: f32 = 16.0;
+    /// REACH curve lower clamp; below this, the kernel still emits one neighbour pair.
+    const DIAMAGNET_REACH_CLAMP_LO: f32 = 0.1;
+    /// REACH curve upper clamp; caps reach at 4 × REACH_SCALE = 64 bins each side.
+    const DIAMAGNET_REACH_CLAMP_HI: f32 = 4.0;
     /// Guard against division by near-zero total weight (boundary bins with no neighbours).
     const DIAMAGNET_MIN_TOTAL_W: f32 = 1e-6;
     /// Guard against dividing by a near-zero dry magnitude when computing the scale factor.
@@ -1023,9 +1027,10 @@ impl KineticsModule {
         num_bins: usize,
         _physics: Option<&BinPhysics>,
     ) {
-        // -- Bind immutable curve slices before taking any mutable borrows. --
-        // reach_curve cannot be bound here because pass B mutates self.diamagnet_new_mag
-        // simultaneously, requiring triple-index access inside the loop body.
+        // -- Bind immutable curve slices used in the simple passes. --
+        // reach_curve is read inside pass B alongside indexed accesses to mag_prev,
+        // dry_mag_scratch, and diamagnet_new_mag (all on `self`); rather than juggle
+        // four overlapping borrows we take reach via direct triple-index inside the loop.
         let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
         let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
 
@@ -1047,11 +1052,9 @@ impl KineticsModule {
 
         // -- 2. Pass A: copy dry magnitudes into dedicated new_mag scratch. --
         {
-            let dry_mag   = &self.dry_mag_scratch[channel][..num_bins];
-            let new_mag   = &mut self.diamagnet_new_mag[channel][..num_bins];
-            for k in 0..num_bins {
-                new_mag[k] = dry_mag[k];
-            }
+            let dry_mag = &self.dry_mag_scratch[channel][..num_bins];
+            let new_mag = &mut self.diamagnet_new_mag[channel][..num_bins];
+            new_mag.copy_from_slice(dry_mag);
         }
 
         // -- 3. Pass B: for each carve source, subtract from its bin and
@@ -1061,7 +1064,8 @@ impl KineticsModule {
             if frac < Self::DIAMAGNET_MIN_CARVE_FRAC { continue; }
 
             let reach_val = self.smoothed_curves[channel][2][k];
-            let reach = (reach_val.clamp(0.1, 4.0) * Self::DIAMAGNET_REACH_SCALE).round() as usize;
+            let reach = (reach_val.clamp(Self::DIAMAGNET_REACH_CLAMP_LO, Self::DIAMAGNET_REACH_CLAMP_HI)
+                         * Self::DIAMAGNET_REACH_SCALE).round() as usize;
             if reach < 1 { continue; }
 
             let dry_k = self.dry_mag_scratch[channel][k];
@@ -1081,10 +1085,10 @@ impl KineticsModule {
                 continue;
             }
 
-            // Distribute proportionally.
-            let inv_total_w = 1.0 / total_w;
+            // Distribute proportionally. take and inv_total_w are loop-invariant across d.
+            let take_per_unit = take / total_w;
             for d in 1..=reach {
-                let share = take * (1.0 / d as f32) * inv_total_w;
+                let share = take_per_unit * (1.0 / d as f32);
                 if k + d < num_bins {
                     self.diamagnet_new_mag[channel][k + d] += share;
                 }
