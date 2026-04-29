@@ -1842,3 +1842,83 @@ fn kinetics_inertial_mass_sidechain_high_when_sc_changing_fast() {
         );
     }
 }
+
+#[test]
+fn kinetics_orbital_phase_rotates_satellites_in_opposite_directions() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::OrbitalPhase);
+
+    let num_bins = 1025;
+
+    // STRENGTH=2.0 (strong rotation), MIX=2.0 (clamped to 1.0 → full wet).
+    let strength = vec![2.0_f32; num_bins];
+    let neutral  = vec![1.0_f32; num_bins];
+    let mix      = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    // -- Warmup: run 30 hops to let the 1-pole curve smoother converge (MIX 0→1, STRENGTH 1→2).
+    // Use the same peak bin each hop so the peak is consistently detected during warmup.
+    let mut warmup_bins: Vec<Complex<f32>> = vec![Complex::new(0.1, 0.0); num_bins];
+    warmup_bins[200] = Complex::new(50.0, 0.0);
+    for _ in 0..30 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut warmup_bins, None, &curves, &mut suppression, None, &ctx,
+        );
+        // Restore bins to static shape (peak still dominates) so the smoother sees
+        // the same input each hop and converges to steady-state.
+        for k in 0..num_bins { warmup_bins[k] = Complex::new(0.1, 0.0); }
+        warmup_bins[200] = Complex::new(50.0, 0.0);
+    }
+
+    // -- Measurement hop: fresh bins with known satellite phases at +1 and -1 from peak.
+    // Use a large peak (50.0) to clear the local-window mean check and produce a
+    // rotation large enough to assert cleanly (Δφ ≈ alpha*m_amp/1² ≈ 0.53 rad at d=1).
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.1, 0.0); num_bins];
+    bins[200] = Complex::new(50.0, 0.0); // master peak — strong and isolated
+    bins[199] = Complex::new(0.5, 0.0);  // -1 satellite
+    bins[201] = Complex::new(0.5, 0.0);  // +1 satellite
+    let dry_left_phase  = bins[199].arg();
+    let dry_right_phase = bins[201].arg();
+
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    let new_left_phase  = bins[199].arg();
+    let new_right_phase = bins[201].arg();
+    let dleft  = new_left_phase  - dry_left_phase;
+    let dright = new_right_phase - dry_right_phase;
+
+    // Both satellites must have moved from their dry phase.
+    assert!(dleft.abs()  > 0.01, "Left satellite did not rotate (delta = {})", dleft);
+    assert!(dright.abs() > 0.01, "Right satellite did not rotate (delta = {})", dright);
+
+    // The rotations must be in opposite signs (left negative, right positive).
+    assert!(
+        dleft.signum() != dright.signum(),
+        "Satellites must orbit in opposite directions; got dleft={}, dright={}",
+        dleft, dright
+    );
+
+    // Master peak phase must be unchanged (rotation NOT applied to master bin itself).
+    let new_master_phase = bins[200].arg();
+    assert!(
+        new_master_phase.abs() < 0.01,
+        "Master phase changed: {}",
+        new_master_phase
+    );
+}

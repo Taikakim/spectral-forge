@@ -566,16 +566,96 @@ impl KineticsModule {
         // bins are not modified — InertialMass only writes physics.mass.
     }
 
-    /// Orbital phase rotation of each bin around its neighbour. Implemented in Task 8.
+    /// Orbital phase rotation — peak-driven, paired-bin linear phase shift.
+    ///
+    /// Detects up to `MAX_PEAKS` spectral peaks (local maxima that exceed both neighbours
+    /// AND exceed 2× the local-window mean over `ORBITAL_SAT_HALF_WINDOW` bins).
+    ///
+    /// For each peak at bin `km` with amplitude `m_amp` and each satellite distance
+    /// `d ∈ 1..=ORBITAL_SAT_HALF_WINDOW`:
+    ///
+    /// - **+d satellite** (`kp = km + d`): `Δφ = +α * m_amp / d²`
+    /// - **-d satellite** (`kn = km - d`): `Δφ = -α * m_amp / d²`  (opposite sign)
+    ///
+    /// where `α = 0.5 * STRENGTH[km] * dt`. The master peak bin itself is NOT rotated.
+    /// MIX curve blends the rotation amount before applying the complex rotation.
     fn apply_orbital_phase(
         &mut self,
-        _channel: usize,
-        _bins: &mut [Complex<f32>],
-        _dt: f32,
-        _num_bins: usize,
+        channel: usize,
+        bins: &mut [Complex<f32>],
+        dt: f32,
+        num_bins: usize,
         _physics: Option<&BinPhysics>,
     ) {
-        // Implemented in Task 8.
+        // Bind local slice refs — avoids triple-indexing through self inside inner loops
+        // and keeps borrows disjoint from the bins mutation in Pass B.
+        let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
+        let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
+
+        // -- Pass A: Find peaks. --
+        // A bin qualifies as a master peak if:
+        //   1. magnitude > both immediate neighbours (local maximum)
+        //   2. magnitude > 2× the mean over the local ORBITAL_SAT_HALF_WINDOW window
+        // SmallVec stays stack-allocated up to MAX_PEAKS = 16 entries; no heap allocation.
+        let mut peaks: SmallVec<[(usize, f32); MAX_PEAKS]> = SmallVec::new();
+        for k in 1..(num_bins - 1) {
+            let m = bins[k].norm();
+            if m < 1e-6 { continue; }
+            let left  = bins[k - 1].norm();
+            let right = bins[k + 1].norm();
+            if m > left && m > right {
+                // Window-mean check: allocation-free iterator sum, compiles to a plain loop.
+                let lo   = k.saturating_sub(ORBITAL_SAT_HALF_WINDOW);
+                let hi   = (k + ORBITAL_SAT_HALF_WINDOW).min(num_bins - 1);
+                let mean = (lo..=hi).map(|i| bins[i].norm()).sum::<f32>() / (hi - lo + 1) as f32;
+                if m > 2.0 * mean {
+                    if peaks.len() < MAX_PEAKS {
+                        peaks.push((k, m));
+                    }
+                }
+            }
+        }
+        if peaks.is_empty() { return; }
+
+        // -- Pass B: Apply phase rotation to satellites around each peak. --
+        // Bins are read+mutated here; the peak list (Pass A) is complete so there is
+        // no conflict between the read of bins[k].norm() above and the write below.
+        for &(km, m_amp) in peaks.iter() {
+            // Upper bound for d: stay within the array AND respect ORBITAL_SAT_HALF_WINDOW.
+            let d_max = ORBITAL_SAT_HALF_WINDOW.min(
+                num_bins.saturating_sub(km).max(1) - 1
+            );
+            for d in 1..=d_max {
+                let alpha = 0.5 * strength_curve[km] * dt;
+                let denom = (d as f32 * d as f32).max(1.0);
+
+                // +d satellite: rotate by +Δφ
+                let kp = km + d;
+                if kp < num_bins {
+                    let dphi_pos = alpha * m_amp / denom;
+                    let mix      = mix_curve[kp].clamp(0.0, 1.0);
+                    let dphi     = dphi_pos * mix;
+                    let (c, s)   = (dphi.cos(), dphi.sin());
+                    let re = bins[kp].re * c - bins[kp].im * s;
+                    let im = bins[kp].re * s + bins[kp].im * c;
+                    bins[kp].re = re;
+                    bins[kp].im = im;
+                }
+
+                // -d satellite: rotate by -Δφ (opposite sign)
+                if km >= d {
+                    let kn       = km - d;
+                    let dphi_neg = -alpha * m_amp / denom;
+                    let mix      = mix_curve[kn].clamp(0.0, 1.0);
+                    let dphi     = dphi_neg * mix;
+                    let (c, s)   = (dphi.cos(), dphi.sin());
+                    let re = bins[kn].re * c - bins[kn].im * s;
+                    let im = bins[kn].re * s + bins[kn].im * c;
+                    bins[kn].re = re;
+                    bins[kn].im = im;
+                }
+            }
+        }
     }
 
     /// Ferromagnetism — bin clusters magnetically align in magnitude. Implemented in Task 9.
