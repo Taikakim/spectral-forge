@@ -1993,3 +1993,59 @@ fn kinetics_ferromagnetism_aligns_neighbour_phases_to_peak() {
     assert!((mag_302 - 0.5).abs() < 1e-3,
         "Ferro must preserve magnitude at bin 302: got {}", mag_302);
 }
+
+#[test]
+fn kinetics_thermal_expansion_heats_then_detunes() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::ThermalExpansion);
+
+    let num_bins = 1025;
+    // Sustained loud bin at 100. Initial phase 0.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0);
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    let strength = vec![2.0_f32; num_bins];
+    let neutral  = vec![1.0_f32; num_bins];
+    let mix      = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    let dry_phase = bins[100].arg();
+    // Run 100 hops with sustained input → heat builds, phase rotates.
+    for _ in 0..100 {
+        bins[100] = Complex::new(2.0, 0.0); // re-inject sustained tone each hop
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, Some(&mut physics), &ctx,
+        );
+    }
+
+    // Temperature should have built up in BinPhysics.
+    assert!(physics.temperature[100] > 0.05,
+        "temperature did not rise on sustained signal (= {})", physics.temperature[100]);
+
+    // The bin's phase should now be different from dry.
+    let new_phase = bins[100].arg();
+    let mut diff = new_phase - dry_phase;
+    while diff >  std::f32::consts::PI { diff -= 2.0 * std::f32::consts::PI; }
+    while diff < -std::f32::consts::PI { diff += 2.0 * std::f32::consts::PI; }
+    assert!(diff.abs() > 0.05,
+        "phase did not detune from heat (delta = {})", diff);
+
+    // All bins must remain finite.
+    for b in &bins { assert!(b.norm().is_finite()); }
+}
