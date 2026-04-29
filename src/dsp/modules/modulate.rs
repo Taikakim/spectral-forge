@@ -400,11 +400,151 @@ fn apply_gravity_phaser_sc_positioned(
     }
 }
 
+// ── PLL Tear helpers ───────────────────────────────────────────────────────
+
+/// xorshift32 — one PRNG step. Real-time safe: no allocation, no branching.
+#[inline]
+fn xorshift32(state: &mut u32) -> u32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    x
+}
+
+/// xorshift32-based uniform random in [-1, 1].
+#[inline]
+fn xorshift32_signed(state: &mut u32) -> f32 {
+    let r = xorshift32(state) as f32 / (u32::MAX as f32 / 2.0);
+    r - 1.0
+}
+
+/// Per-bin 2nd-order PI PLL bank with lock-loss hysteresis and chaotic tear emission.
+///
+/// Locked bins pass through dry. Unlocked bins receive a random phase rotation
+/// (magnitude preserved). Lock-loss writes an impulse into `phase_momentum[k]`
+/// proportional to the excess error.
+///
+/// # Allocation contract
+/// No heap allocation. All scratch slices are pre-allocated by the caller.
+#[allow(clippy::too_many_arguments)]
+fn apply_pll_tear(
+    bins: &mut [Complex<f32>],
+    smoothed: &[&[f32]; 6],
+    target_phase: &[f32],
+    pll_phase: &mut [f32],
+    pll_freq: &mut [f32],
+    pll_err: &mut [f32],
+    pll_torn: &mut [bool],
+    pll_relock: &mut [u8],
+    rng_state: &mut u32,
+    phase_momentum: &mut [f32],
+) {
+    use crate::dsp::physics_helpers::pll_bank_step;
+    use std::f32::consts::PI;
+
+    let amount_c = smoothed[0];
+    let reach_c  = smoothed[1];
+    let rate_c   = smoothed[2];
+    let thresh_c = smoothed[3];
+    let mix_c    = smoothed[5];
+
+    let num_bins = bins.len();
+
+    // Loop natural frequency ωₙ from RATE curve at bin 0 (0..2 → 0..0.2 cycles/hop).
+    let omega_n = rate_c.first().copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.1;
+    let zeta    = 0.707_f32;
+    let alpha   = 2.0 * zeta * omega_n;
+    let beta    = omega_n * omega_n;
+
+    // Tear threshold scales with THRESH curve (1.0 → π/2 default).
+    let thresh_scale = thresh_c.first().copied().unwrap_or(1.0).clamp(0.1, 4.0);
+    let tear_thresh  = PLL_TEAR_THRESHOLD * thresh_scale.min(2.0);
+
+    // REACH defines bin range upper bound (0..2 → 0..num_bins).
+    let reach_norm = reach_c.first().copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.5;
+    let max_bin    = (((reach_norm + 0.5) * num_bins as f32) as usize).min(num_bins);
+
+    let stepped_lo = PLL_MIN_BIN;
+    let stepped_hi = max_bin.max(stepped_lo);
+
+    // Advance PLL for bins in range.
+    if stepped_hi > stepped_lo {
+        pll_bank_step(
+            &mut pll_phase[stepped_lo..stepped_hi],
+            &mut pll_freq[stepped_lo..stepped_hi],
+            &target_phase[stepped_lo..stepped_hi],
+            alpha,
+            beta,
+            &mut pll_err[stepped_lo..stepped_hi],
+        );
+    }
+
+    for k in 0..num_bins {
+        let amount = amount_c[k].clamp(0.0, 2.0);
+        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        if k < stepped_lo || k >= stepped_hi {
+            // Bin out of PLL range: passthrough.
+            continue;
+        }
+
+        let err = pll_err[k];
+
+        // Lock-loss detector with hysteresis.
+        if pll_torn[k] {
+            // Currently torn: count consecutive hops below re-lock threshold.
+            if err.abs() < PLL_RELOCK_THRESHOLD {
+                pll_relock[k] = pll_relock[k].saturating_add(1);
+                if pll_relock[k] >= PLL_RELOCK_HOPS {
+                    pll_torn[k]   = false;
+                    pll_relock[k] = 0;
+                }
+            } else {
+                pll_relock[k] = 0;
+            }
+        } else if err.abs() > tear_thresh {
+            // Currently locked: detect lock loss.
+            pll_torn[k]   = true;
+            pll_relock[k] = 0;
+        }
+
+        if pll_torn[k] {
+            // Emit chaotic noise: random phase rotation, magnitude preserved.
+            let r        = xorshift32_signed(rng_state);
+            let rotation = r * PI * amount;
+            let cos_r    = rotation.cos();
+            let sin_r    = rotation.sin();
+            let dry      = bins[k];
+            let wet      = Complex::new(
+                dry.re * cos_r - dry.im * sin_r,
+                dry.re * sin_r + dry.im * cos_r,
+            );
+            bins[k] = dry * (1.0 - mix) + wet * mix;
+            // Kick phase momentum proportional to excess error beyond tear threshold.
+            phase_momentum[k] += 0.1 * err.signum() * (err.abs() - tear_thresh).max(0.0);
+        }
+        // else: locked → passthrough (PLL is silent in lock).
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
 /// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear.
 const MOD_HEAVY: [bool; 7] = [false, false, false, false, false, false, true /* [6] PllTear */];
+
+// ── PLL Tear constants ─────────────────────────────────────────────────────
+
+/// Skip sub-100 Hz bins (research finding 3) — avoids DC/sub-bass PLL instability.
+pub const PLL_MIN_BIN: usize = 16;
+/// Number of consecutive hops with |err| < PLL_RELOCK_THRESHOLD required to re-lock.
+pub const PLL_RELOCK_HOPS: u8 = 4;
+/// Phase error above which lock is declared lost (π/2 rad).
+pub const PLL_TEAR_THRESHOLD: f32 = std::f32::consts::FRAC_PI_2;
+/// Phase error below which re-lock count increments (π/8 rad).
+pub const PLL_RELOCK_THRESHOLD: f32 = std::f32::consts::FRAC_PI_4 * 0.5; // π/8
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModulateMode {
@@ -447,6 +587,27 @@ pub struct ModulateModule {
     /// Per-channel first-touch flag; primes the smoother with a direct copy
     /// on the first hop after reset (avoids 5-hop ramp-in artefact).
     smoothed_primed: [bool; 2],
+    // ── PLL Tear state ────────────────────────────────────────────────────
+    /// Per-channel PLL bank phase accumulator (one entry per FFT bin).
+    pll_phase: [Vec<f32>; 2],
+    /// Per-channel PLL bank frequency integrator (rad/hop per bin).
+    pll_freq: [Vec<f32>; 2],
+    /// Per-channel scratch for phase errors from pll_bank_step.
+    pll_err_scratch: [Vec<f32>; 2],
+    /// Per-channel lock-loss flag per bin.
+    pll_torn: [Vec<bool>; 2],
+    /// Per-channel consecutive-below-threshold hop counter used for re-lock hysteresis.
+    pll_relock_count: [Vec<u8>; 2],
+    /// Per-channel previous wrapped phase (for local-unwrap fallback when
+    /// ctx.unwrapped_phase is None).
+    prev_phase: [Vec<f32>; 2],
+    /// Per-channel pre-allocated scratch for prev_phase_scratch (avoids any
+    /// per-hop allocation in the fallback unwrap path).
+    prev_phase_scratch: [Vec<f32>; 2],
+    /// Per-channel running unwrapped-phase accumulator (local fallback).
+    unwrap_local: [Vec<f32>; 2],
+    /// Per-channel xorshift32 RNG state for chaotic-noise emission on torn bins.
+    tear_rng: [u32; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -469,6 +630,15 @@ impl ModulateModule {
                 [Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new(), Vec::<f32>::new()],
             ],
             smoothed_primed: [false; 2],
+            pll_phase:        [Vec::new(), Vec::new()],
+            pll_freq:         [Vec::new(), Vec::new()],
+            pll_err_scratch:  [Vec::new(), Vec::new()],
+            pll_torn:         [Vec::new(), Vec::new()],
+            pll_relock_count: [Vec::new(), Vec::new()],
+            prev_phase:       [Vec::new(), Vec::new()],
+            prev_phase_scratch: [Vec::new(), Vec::new()],
+            unwrap_local:     [Vec::new(), Vec::new()],
+            tear_rng:         [0xC0FFEE_u32, 0xBEEF_u32],
             sample_rate:  48_000.0,
             fft_size:     2048,
             #[cfg(any(test, feature = "probe"))]
@@ -545,7 +715,7 @@ impl SpectralModule for ModulateModule {
         curves: &[&[f32]],
         suppression_out: &mut [f32],
         mut physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
-        _ctx: &ModuleContext<'_>,
+        ctx: &ModuleContext<'_>,
     ) {
         debug_assert!(channel < 2);
 
@@ -615,7 +785,70 @@ impl SpectralModule for ModulateModule {
                 }
             }
             ModulateMode::PllTear => {
-                // Kernel added in Task 5b4.7. Pass through unchanged.
+                let num_bins = bins.len();
+                self.refresh_smoothed(channel, curves, num_bins);
+
+                // Snapshot wrapped phases of current `bins` into prev_phase_scratch.
+                // Do this BEFORE borrowing self fields that would conflict.
+                for k in 0..num_bins {
+                    self.prev_phase_scratch[channel][k] = bins[k].arg();
+                }
+
+                // target_phase: copy ctx.unwrapped_phase Cells into unwrap_local; or
+                // local-unwrap fallback.
+                match ctx.unwrapped_phase {
+                    Some(cells) if cells.len() >= num_bins => {
+                        // Read from Cell<f32> into the pre-allocated f32 buffer.
+                        for k in 0..num_bins {
+                            self.unwrap_local[channel][k] = cells[k].get();
+                        }
+                    }
+                    _ => {
+                        // Local unwrap fallback — update unwrap_local from prev_phase delta.
+                        for k in 0..num_bins {
+                            use crate::dsp::physics_helpers::wrap_phase;
+                            let cur  = self.prev_phase_scratch[channel][k];
+                            let prev = self.prev_phase[channel][k];
+                            self.unwrap_local[channel][k] += wrap_phase(cur - prev);
+                        }
+                        // Save current wrapped phases for next call.
+                        let (pp, pps) = (&mut self.prev_phase[channel],
+                                         &self.prev_phase_scratch[channel]);
+                        pp[..num_bins].copy_from_slice(&pps[..num_bins]);
+                    }
+                }
+
+                // Build smoothed-curve array by directly indexing the struct field
+                // (not via the method, so Rust can see the borrow is on
+                // `self.smoothed_curves` only, not on the PLL state fields).
+                let smoothed: [&[f32]; 6] = [
+                    &self.smoothed_curves[channel][0][..num_bins],
+                    &self.smoothed_curves[channel][1][..num_bins],
+                    &self.smoothed_curves[channel][2][..num_bins],
+                    &self.smoothed_curves[channel][3][..num_bins],
+                    &self.smoothed_curves[channel][4][..num_bins],
+                    &self.smoothed_curves[channel][5][..num_bins],
+                ];
+
+                if let Some(p) = physics.as_mut() {
+                    let momentum = &mut p.phase_momentum[..num_bins];
+                    let target   = &self.unwrap_local[channel][..num_bins];
+                    apply_pll_tear(
+                        bins,
+                        &smoothed,
+                        target,
+                        &mut self.pll_phase[channel][..num_bins],
+                        &mut self.pll_freq[channel][..num_bins],
+                        &mut self.pll_err_scratch[channel][..num_bins],
+                        &mut self.pll_torn[channel][..num_bins],
+                        &mut self.pll_relock_count[channel][..num_bins],
+                        &mut self.tear_rng[channel],
+                        momentum,
+                    );
+                } else {
+                    debug_assert!(false,
+                        "PllTear requires Some(physics) — FxMatrix must supply it for writes_bin_physics modules");
+                }
             }
         }
 
@@ -646,6 +879,25 @@ impl SpectralModule for ModulateModule {
             }
             self.smoothed_primed[ch] = false;
             self.gp_nodes[ch].clear();
+            // PLL Tear scratch buffers.
+            self.pll_phase[ch].clear();
+            self.pll_phase[ch].resize(num_bins, 0.0);
+            self.pll_freq[ch].clear();
+            self.pll_freq[ch].resize(num_bins, 0.0);
+            self.pll_err_scratch[ch].clear();
+            self.pll_err_scratch[ch].resize(num_bins, 0.0);
+            self.pll_torn[ch].clear();
+            self.pll_torn[ch].resize(num_bins, false);
+            self.pll_relock_count[ch].clear();
+            self.pll_relock_count[ch].resize(num_bins, 0);
+            self.prev_phase[ch].clear();
+            self.prev_phase[ch].resize(num_bins, 0.0);
+            self.prev_phase_scratch[ch].clear();
+            self.prev_phase_scratch[ch].resize(num_bins, 0.0);
+            self.unwrap_local[ch].clear();
+            self.unwrap_local[ch].resize(num_bins, 0.0);
+            // Seed RNG distinctly per channel (wrapping_mul to avoid debug-mode overflow).
+            self.tear_rng[ch] = 0xC0FFEE_u32 ^ (ch as u32 + 1).wrapping_mul(0xDEAD_BEEF_u32);
         }
         self.hop_count = [0; 2];
         // self.mode is preserved across reset (user choice survives FFT-size change).

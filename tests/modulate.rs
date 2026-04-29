@@ -599,8 +599,8 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
             0.5, false, false,
         );
 
-        // GravityPhaser writes phase_momentum so requires Some(physics).
-        let needs_physics = matches!(mode, ModulateMode::GravityPhaser);
+        // GravityPhaser and PllTear write phase_momentum so require Some(physics).
+        let needs_physics = matches!(mode, ModulateMode::GravityPhaser | ModulateMode::PllTear);
         let mut physics = BinPhysics::new();
         if needs_physics {
             physics.reset_active(num_bins, 48_000.0, 2048);

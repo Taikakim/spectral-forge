@@ -2496,3 +2496,122 @@ fn modulate_gravity_phaser_sc_positioned_peaks_concentrate_momentum() {
     assert!(phys2.phase_momentum[300].abs() < 1.0,
         "no-sidechain momentum did not decay: m[300]={}", phys2.phase_momentum[300]);
 }
+
+#[test]
+fn modulate_pll_tear_locks_on_steady_input_and_passes_through() {
+    use std::cell::Cell;
+    use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_modulate_mode(ModulateMode::PllTear);
+
+    let num_bins = 1025;
+    // Steady input: phases identical hop-to-hop. PLL must lock and emit dry.
+    let bins_template: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| {
+            let phase = (k as f32) * 0.05;
+            Complex::new(phase.cos(), phase.sin())
+        })
+        .collect();
+    let mut bins = bins_template.clone();
+
+    // AMOUNT=2 (full wet of torn output, but tear is gated by lock detector),
+    // REACH=2 (all bins active), RATE=1 (default omega_n), THRESH=1 (default),
+    // AMPGATE=0, MIX=2.
+    let amount  = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let zeros   = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    // Provide unwrapped phase as Cell<f32> (the correct type for ctx.unwrapped_phase).
+    let phases_raw: Vec<f32> = bins_template.iter().map(|b| b.arg()).collect();
+    let unwrapped_cells: Vec<Cell<f32>> = phases_raw.iter().map(|&p| Cell::new(p)).collect();
+
+    let mut ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false,
+    );
+    ctx.unwrapped_phase = Some(&unwrapped_cells[..]);
+
+    // Run 30 hops with constant input. PLL should converge to lock; output ≈ dry.
+    for _ in 0..30 {
+        bins.copy_from_slice(&bins_template);
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves,
+                       &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    // After lock, magnitudes should still match dry (within tolerance).
+    for k in 16..num_bins.min(900) {
+        let mag = bins[k].norm();
+        assert!((mag - 1.0).abs() < 0.05,
+            "locked PLL magnitude drift at bin {}: {}", k, mag);
+    }
+}
+
+#[test]
+fn modulate_pll_tear_writes_phase_momentum_on_glide() {
+    use std::cell::Cell;
+    use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_modulate_mode(ModulateMode::PllTear);
+
+    let num_bins = 1025;
+    let mut phases: Vec<f32> = (0..num_bins).map(|k| (k as f32) * 0.05).collect();
+    let mut bins: Vec<Complex<f32>> = phases.iter().map(|p| Complex::new(p.cos(), p.sin())).collect();
+
+    let amount  = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let zeros   = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    let base_ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false,
+    );
+
+    // Apply a fast phase glide in bin 100 over 30 hops — should overshoot loop bandwidth and tear.
+    for hop in 0..30 {
+        let glide = (hop as f32) * 0.8; // fast: 0.8 rad/hop in just bin 100
+        phases[100] = (100.0 * 0.05) + glide;
+        bins[100] = Complex::new(phases[100].cos(), phases[100].sin());
+
+        // Build Cell<f32> slice from the current phase vector each hop.
+        let unwrapped_cells: Vec<Cell<f32>> = phases.iter().map(|&p| Cell::new(p)).collect();
+        let mut ctx = base_ctx;
+        ctx.unwrapped_phase = Some(&unwrapped_cells[..]);
+
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves,
+                       &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    // Bin 100 phase momentum should have been kicked by the tear event.
+    assert!(physics.phase_momentum[100].abs() > 0.0,
+        "bin 100 momentum unchanged after glide tear: {}", physics.phase_momentum[100]);
+    // No NaN or runaway anywhere.
+    for k in 0..num_bins {
+        assert!(physics.phase_momentum[k].is_finite(), "bin {} momentum NaN", k);
+        assert!(physics.phase_momentum[k].abs() < 100.0,
+            "bin {} momentum runaway: {}", k, physics.phase_momentum[k]);
+    }
+}
