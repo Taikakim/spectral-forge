@@ -935,7 +935,6 @@ impl Pipeline {
                 // Roll IF prev phase forward for the next hop on this channel.
                 if_prev_phase_ref[ch][..num_bins]
                     .copy_from_slice(&scratch_curr_phase_ref[..num_bins]);
-                // Expose to modules. Borrow ends before fx_matrix.process_hop reads.
                 hop_ctx.instantaneous_freq = Some(&if_buffer_ref[ch][..num_bins]);
             }
 
