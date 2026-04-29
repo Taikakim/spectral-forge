@@ -49,7 +49,7 @@ impl SpectralModule for IfProbe {
     }
 
     fn reset(&mut self, _sample_rate: f32, _fft_size: usize) {}
-    fn module_type(&self) -> ModuleType { ModuleType::Empty }
+    fn module_type(&self) -> ModuleType { ModuleType::Gain } // arbitrary non-Empty
     fn num_curves(&self) -> usize { 0 }
 }
 
