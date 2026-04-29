@@ -810,23 +810,11 @@ impl KineticsModule {
         }
     }
 
-    /// Thermal expansion — temperature accumulation + phase-rotation frequency shift.
+    /// Thermal expansion — temperature accumulation drives a frequency-detune phase rotation.
     ///
-    /// **Heat model**: each hop, per-bin temperature rises by
-    /// `heat_in = STRENGTH.clamp(0, 4) × |mag|² × dt` and decays by
-    /// `cool_factor = (1 − DAMPING × 2 × dt).max(0)`. Temperature is clamped to
-    /// `THERMAL_TEMP_CEILING` to prevent runaway on loud sustained signals.
-    ///
-    /// **Phase detune**: the accumulated temperature is converted to a frequency detune
-    /// `Δφ = 2π × 5Hz × temp × dt`, scaled by the MIX curve, and applied as a complex
-    /// rotation to `bins[k]`. This simulates thermal expansion elongating a resonant
-    /// body and thus lowering its pitch.
-    ///
-    /// **BinPhysics mirror**: if `physics` is `Some`, `p.temperature[k]` is updated as
-    /// a 50/50 blend with the local temperature so downstream modules can read it.
-    ///
-    /// Reads dry magnitudes from `self.dry_mag_scratch[channel][..num_bins]` (pre-filled
-    /// by the caller before invoking this kernel — no allocation required).
+    /// Heat: `temp[k] = ((temp[k] + STRENGTH·|mag|²·dt) · (1 − DAMPING·2·dt).max(0)).min(CEILING)`.
+    /// Detune: `Δφ = 2π · DETUNE_HZ_PER_TEMP · temp[k] · dt`, scaled by `MIX.clamp(0,1)`.
+    /// If `physics` is `Some`, `p.temperature[k]` gets a 50/50 blend with `temp[k]`.
     #[allow(clippy::too_many_arguments)]
     fn apply_thermal_expansion(
         &mut self,
@@ -838,18 +826,12 @@ impl KineticsModule {
     ) {
         use std::f32::consts::PI;
 
-        // Bind local slice refs — keeps borrows disjoint between the immutable curve
-        // reads and the mutable temperature_local write, and avoids triple-indexing
-        // through self inside the inner loops.
         let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
         let damping_curve  = &self.smoothed_curves[channel][3][..num_bins];
         let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
         let dry_mag        = &self.dry_mag_scratch[channel][..num_bins];
 
-        // -- 1. Heat update: accumulate heat from sustained signal, apply cooling. --
-        //    cool_factor is applied AFTER adding heat_in (plan §10.3, line 2332).
-        //    All reads are from disjoint fields so the mutable borrow of temperature_local
-        //    coexists safely with the immutable borrows of smoothed_curves and dry_mag_scratch.
+        // 1. Heat update. cool_factor is applied AFTER adding heat_in (plan §10.3).
         let temp = &mut self.temperature_local[channel][..num_bins];
         for k in 0..num_bins {
             let heat_in   = strength_curve[k].clamp(0.0, THERMAL_HEAT_STRENGTH_CLAMP_HI)
@@ -860,23 +842,18 @@ impl KineticsModule {
             temp[k] = ((temp[k] + heat_in) * cool_factor).min(THERMAL_TEMP_CEILING);
         }
 
-        // -- 2. Phase rotation: Δφ = 2π × THERMAL_DETUNE_HZ_PER_TEMP × temp × dt, scaled by MIX. --
-        //    `bins` is mutated here; `temp` and `mix_curve` are read-only within this loop.
-        //    The borrow checker accepts this because `temp` is a mutable slice of
-        //    `self.temperature_local[channel]` — already obtained above — while `bins`
-        //    is a separate parameter.
+        // 2. Phase rotation. Hoist the per-hop invariant: dphi = dphi_per_unit · temp[k].
+        let dphi_per_unit = 2.0 * PI * THERMAL_DETUNE_HZ_PER_TEMP * dt;
         for k in 0..num_bins {
-            let detune_hz = THERMAL_DETUNE_HZ_PER_TEMP * temp[k];
-            let dphi      = 2.0 * PI * detune_hz * dt;
-            let dphi_mixed = dphi * mix_curve[k].clamp(0.0, 1.0);
-            let (c, s)    = (dphi_mixed.cos(), dphi_mixed.sin());
+            let dphi_mixed = dphi_per_unit * temp[k] * mix_curve[k].clamp(0.0, 1.0);
+            let (c, s)     = (dphi_mixed.cos(), dphi_mixed.sin());
             let re = bins[k].re * c - bins[k].im * s;
             let im = bins[k].re * s + bins[k].im * c;
             bins[k].re = re;
             bins[k].im = im;
         }
 
-        // -- 3. Mirror local temperature into BinPhysics (50/50 blend with upstream). --
+        // 3. Mirror local temperature into BinPhysics (50/50 blend with upstream).
         if let Some(p) = physics {
             for k in 0..num_bins {
                 p.temperature[k] = (1.0 - THERMAL_PHYSICS_BLEND) * p.temperature[k]

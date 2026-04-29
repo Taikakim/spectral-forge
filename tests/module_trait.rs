@@ -2015,7 +2015,7 @@ fn kinetics_thermal_expansion_heats_then_detunes() {
 
     let strength = vec![2.0_f32; num_bins];
     let neutral  = vec![1.0_f32; num_bins];
-    let mix      = vec![2.0_f32; num_bins];
+    let mix      = vec![2.0_f32; num_bins]; // > 1.0 to exercise the kernel's MIX clamp.
     let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
 
     let mut suppression = vec![0.0_f32; num_bins];
@@ -2025,7 +2025,9 @@ fn kinetics_thermal_expansion_heats_then_detunes() {
     );
 
     let dry_phase = bins[100].arg();
-    // Run 100 hops with sustained input → heat builds, phase rotates.
+    // 100 hops ≈ 1.07 s at 48 kHz / hop=512 — long enough that even with a low-ish
+    // STRENGTH=2 and DAMPING=1 the bin's temperature converges well above the
+    // assertion floor (empirically ~1.0, ceiling 10.0).
     for _ in 0..100 {
         bins[100] = Complex::new(2.0, 0.0); // re-inject sustained tone each hop
         module.process(
