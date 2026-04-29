@@ -767,6 +767,11 @@ impl Pipeline {
         // permit_alloc: sync_amp_modes may allocate if mode changed (user action).
         self.fx_matrix.sync_amp_modes(&route_matrix_snap, num_bins);
 
+        // Phase 6.1: scan active slot types for IF demand. Uses the slot_types_snap
+        // already captured at the top of process() — no extra lock, no allocation.
+        let any_needs_if = slot_types_snap.iter()
+            .any(|&ty| crate::dsp::modules::module_spec(ty).needs_instantaneous_freq);
+
         // Reborrow fields as locals so the closure can capture them without
         // conflicting with the &mut self.stft borrow inside process_overlap_add.
         let fft_plan  = self.fft_plan.clone();
