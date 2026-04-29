@@ -619,7 +619,8 @@ fn apply_slew_distortion(
 
         let prev = prev_mag[k];
         let delta   = in_mag - prev;
-        let allowed = rate_cap * (0.5 + 0.5 * amount); // amount scales the effective cap
+        // amount=0 → 0.5×rate_cap (gentle limiter); amount=1 → 1.0×rate_cap (full).
+        let allowed = rate_cap * (0.5 + 0.5 * amount);
 
         let (capped_mag, excess) = if delta.abs() > allowed {
             let new_mag = prev + delta.signum() * allowed;

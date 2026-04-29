@@ -43,9 +43,11 @@ fn circuit_slew_distortion_caps_rate_of_change_and_scrambles_phase() {
 
     let after_mag = bins[100].norm();
     let after_phase = bins[100].arg();
-    // Magnitude should be rate-limited (≤ thresh × scale = 0.1 * 1.0 = 0.1).
-    assert!(after_mag < 1.0, "mag should be slew-capped (got {})", after_mag);
-    assert!(after_mag > 0.0, "mag should not be zero (got {})", after_mag);
+    // Magnitude should be capped exactly at allowed = rate_cap * (0.5 + 0.5*amount)
+    //                                              = 0.1   * (0.5 + 0.5*1.0) = 0.1.
+    // With prev=0 and a +2.0 jump, capped_mag = 0 + 1.0 * 0.1 = 0.1.
+    assert!((after_mag - 0.1).abs() < 1e-4,
+            "mag should be slew-capped to ~0.1 (got {})", after_mag);
     // Phase should differ from input phase (scramble from excess slew).
     let phase_diff = (after_phase - phase_in).abs();
     assert!(phase_diff > 0.01, "phase should be scrambled by excess slew (diff={})", phase_diff);
