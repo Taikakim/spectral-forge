@@ -338,13 +338,22 @@ impl ModulateModule {
         self.smoothed_curves[0][0].len()
     }
 
+    /// Test helper — exposes the per-channel first-touch flag so tests can
+    /// assert that v1 modes never feed the smoother.
+    pub fn smoothed_primed_for_test(&self, channel: usize) -> bool {
+        self.smoothed_primed[channel]
+    }
+
     /// Refresh `smoothed_curves[channel]` from the raw input curves. Called only
     /// by retrofit modes; v1 modes consume `curves` directly. On the first hop
     /// after reset, the smoother is primed by direct copy (otherwise ~5-hop ramp).
-    // removed in Task 5b4.4 when first caller (apply_gravity_phaser) lands
+    // `#[allow(dead_code)]` is removed in Task 5b4.4 when the first caller
+    // (apply_gravity_phaser) lands.
     #[allow(dead_code)]
     fn refresh_smoothed(&mut self, channel: usize, curves: &[&[f32]], num_bins: usize) {
         use crate::dsp::physics_helpers::smooth_curve_one_pole;
+        debug_assert!(channel < 2, "channel must be 0 or 1, got {}", channel);
+        debug_assert!(curves.len() >= 6, "refresh_smoothed expects 6 curves, got {}", curves.len());
         let dt = self.fft_size as f32 / self.sample_rate / 4.0; // hop = fft/4 (75% overlap)
         let primed = self.smoothed_primed[channel];
         let take = curves.len().min(6);

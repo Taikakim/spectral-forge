@@ -2255,35 +2255,48 @@ fn modulate_v1_modes_skip_smoothing_pass() {
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
 
-    // PhasePhaser is v1: smoothing must NOT alter its curve consumption.
-    let mut module = ModulateModule::new();
-    module.reset(48_000.0, 2048);
-    module.set_mode(ModulateMode::PhasePhaser);
+    // All five v1 modes must NOT touch the smoother (smoothed_primed stays false).
+    // Each mode runs in a fresh module so primed state cannot leak between modes.
+    let v1_modes = [
+        ModulateMode::PhasePhaser,
+        ModulateMode::BinSwapper,
+        ModulateMode::RmFmMatrix,
+        ModulateMode::DiodeRm,
+        ModulateMode::GroundLoop,
+    ];
 
     let num_bins = 1025;
-    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
-
     let amount = vec![2.0_f32; num_bins];
     let neutral = vec![1.0_f32; num_bins];
     let zeros = vec![0.0_f32; num_bins];
     let mix = vec![2.0_f32; num_bins];
     // curves: [AMOUNT, REACH, RATE, THRESH, AMPGATE, MIX]
     let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
-
-    let mut suppression = vec![0.0_f32; num_bins];
+    let sidechain = vec![0.5_f32; num_bins]; // RM/FM Matrix + Diode RM consume sidechain
     let ctx = ModuleContext::new(
         48_000.0, 2048, num_bins,
         10.0, 100.0, 1.0,
         1.0, false, false,
     );
 
-    module.process(0, StereoLink::Linked, FxChannelTarget::All,
-                   &mut bins, None, &curves, &mut suppression, None, &ctx);
+    for mode in v1_modes {
+        let mut module = ModulateModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_mode(mode);
 
-    // Magnitudes preserved (Phase Phaser invariant — same as v1).
-    for k in 0..num_bins {
-        let mag = bins[k].norm();
-        assert!((mag - 1.0).abs() < 1e-3,
-            "v1 PhasePhaser invariant violated at bin {}: mag={}", k, mag);
+        let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+        let mut suppression = vec![0.0_f32; num_bins];
+
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, Some(&sidechain), &curves, &mut suppression, None, &ctx);
+        module.process(1, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, Some(&sidechain), &curves, &mut suppression, None, &ctx);
+
+        // Real claim of the test name: v1 modes never call refresh_smoothed,
+        // so smoothed_primed stays false on both channels.
+        assert!(!module.smoothed_primed_for_test(0),
+            "{:?}: smoothed_primed[0] became true — v1 mode should not call refresh_smoothed", mode);
+        assert!(!module.smoothed_primed_for_test(1),
+            "{:?}: smoothed_primed[1] became true — v1 mode should not call refresh_smoothed", mode);
     }
 }
