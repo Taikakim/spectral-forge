@@ -3,6 +3,7 @@ pub mod bin_physics;
 pub mod guard;
 pub mod history_buffer;
 pub mod physics_helpers;
+pub mod circuit_kernels;
 pub mod modules;
 pub mod phase;
 pub mod pipeline;
