@@ -89,6 +89,20 @@ const STATIC_WELL_BASELINE: f32 = 1.05;
 /// Sidechain peak must reach this fraction of the per-hop max to register as a well.
 const SC_WELL_THRESHOLD_FRAC: f32 = 0.4;
 
+// ── Ferromagnetism kernel constants ──────────────────────────────────────────
+
+/// Peak detection window half-width for Ferromagnetism mode.
+/// A bin counts as a peak only if its magnitude exceeds `ORBITAL_PEAK_THRESHOLD_FACTOR`
+/// times the local-window mean over this many bins on each side.
+const FERRO_PEAK_WINDOW_HALF: usize = 8;
+/// Per-hop alpha multiplier on STRENGTH: `alpha = STRENGTH * FERRO_ALPHA_SCALE`.
+/// Keeps per-hop phase pull in the range [0, 0.6] for STRENGTH in [0, 2].
+const FERRO_ALPHA_SCALE: f32 = 0.3;
+/// Maximum per-hop pull fraction — clamps `alpha * weight / (1 + resistance)`.
+const FERRO_PULL_CAP: f32 = 0.95;
+/// REACH curve → bin distance multiplier: `reach_bins = REACH * FERRO_REACH_SCALE`.
+const FERRO_REACH_SCALE: f32 = 16.0;
+
 // ── State structs ──────────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "probe"))]
@@ -663,16 +677,110 @@ impl KineticsModule {
         }
     }
 
-    /// Ferromagnetism — bin clusters magnetically align in magnitude. Implemented in Task 9.
+    /// Ferromagnetism — peak-attracted phase alignment.
+    ///
+    /// **Pass A** detects up to `MAX_PEAKS` spectral peaks (local maxima that exceed both
+    /// immediate neighbours AND exceed `ORBITAL_PEAK_THRESHOLD_FACTOR` × the local-window
+    /// mean over `FERRO_PEAK_WINDOW_HALF` bins on each side).
+    ///
+    /// **Pass B** pulls satellite bins' phases toward the master peak's phase.  For each
+    /// peak at bin `km` with phase `target_phase` and each distance `d ∈ 1..=reach_bins`:
+    ///
+    /// ```text
+    /// weight   = exp(-d / reach_bins)            // exponential decay with distance
+    /// pull     = clamp(α * weight / (1+resistance), 0, FERRO_PULL_CAP)
+    /// new_phase = cur_phase + phase_diff_wrapped(target, cur) * pull * mix
+    /// ```
+    ///
+    /// where `α = STRENGTH[km] * FERRO_ALPHA_SCALE`.  Magnitudes are preserved; only
+    /// phase is rotated.  MIX curve blends the pull amount (0 = dry phase, 1 = full pull).
     fn apply_ferromagnetism(
         &mut self,
-        _channel: usize,
-        _bins: &mut [Complex<f32>],
+        channel: usize,
+        bins: &mut [Complex<f32>],
         _dt: f32,
-        _num_bins: usize,
+        num_bins: usize,
         _physics: Option<&BinPhysics>,
     ) {
-        // Implemented in Task 9.
+        use std::f32::consts::PI;
+
+        // Bind local slice refs — avoids triple-indexing through self inside inner loops
+        // and keeps borrows disjoint from the bins mutation in Pass B.
+        let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
+        let reach_curve    = &self.smoothed_curves[channel][2][..num_bins];
+        let damping_curve  = &self.smoothed_curves[channel][3][..num_bins];
+        let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
+
+        // -- Pass A: Find peaks. --
+        // A bin qualifies as a master peak if:
+        //   1. magnitude > both immediate neighbours (local maximum)
+        //   2. magnitude > ORBITAL_PEAK_THRESHOLD_FACTOR × the mean over the local
+        //      FERRO_PEAK_WINDOW_HALF window
+        // SmallVec stays stack-allocated up to MAX_PEAKS = 16 entries; no heap allocation.
+        // Tuple: (bin_index, magnitude, phase)
+        let mut peaks: SmallVec<[(usize, f32, f32); MAX_PEAKS]> = SmallVec::new();
+        for k in 1..(num_bins - 1) {
+            let m = bins[k].norm();
+            if m < 1e-6 { continue; }
+            let left  = bins[k - 1].norm();
+            let right = bins[k + 1].norm();
+            if m > left && m > right {
+                // Window-mean check: allocation-free iterator sum over the local window.
+                let lo   = k.saturating_sub(FERRO_PEAK_WINDOW_HALF);
+                let hi   = (k + FERRO_PEAK_WINDOW_HALF).min(num_bins - 1);
+                let mean = (lo..=hi).map(|i| bins[i].norm()).sum::<f32>() / (hi - lo + 1) as f32;
+                if m > ORBITAL_PEAK_THRESHOLD_FACTOR * mean {
+                    if peaks.len() < MAX_PEAKS {
+                        peaks.push((k, m, bins[k].arg()));
+                    }
+                }
+            }
+        }
+        if peaks.is_empty() { return; }
+
+        // -- Pass B: Pull satellite phases toward each peak's phase. --
+        // Bins are read+mutated here; the peak list (Pass A) is complete so there is
+        // no conflict between the norm/arg reads above and the writes below.
+        for &(km, _m_amp, target_phase) in peaks.iter() {
+            let reach_bins = (reach_curve[km].clamp(0.1, 4.0) * FERRO_REACH_SCALE).round() as usize;
+            let alpha      = strength_curve[km].clamp(0.0, 2.0) * FERRO_ALPHA_SCALE;
+            let resistance = damping_curve[km].clamp(0.0, 2.0);
+
+            for d in 1..=reach_bins {
+                // Exponential decay: weight = exp(-d / reach_bins).
+                let weight = (-(d as f32) / reach_bins.max(1) as f32).exp();
+                let pull   = (alpha * weight / (1.0 + resistance)).min(FERRO_PULL_CAP);
+
+                // +d satellite
+                let kp = km + d;
+                if kp < num_bins {
+                    let cur_mag = bins[kp].norm();
+                    let cur_ph  = bins[kp].arg();
+                    let mix     = mix_curve[kp].clamp(0.0, 1.0);
+                    // Shortest-arc phase difference, wrapped to (-π, π].
+                    let mut diff = target_phase - cur_ph;
+                    while diff >  PI { diff -= 2.0 * PI; }
+                    while diff < -PI { diff += 2.0 * PI; }
+                    let new_ph  = cur_ph + diff * pull * mix;
+                    bins[kp].re = cur_mag * new_ph.cos();
+                    bins[kp].im = cur_mag * new_ph.sin();
+                }
+
+                // -d satellite
+                if km >= d {
+                    let kn      = km - d;
+                    let cur_mag = bins[kn].norm();
+                    let cur_ph  = bins[kn].arg();
+                    let mix     = mix_curve[kn].clamp(0.0, 1.0);
+                    let mut diff = target_phase - cur_ph;
+                    while diff >  PI { diff -= 2.0 * PI; }
+                    while diff < -PI { diff += 2.0 * PI; }
+                    let new_ph  = cur_ph + diff * pull * mix;
+                    bins[kn].re = cur_mag * new_ph.cos();
+                    bins[kn].im = cur_mag * new_ph.sin();
+                }
+            }
+        }
     }
 
     /// Thermal expansion — temperature-driven magnitude swelling.

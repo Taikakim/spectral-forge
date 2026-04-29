@@ -1922,3 +1922,66 @@ fn kinetics_orbital_phase_rotates_satellites_in_opposite_directions() {
         new_master_phase
     );
 }
+
+#[test]
+fn kinetics_ferromagnetism_aligns_neighbour_phases_to_peak() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::Ferromagnetism);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.1, 0.0); num_bins];
+    // Master peak with phase pi/2 at bin 300.
+    bins[300] = Complex::new(0.0, 5.0);
+    // Neighbour bins with initial phases away from pi/2.
+    bins[298] = Complex::from_polar(0.5, -1.5);
+    bins[302] = Complex::from_polar(0.5, 1.5);
+
+    let strength = vec![2.0_f32; num_bins]; // strong magnetic pull
+    let neutral  = vec![1.0_f32; num_bins];
+    let mix      = vec![2.0_f32; num_bins]; // clamped to 1.0 inside the kernel
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    let target_phase = bins[300].arg();
+    let dry_298 = bins[298].arg();
+    let dry_302 = bins[302].arg();
+
+    for _ in 0..10 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+
+    let new_298 = bins[298].arg();
+    let new_302 = bins[302].arg();
+    let phase_diff = |a: f32, b: f32| -> f32 {
+        let mut d = a - b;
+        while d >  std::f32::consts::PI { d -= 2.0 * std::f32::consts::PI; }
+        while d < -std::f32::consts::PI { d += 2.0 * std::f32::consts::PI; }
+        d.abs()
+    };
+
+    let dry_offset_298 = phase_diff(dry_298, target_phase);
+    let new_offset_298 = phase_diff(new_298, target_phase);
+    let dry_offset_302 = phase_diff(dry_302, target_phase);
+    let new_offset_302 = phase_diff(new_302, target_phase);
+
+    assert!(new_offset_298 < dry_offset_298,
+        "neighbour 298 did not align toward peak phase: dry_offset={}, new_offset={}",
+        dry_offset_298, new_offset_298);
+    assert!(new_offset_302 < dry_offset_302,
+        "neighbour 302 did not align toward peak phase: dry_offset={}, new_offset={}",
+        dry_offset_302, new_offset_302);
+}
