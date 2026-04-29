@@ -1,6 +1,6 @@
 # Phase 5b.3 — Kinetics Module Implementation Plan
 
-> **Status:** PLANNED — implementation pending. Phase 5 sub-plan; depends on Phase 1 (`docs/superpowers/plans/2026-04-27-phase-1-foundation-infra.md`) and Phase 3 BinPhysics (`docs/superpowers/plans/2026-04-27-phase-3-bin-physics.md`).
+> **Status:** IMPLEMENTED (2026-04-29). All 17 tasks merged: 8 modes, shared `physics_helpers` module, full BinPhysics writer/reader integration, per-slot mode + WellSource + MassSource persistence, mode-picker popup with sub-source pickers, integration + calibration tests. Source of truth: [../STATUS.md](../STATUS.md).
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
