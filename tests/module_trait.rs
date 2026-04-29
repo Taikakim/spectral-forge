@@ -2413,3 +2413,86 @@ fn modulate_gravity_phaser_repel_inverts_rotation_direction() {
         "Repel not exact sign flip: pull={}, push={}, sum={}",
         pull_momentum, push_momentum, pull_momentum + push_momentum);
 }
+
+#[test]
+fn modulate_gravity_phaser_sc_positioned_peaks_concentrate_momentum() {
+    // SidechainPositioned mode: sidechain peaks act as gravity wells. Bins near
+    // a strong sidechain peak must accumulate more phase_momentum than distant bins.
+    use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_modulate_mode(ModulateMode::GravityPhaser);
+    module.set_modulate_sc_positioned(true);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+    // AMOUNT=2, REACH=1 (medium), RATE=neutral, THRESH=1, AMPGATE=neutral, MIX=2 full-wet
+    let amount  = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &neutral, &mix];
+
+    // Sidechain with a single strong peak at bin 200.
+    let mut sc = vec![0.01_f32; num_bins];
+    sc[199] = 0.2;
+    sc[200] = 3.0; // clear local maximum
+    sc[201] = 0.15;
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+
+    // Run enough hops for momentum to integrate.
+    for _ in 0..20 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, Some(&sc), &curves,
+                       &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    // All momentum values must be finite.
+    for k in 0..num_bins {
+        assert!(physics.phase_momentum[k].is_finite(),
+            "NaN/Inf momentum at bin {}", k);
+    }
+
+    // Bins near the sidechain peak (bin 200) should have more momentum than
+    // bins far from any peak (e.g. bin 600 which is well past the only peak).
+    let near_peak  = physics.phase_momentum[200].abs();
+    let far_from_peak = physics.phase_momentum[600].abs();
+    assert!(near_peak > far_from_peak,
+        "sc_positioned: near-peak momentum ({}) not greater than far-peak ({})",
+        near_peak, far_from_peak);
+
+    // When no sidechain is supplied, momentum decays to zero (empty node list → pure decay).
+    let mut module_no_sc = ModulateModule::new();
+    module_no_sc.reset(48_000.0, 2048);
+    module_no_sc.set_modulate_mode(ModulateMode::GravityPhaser);
+    module_no_sc.set_modulate_sc_positioned(true);
+
+    let mut bins2: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+    let mut supp2 = vec![0.0_f32; num_bins];
+    let mut phys2 = BinPhysics::new();
+    phys2.reset_active(num_bins, 48_000.0, 2048);
+    // Seed a nonzero value.
+    phys2.phase_momentum[300] = 5.0;
+
+    // Run with no sidechain — momentum should decay via the 0.95 factor.
+    for _ in 0..40 {
+        module_no_sc.process(0, StereoLink::Linked, FxChannelTarget::All,
+                             &mut bins2, None, &curves,
+                             &mut supp2, Some(&mut phys2), &ctx);
+    }
+
+    // After 40 hops with pure decay (0.95^40 ≈ 0.129), the seeded momentum
+    // should be well below the original 5.0.
+    assert!(phys2.phase_momentum[300].abs() < 1.0,
+        "no-sidechain momentum did not decay: m[300]={}", phys2.phase_momentum[300]);
+}

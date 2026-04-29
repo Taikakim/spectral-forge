@@ -13,11 +13,18 @@
 
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::dsp::modules::{
     FxChannelTarget, ModuleContext, ModuleType, SpectralModule,
 };
 use crate::params::StereoLink;
+
+// ── SidechainPositioned peak-detection constant ────────────────────────────
+
+/// Maximum number of sidechain gravity-well peaks kept per channel.
+/// Stack-allocated in SmallVec — no heap alloc in the hot path.
+const MAX_GP_NODES: usize = 32;
 
 // ── Phase Phaser kernel ────────────────────────────────────────────────────
 
@@ -310,6 +317,85 @@ fn apply_gravity_phaser(
     }
 }
 
+// ── SidechainPositioned helpers ───────────────────────────────────────────
+
+/// Locate local maxima in `sc` that exceed `thresh` and write them into
+/// `out` as `(bin_index, normalised_magnitude)`. `out` is cleared before
+/// writing. At most `MAX_GP_NODES` peaks are recorded; extras are silently
+/// dropped (stack limit). No allocation is performed.
+fn find_sidechain_peaks(
+    sc: &[f32],
+    thresh: f32,
+    out: &mut SmallVec<[(usize, f32); MAX_GP_NODES]>,
+) {
+    out.clear();
+    let n = sc.len();
+    if n < 3 { return; }
+    for k in 1..(n - 1) {
+        if sc[k] > thresh && sc[k] > sc[k - 1] && sc[k] > sc[k + 1] {
+            if out.len() < MAX_GP_NODES {
+                out.push((k, sc[k]));
+            }
+        }
+    }
+}
+
+/// Gravity Phaser variant that positions gravity wells at sidechain spectral
+/// peaks. Each peak pulls (or repels, when `repel=true`) nearby bins via a
+/// Gaussian force profile; the resulting momentum accumulates into
+/// `phase_momentum` and drives a complex rotation applied to `bins`.
+///
+/// # Allocation contract
+/// This function performs **no heap allocation**. `nodes` is a stack-backed
+/// SmallVec slice. `phase_momentum` is a pre-allocated caller-owned slice.
+fn apply_gravity_phaser_sc_positioned(
+    bins: &mut [Complex<f32>],
+    smoothed: &[&[f32]; 6],
+    nodes: &[(usize, f32)],
+    phase_momentum: &mut [f32],
+    repel: bool,
+) {
+    use std::f32::consts::PI;
+    let amount_c = smoothed[0];
+    let reach_c  = smoothed[1];
+    let mix_c    = smoothed[5];
+    let num_bins = bins.len();
+    let sign: f32 = if repel { -1.0 } else { 1.0 };
+
+    if nodes.is_empty() {
+        // No peaks found — pure momentum decay; bins pass through unchanged.
+        for k in 0..num_bins {
+            phase_momentum[k] *= 0.95;
+        }
+        return;
+    }
+
+    for k in 0..num_bins {
+        let amount = amount_c[k].clamp(0.0, 2.0);
+        let reach  = reach_c[k].clamp(0.1, 4.0);
+        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let width_bins = (reach * 12.0).max(1.0);
+        let mut force = 0.0_f32;
+        for (n_idx, n_mag) in nodes.iter() {
+            let d = (k as i32 - *n_idx as i32) as f32;
+            let g = (-(d * d) / (width_bins * width_bins)).exp();
+            force += sign * amount * 0.05 * (*n_mag).min(2.0) * g;
+        }
+        phase_momentum[k] = (phase_momentum[k] * 0.95 + force).clamp(-10.0, 10.0);
+
+        let rotation = phase_momentum[k] * PI;
+        let cos_r = rotation.cos();
+        let sin_r = rotation.sin();
+        let dry = bins[k];
+        let wet = Complex::new(
+            dry.re * cos_r - dry.im * sin_r,
+            dry.re * sin_r + dry.im * cos_r,
+        );
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
@@ -337,6 +423,12 @@ pub struct ModulateModule {
     mode: ModulateMode,
     /// When true, GravityPhaser inverts force sign (push instead of pull).
     repel: bool,
+    /// When true, GravityPhaser uses sidechain spectral peaks as gravity wells
+    /// (SidechainPositioned mode). Requires a live sidechain connection.
+    sc_positioned: bool,
+    /// Per-channel SmallVec of `(bin_index, magnitude)` tuples produced by
+    /// `find_sidechain_peaks`. Stack-allocated up to `MAX_GP_NODES` per channel.
+    gp_nodes: [SmallVec<[(usize, f32); MAX_GP_NODES]>; 2],
     /// Accumulated hop count per channel (used by phase animation kernels).
     hop_count: [u64; 2],
     /// Per-channel scratch buffer for BinSwapper (length = num_bins after reset).
@@ -360,9 +452,11 @@ pub struct ModulateModule {
 impl ModulateModule {
     pub fn new() -> Self {
         Self {
-            mode:         ModulateMode::default(),
-            repel:        false,
-            hop_count:    [0; 2],
+            mode:          ModulateMode::default(),
+            repel:         false,
+            sc_positioned: false,
+            gp_nodes:      [SmallVec::new(), SmallVec::new()],
+            hop_count:     [0; 2],
             swap_scratch: [Vec::<Complex<f32>>::new(), Vec::<Complex<f32>>::new()],
             rms_history:  [[0.0; 16]; 2],
             rms_idx:      [0; 2],
@@ -488,10 +582,27 @@ impl SpectralModule for ModulateModule {
             ModulateMode::GravityPhaser => {
                 let num_bins = bins.len();
                 self.refresh_smoothed(channel, curves, num_bins);
-                let smoothed = self.smoothed_curves_for(channel);
                 if let Some(p) = physics.as_mut() {
                     let momentum = &mut p.phase_momentum[..num_bins];
-                    apply_gravity_phaser(bins, &smoothed, momentum, self.repel);
+                    if self.sc_positioned {
+                        // Populate gp_nodes before borrowing smoothed_curves.
+                        // Threshold from THRESH curve at bin 0, scaled to [0.005, 2.0].
+                        // We need the thresh value before borrowing smoothed, so read it directly.
+                        let thresh = self.smoothed_curves[channel][3]
+                            .first().copied().unwrap_or(1.0).clamp(0.01, 4.0) * 0.5;
+                        if let Some(sc) = sidechain {
+                            find_sidechain_peaks(sc, thresh, &mut self.gp_nodes[channel]);
+                        } else {
+                            self.gp_nodes[channel].clear();
+                        }
+                        // Now take the smoothed borrow and a shared ref to gp_nodes.
+                        let smoothed = self.smoothed_curves_for(channel);
+                        let nodes = &self.gp_nodes[channel][..];
+                        apply_gravity_phaser_sc_positioned(bins, &smoothed, nodes, momentum, self.repel);
+                    } else {
+                        let smoothed = self.smoothed_curves_for(channel);
+                        apply_gravity_phaser(bins, &smoothed, momentum, self.repel);
+                    }
                 } else {
                     debug_assert!(false,
                         "GravityPhaser requires Some(physics) — FxMatrix must supply it for writes_bin_physics modules");
@@ -546,6 +657,10 @@ impl SpectralModule for ModulateModule {
 
     fn set_modulate_repel(&mut self, repel: bool) {
         self.repel = repel;
+    }
+
+    fn set_modulate_sc_positioned(&mut self, enabled: bool) {
+        self.sc_positioned = enabled;
     }
 
     #[cfg(any(test, feature = "probe"))]

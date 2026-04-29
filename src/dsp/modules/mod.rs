@@ -291,6 +291,9 @@ pub trait SpectralModule: Send {
     /// Update the per-slot Repel toggle for Modulate.GravityPhaser. Default no-op.
     fn set_modulate_repel(&mut self, _repel: bool) {}
 
+    /// Update the per-slot SidechainPositioned toggle for Modulate.GravityPhaser. Default no-op.
+    fn set_modulate_sc_positioned(&mut self, _enabled: bool) {}
+
     /// Update the operating mode for Circuit modules. Default no-op for all other types.
     fn set_circuit_mode(&mut self, _: crate::dsp::modules::circuit::CircuitMode) {}
 
