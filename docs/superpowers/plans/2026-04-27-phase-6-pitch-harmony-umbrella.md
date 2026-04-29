@@ -47,7 +47,7 @@ inline.
 
 | # | Plan file | What it ships | Depends on |
 |---|-----------|--------------|------------|
-| 6.1 | `2026-04-27-phase-6.1-instantaneous-freq.md` | `compute_instantaneous_freq` helper; populate `ctx.instantaneous_freq` per hop, gated by `needs_instantaneous_freq`. | Phase 1, Phase 4 |
+| 6.1 ✅ IMPLEMENTED | `2026-04-27-phase-6.1-instantaneous-freq.md` | `compute_instantaneous_freq` helper; populate `ctx.instantaneous_freq` per hop, gated by `needs_instantaneous_freq`. Landed 2026-04-30 on `feature/next-gen-modules-plans`. | Phase 1, Phase 4 |
 | 6.2 | `2026-04-27-phase-6.2-chromagram-harmonic-groups.md` | `compute_chromagram` (12-element pitch class) + `harmonic_group_detect` (Klapuri-style); populate `ctx.chromagram` and `ctx.harmonic_groups`. | 6.1 |
 | 6.3 | `2026-04-27-phase-6.3-midi-input.md` | nih-plug MIDI port wiring; `held_notes: [bool; 128]`, `pitch_classes: [bool; 12]`, `note_events: &[NoteEvent]` in `SharedState`; populate `ctx.midi_notes` / `ctx.held_pitch_classes`. | Phase 1 |
 | 6.4 | `2026-04-27-phase-6.4-cepstrum.md` | Lazy cepstrum (extra real-FFT pair) gated by `needs_cepstrum`, exposed via `ctx.cepstrum_buf`. | Phase 1 |
