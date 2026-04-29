@@ -873,11 +873,32 @@ impl SpectralModule for ModulateModule {
 
         #[cfg(any(test, feature = "probe"))]
         {
-            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+            // Per-mode extra probes — only set when the relevant mode is active.
+            let mut snap = crate::dsp::modules::ProbeSnapshot {
                 amount_pct: Some(probe_amount_pct),
                 mix_pct:    Some(probe_mix_pct),
                 ..Default::default()
             };
+            match self.mode {
+                ModulateMode::GravityPhaser => {
+                    snap.mod_gp_node_count    = Some(self.gp_nodes[channel].len() as u16);
+                    snap.mod_gp_repel         = Some(self.repel);
+                    snap.mod_gp_sc_positioned = Some(self.sc_positioned);
+                }
+                ModulateMode::PllTear => {
+                    let total = self.pll_torn[channel].len().saturating_sub(PLL_MIN_BIN);
+                    let locked = if total > 0 {
+                        self.pll_torn[channel][PLL_MIN_BIN..]
+                            .iter()
+                            .filter(|t| !**t)
+                            .count()
+                    } else { 0 };
+                    let pct = if total > 0 { (locked as f32 / total as f32) * 100.0 } else { 0.0 };
+                    snap.mod_pll_lock_pct = Some(pct);
+                }
+                _ => {}
+            }
+            self.last_probe = snap;
         }
     }
 

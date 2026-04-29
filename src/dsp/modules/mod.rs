@@ -224,6 +224,17 @@ pub struct ProbeSnapshot {
     pub kinetics_velocity:        Option<f32>,
     pub kinetics_active_mode_idx: Option<u8>,
     pub kinetics_well_count:      Option<u16>,
+
+    // Modulate retrofit-mode probes — populated by ModulateModule::process()
+    // when self.mode is GravityPhaser or PllTear.
+    /// Gravity Phaser: count of detected sidechain peaks (0..=32).
+    pub mod_gp_node_count:    Option<u16>,
+    /// Gravity Phaser: repel-toggle state at the time of probe.
+    pub mod_gp_repel:         Option<bool>,
+    /// Gravity Phaser: sidechain-positioned mode state at the time of probe.
+    pub mod_gp_sc_positioned: Option<bool>,
+    /// PLL Tear: percentage of PLL-active bins currently locked, 0..=100.
+    pub mod_pll_lock_pct:     Option<f32>,
 }
 
 // ── SpectralModule trait ───────────────────────────────────────────────────

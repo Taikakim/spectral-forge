@@ -1372,3 +1372,102 @@ fn kinetics_calibration_probes_round_trip() {
     assert!(p.kinetics_velocity.unwrap().is_finite());
     assert_eq!(p.kinetics_well_count, Some(0)); // Hooke uses no fork list
 }
+
+// ── Modulate retrofit-mode probes ─────────────────────────────────────────────
+
+#[test]
+fn modulate_gravity_phaser_probe_reflects_toggles_and_node_count() {
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    module.set_modulate_mode(ModulateMode::GravityPhaser);
+    module.set_modulate_repel(true);
+    module.set_modulate_sc_positioned(true);
+
+    // Build a sidechain with a clear peak at bin 200 so the peak finder
+    // detects exactly one node.
+    let mut sc = vec![0.0_f32; NUM_BINS];
+    sc[200] = 1.0;
+
+    let amount  = vec![1.0_f32; NUM_BINS];
+    let neutral = vec![1.0_f32; NUM_BINS];
+    let zeros   = vec![0.0_f32; NUM_BINS];
+    let mix     = vec![1.0_f32; NUM_BINS];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); NUM_BINS];
+    let mut suppression = vec![0.0_f32; NUM_BINS];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(NUM_BINS, SAMPLE_RATE, FFT_SIZE);
+    let ctx = make_ctx();
+
+    for _ in 0..5 {
+        module.process(
+            0,
+            StereoLink::Linked,
+            FxChannelTarget::All,
+            &mut bins,
+            Some(&sc),
+            &curves,
+            &mut suppression,
+            Some(&mut physics),
+            &ctx,
+        );
+    }
+
+    let probe = module.last_probe();
+    assert_eq!(probe.mod_gp_repel, Some(true), "repel toggle not reflected");
+    assert_eq!(probe.mod_gp_sc_positioned, Some(true), "sc_positioned toggle not reflected");
+    let nodes = probe.mod_gp_node_count.expect("gp_node_count must be Some when in GravityPhaser");
+    assert!(nodes <= 32, "gp_node_count out of bounds: {}", nodes);
+    // The pll_lock_pct should not be set when not in PllTear mode.
+    assert_eq!(probe.mod_pll_lock_pct, None);
+}
+
+#[test]
+fn modulate_pll_tear_probe_reports_lock_percentage() {
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = create_module(ModuleType::Modulate, SAMPLE_RATE, FFT_SIZE);
+    module.set_modulate_mode(ModulateMode::PllTear);
+
+    let amount  = vec![1.0_f32; NUM_BINS];
+    let neutral = vec![1.0_f32; NUM_BINS];
+    let zeros   = vec![0.0_f32; NUM_BINS];
+    let mix     = vec![1.0_f32; NUM_BINS];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    // Steady, identical bins → PLL should lock quickly on most bins.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); NUM_BINS];
+    let mut suppression = vec![0.0_f32; NUM_BINS];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(NUM_BINS, SAMPLE_RATE, FFT_SIZE);
+    let ctx = make_ctx();
+
+    // 50 hops gives the PLL time to settle and re-lock counter to clear.
+    for _ in 0..50 {
+        module.process(
+            0,
+            StereoLink::Linked,
+            FxChannelTarget::All,
+            &mut bins,
+            None,
+            &curves,
+            &mut suppression,
+            Some(&mut physics),
+            &ctx,
+        );
+    }
+
+    let probe = module.last_probe();
+    let pct = probe.mod_pll_lock_pct.expect("pll_lock_pct must be Some when in PllTear");
+    assert!(pct >= 0.0 && pct <= 100.0, "pll_lock_pct out of range: {}", pct);
+    // GravityPhaser-only fields must remain None.
+    assert_eq!(probe.mod_gp_node_count,    None);
+    assert_eq!(probe.mod_gp_repel,         None);
+    assert_eq!(probe.mod_gp_sc_positioned, None);
+}
