@@ -795,6 +795,9 @@ impl Pipeline {
         let scratch_mags_ref         = &mut self.scratch_mags;
         let peak_buf_ref             = &mut self.peak_buf;
         let total_hops_ref           = &mut self.total_hops_per_ch;
+        let if_buffer_ref            = &mut self.if_buffer;
+        let if_prev_phase_ref        = &mut self.if_prev_phase;
+        let sample_rate              = self.sample_rate;
         let pending_hop_frames       = &mut self.pending_hop_frames;
         let mut pending_hops: usize  = 0;
         let stft_num_channels        = self.stft.num_channels();
@@ -911,6 +914,29 @@ impl Pipeline {
                     std::cell::Cell::from_mut(&mut unwrapped_phase_ref[ch][..num_bins])
                         .as_slice_of_cells(),
                 );
+            }
+
+            // Phase 6.1: per-hop instantaneous-frequency populate.
+            // Skip when no active module needs it — saves ~1 wrap + 4 FLOPs/bin/hop.
+            if any_needs_if {
+                // Extract current wrapped phase. Always overwrite — safe whether PLPV
+                // already filled this scratch or not (PLPV writes the same values).
+                for k in 0..num_bins {
+                    scratch_curr_phase_ref[k] = complex_buf[k].arg();
+                }
+                crate::dsp::instantaneous_freq::compute_instantaneous_freq(
+                    &if_prev_phase_ref[ch][..num_bins],
+                    &scratch_curr_phase_ref[..num_bins],
+                    &mut if_buffer_ref[ch][..num_bins],
+                    sample_rate,
+                    hop_size,
+                    fft_size,
+                );
+                // Roll IF prev phase forward for the next hop on this channel.
+                if_prev_phase_ref[ch][..num_bins]
+                    .copy_from_slice(&scratch_curr_phase_ref[..num_bins]);
+                // Expose to modules. Borrow ends before fx_matrix.process_hop reads.
+                hop_ctx.instantaneous_freq = Some(&if_buffer_ref[ch][..num_bins]);
             }
 
             // Run all modules through the fx_matrix slot chain.
