@@ -1,8 +1,12 @@
 # Phase 5b.4 — Modulate Retrofit (Gravity Phaser + PLL Tear) Implementation Plan
 
-> **Status:** PLANNED — implementation pending. Phase 5b sub-plan; depends on
-> Phase 1 foundation infra, Phase 2f Modulate-light, Phase 3 BinPhysics, Phase 4
-> PLPV unwrapped phase, and Phase 5b.3 `physics_helpers.rs`.
+> **Status:** IMPLEMENTED — landed on branch `feature/next-gen-modules-plans`
+> (all 13 tasks). Modulate gained two physics-aware modes — **Gravity Phaser**
+> (reads/writes `BinPhysics::phase_momentum`, with per-slot Repel and
+> SidechainPositioned toggles) and **PLL Tear** (consumes
+> `ctx.unwrapped_phase`, lock-loss tear emission with hysteresis). Shared
+> `physics_helpers.rs` gained `pll_bank_step` + `wrap_phase`. FM Network +
+> Slew Lag remain deferred to Phase 6+.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task.
