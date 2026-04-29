@@ -2,8 +2,8 @@
 //! Designed for clean SIMD lift in v2 (target `wide::f32x8`); v1 is scalar.
 //!
 //! All functions are `#[inline]` and use bin-major loops with no inter-bin
-//! dependencies except `spread_3tap`, which expects a pre-cleared output
-//! buffer that aliases-free with `input`.
+//! dependencies except `spread_3tap`, whose output buffer must not alias
+//! `input`.
 
 /// One step of a 1-pole lowpass: `state += (target - state) * alpha`.
 /// `alpha` should already be clamped to `[0, 1]` by the caller.
@@ -82,25 +82,24 @@ impl SimdRng {
 
     /// Uniform `f32` in `[-1, 1)`.
     ///
-    /// Divides by 2^31 (= 2147483648.0) rather than `i32::MAX as f32`
-    /// (= 2147483520.0, rounded) to ensure the lower bound -1.0 holds
-    /// exactly. When the raw u32 maps to i32::MIN, the cast gives
-    /// -2147483648.0; dividing by 2147483648.0 yields exactly -1.0,
-    /// which satisfies `x >= -1.0`. With i32::MAX as divisor the same
-    /// value would yield ≈ -1.0000001, failing the bound assertion.
+    /// f32 only has 24 bits of mantissa precision, so dividing a 31/32-bit
+    /// integer by 2^31/2^32 rounds the upper bound up to exactly 1.0. We
+    /// therefore arithmetic-shift the raw u32-cast-to-i32 right by 7,
+    /// keeping a sign bit and 24 magnitude bits — both numerator range
+    /// `[-2^24, 2^24)` and divisor `2^24` are exact in f32, so the half-open
+    /// upper bound holds strictly.
     #[inline]
     pub fn next_f32_centered(&mut self) -> f32 {
-        (self.next_u32() as i32 as f32) / ((1u32 << 31) as f32)
+        ((self.next_u32() as i32) >> 7) as f32 / ((1u32 << 24) as f32)
     }
 
     /// Uniform `f32` in `[0, 1)`.
     ///
-    /// Divides by 2^32 (= 4294967296.0) rather than `u32::MAX as f32`
-    /// (which rounds to 4294967296.0 in f32, the same value the maximum
-    /// raw u32 also rounds to — yielding ratio = 1.0 exactly and breaking
-    /// the half-open upper bound).
+    /// Uses the top 24 bits of the raw u32 (matching f32's mantissa
+    /// precision). Numerator range `[0, 2^24)` and divisor `2^24` are
+    /// both exact in f32, so the half-open upper bound holds strictly.
     #[inline]
     pub fn next_f32_unit(&mut self) -> f32 {
-        (self.next_u32() as f32) / 4294967296.0_f32
+        (self.next_u32() >> 8) as f32 / ((1u32 << 24) as f32)
     }
 }
