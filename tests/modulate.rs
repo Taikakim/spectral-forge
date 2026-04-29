@@ -546,11 +546,11 @@ fn modulate_mode_dispatch_via_trait_setter() {
 /// every output bin is finite and below the runaway threshold (1e6), and every
 /// suppression entry is finite and non-negative.
 ///
-/// GravityPhaser + PllTear are pass-throughs in this phase; iterating them here
-/// guards the no-op arm against regressions when the kernels land in 5b4.4 / 5b4.7.
+/// GravityPhaser requires Some(physics); PllTear is a pass-through in this phase.
 #[test]
 fn modulate_finite_bounded_all_modes_dual_channel() {
     use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
     use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
@@ -599,9 +599,17 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
             0.5, false, false,
         );
 
+        // GravityPhaser writes phase_momentum so requires Some(physics).
+        let needs_physics = matches!(mode, ModulateMode::GravityPhaser);
+        let mut physics = BinPhysics::new();
+        if needs_physics {
+            physics.reset_active(num_bins, 48_000.0, 2048);
+        }
+
         for hop in 0..200 {
             for ch in 0..2_usize {
                 let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
+                let phys_arg = if needs_physics { Some(&mut physics) } else { None };
                 module.process(
                     ch,
                     StereoLink::Independent,
@@ -610,7 +618,7 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
                     Some(&sc),
                     &curves,
                     &mut suppression,
-                    None,
+                    phys_arg,
                     &ctx,
                 );
                 for (i, b) in bins.iter().enumerate() {

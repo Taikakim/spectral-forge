@@ -2300,3 +2300,55 @@ fn modulate_v1_modes_skip_smoothing_pass() {
             "{:?}: smoothed_primed[1] became true — v1 mode should not call refresh_smoothed", mode);
     }
 }
+
+#[test]
+fn modulate_gravity_phaser_writes_phase_momentum_and_rotates() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_modulate_mode(ModulateMode::GravityPhaser);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+    let dry_norms: Vec<f32> = bins.iter().map(|b| b.norm()).collect();
+
+    // AMOUNT=2 (max), REACH=1, RATE=1, THRESH=1, AMPGATE=0, MIX=2 (full wet)
+    let amount = vec![2.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let zeros = vec![0.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+    physics.phase_momentum[100] = 0.5; // seed at bin 100
+
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+
+    // 10 hops so smoother primes and momentum integrates.
+    for _ in 0..10 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves,
+                       &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    // Magnitudes preserved (rotation is unit-modulus + dry/wet blend of equal-magnitude vectors).
+    for k in 0..num_bins {
+        let mag = bins[k].norm();
+        assert!((mag - dry_norms[k]).abs() < 0.05,
+            "bin {} mag drift {} -> {}", k, dry_norms[k], mag);
+    }
+    // Phases must have rotated away from 0 around bin 100 (where momentum was seeded).
+    let near_seed: f32 = (95..=105).map(|k| bins[k].im.abs()).fold(0.0, f32::max);
+    assert!(near_seed > 0.05, "near-seed bins did not rotate (max im = {})", near_seed);
+    // Phase momentum must remain non-zero around bin 100 (kernel writes it).
+    let momentum_after = physics.phase_momentum[100];
+    assert!(momentum_after.is_finite(), "momentum NaN after Gravity Phaser");
+    assert!(momentum_after.abs() > 0.0, "Gravity Phaser did not write phase_momentum");
+}

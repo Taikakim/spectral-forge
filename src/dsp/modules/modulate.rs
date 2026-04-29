@@ -252,6 +252,60 @@ fn apply_ground_loop(
     }
 }
 
+// ── Gravity Phaser kernel ─────────────────────────────────────────────────
+
+fn apply_gravity_phaser(
+    bins: &mut [Complex<f32>],
+    smoothed: &[&[f32]; 6],
+    phase_momentum: &mut [f32],
+    repel: bool,
+) {
+    use std::f32::consts::PI;
+
+    let amount_c  = smoothed[0];
+    let reach_c   = smoothed[1];
+    let _rate_c   = smoothed[2]; // animation rate consumed by SidechainPositioned (Task 5b4.6)
+    let thresh_c  = smoothed[3];
+    let ampgate_c = smoothed[4];
+    let mix_c     = smoothed[5];
+
+    let num_bins = bins.len();
+    debug_assert!(phase_momentum.len() >= num_bins,
+        "phase_momentum buffer too short: {} < {}", phase_momentum.len(), num_bins);
+    let sign: f32 = if repel { -1.0 } else { 1.0 };
+
+    for k in 0..num_bins {
+        let amount  = amount_c[k].clamp(0.0, 2.0);
+        let reach   = reach_c[k].clamp(0.0, 4.0);
+        let thresh  = thresh_c[k].clamp(0.01, 4.0);
+        let ampgate = ampgate_c[k].clamp(0.0, 2.0);
+        let mix     = mix_c[k].clamp(0.0, 2.0) * 0.5;
+
+        let mag = bins[k].norm();
+        // Amp-gated drive: when ampgate > 0, scale per-bin drive by min(mag/thresh, 1).
+        let gate_factor = if ampgate > 0.001 {
+            (mag / thresh).min(1.0) * ampgate.min(1.0)
+        } else {
+            1.0
+        };
+
+        // Force = sign * amount * (reach * 0.05) — `reach` widens the per-bin influence.
+        // 5%/hop momentum decay prevents unbounded growth.
+        let force = sign * amount * reach * 0.05 * gate_factor;
+        phase_momentum[k] = phase_momentum[k] * 0.95 + force;
+
+        let rotation = phase_momentum[k] * PI;
+        let cos_r = rotation.cos();
+        let sin_r = rotation.sin();
+        let dry = bins[k];
+        let wet = Complex::new(
+            dry.re * cos_r - dry.im * sin_r,
+            dry.re * sin_r + dry.im * cos_r,
+        );
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
@@ -344,12 +398,17 @@ impl ModulateModule {
         self.smoothed_primed[channel]
     }
 
+    /// Borrow the 6 smoothed curves for `channel` as a fixed-size array.
+    /// Used by retrofit-mode kernels.
+    fn smoothed_curves_for(&self, channel: usize) -> [&[f32]; 6] {
+        debug_assert!(channel < 2, "channel must be 0 or 1, got {}", channel);
+        let c = &self.smoothed_curves[channel];
+        [&c[0], &c[1], &c[2], &c[3], &c[4], &c[5]]
+    }
+
     /// Refresh `smoothed_curves[channel]` from the raw input curves. Called only
     /// by retrofit modes; v1 modes consume `curves` directly. On the first hop
     /// after reset, the smoother is primed by direct copy (otherwise ~5-hop ramp).
-    // `#[allow(dead_code)]` is removed in Task 5b4.4 when the first caller
-    // (apply_gravity_phaser) lands.
-    #[allow(dead_code)]
     fn refresh_smoothed(&mut self, channel: usize, curves: &[&[f32]], num_bins: usize) {
         use crate::dsp::physics_helpers::smooth_curve_one_pole;
         debug_assert!(channel < 2, "channel must be 0 or 1, got {}", channel);
@@ -380,7 +439,7 @@ impl SpectralModule for ModulateModule {
         sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
-        _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
+        mut physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
         _ctx: &ModuleContext<'_>,
     ) {
         debug_assert!(channel < 2);
@@ -419,8 +478,20 @@ impl SpectralModule for ModulateModule {
                 let idx     = &mut self.rms_idx[channel];
                 apply_ground_loop(bins, history, idx, self.sample_rate, self.fft_size, curves);
             }
-            ModulateMode::GravityPhaser | ModulateMode::PllTear => {
-                // Kernels added in Tasks 5b4.4 / 5b4.7. Pass through unchanged.
+            ModulateMode::GravityPhaser => {
+                let num_bins = bins.len();
+                self.refresh_smoothed(channel, curves, num_bins);
+                let smoothed = self.smoothed_curves_for(channel);
+                if let Some(p) = physics.as_mut() {
+                    let momentum = &mut p.phase_momentum[..num_bins];
+                    apply_gravity_phaser(bins, &smoothed, momentum, /* repel */ false);
+                } else {
+                    debug_assert!(false,
+                        "GravityPhaser requires Some(physics) — FxMatrix must supply it for writes_bin_physics modules");
+                }
+            }
+            ModulateMode::PllTear => {
+                // Kernel added in Task 5b4.7. Pass through unchanged.
             }
         }
 
