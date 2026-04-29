@@ -2222,6 +2222,13 @@ fn modulate_heavy_cpu_only_for_pll_tear() {
 #[test]
 fn modulate_mode_enum_has_new_variants() {
     use spectral_forge::dsp::modules::modulate::ModulateMode;
-    let _ = ModulateMode::GravityPhaser;
-    let _ = ModulateMode::PllTear;
+    // Pin discriminants: MOD_HEAVY indexes by `mode as usize`, so a silent
+    // reorder would mis-flag light modes as heavy and vice versa.
+    assert_eq!(ModulateMode::PhasePhaser   as u8, 0);
+    assert_eq!(ModulateMode::BinSwapper    as u8, 1);
+    assert_eq!(ModulateMode::RmFmMatrix    as u8, 2);
+    assert_eq!(ModulateMode::DiodeRm       as u8, 3);
+    assert_eq!(ModulateMode::GroundLoop    as u8, 4);
+    assert_eq!(ModulateMode::GravityPhaser as u8, 5);
+    assert_eq!(ModulateMode::PllTear       as u8, 6);
 }

@@ -541,10 +541,13 @@ fn modulate_mode_dispatch_via_trait_setter() {
     assert_eq!(concrete.current_mode(), ModulateMode::GroundLoop);
 }
 
-/// End-to-end finite/bounded regression guard: 200 hops × 2 channels × 5 modes.
+/// End-to-end finite/bounded regression guard: 200 hops × 2 channels × 7 modes.
 /// Hammers every ModulateMode with a non-trivial complex spectrum and verifies
 /// every output bin is finite and below the runaway threshold (1e6), and every
 /// suppression entry is finite and non-negative.
+///
+/// GravityPhaser + PllTear are pass-throughs in this phase; iterating them here
+/// guards the no-op arm against regressions when the kernels land in 5b4.4 / 5b4.7.
 #[test]
 fn modulate_finite_bounded_all_modes_dual_channel() {
     use num_complex::Complex;
@@ -560,6 +563,8 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
         ModulateMode::RmFmMatrix,
         ModulateMode::DiodeRm,
         ModulateMode::GroundLoop,
+        ModulateMode::GravityPhaser,
+        ModulateMode::PllTear,
     ] {
         let mut module = ModulateModule::new();
         module.reset(48_000.0, 2048);

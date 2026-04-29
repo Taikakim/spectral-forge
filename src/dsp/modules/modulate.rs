@@ -256,7 +256,7 @@ fn apply_ground_loop(
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
 /// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear.
-const MOD_HEAVY: [bool; 7] = [false, false, false, false, false, false, true];
+const MOD_HEAVY: [bool; 7] = [false, false, false, false, false, false, true /* [6] PllTear */];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModulateMode {
