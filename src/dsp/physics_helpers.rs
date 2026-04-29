@@ -73,3 +73,59 @@ pub fn apply_energy_rise_hysteresis(
         rose_last[k] = doubled;
     }
 }
+
+/// Fold an angle into the canonical interval `[-π, π]`.
+/// Uses `rem_euclid` on a shifted-by-π value, then shifts back.
+/// The exact boundary `+π` is preserved as `+π` (range includes both `±π`).
+#[inline]
+pub fn wrap_phase(p: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    // (p + PI).rem_euclid(TAU) gives a value in [0, TAU); subtract PI -> [-PI, PI).
+    // When shifted == 0, the input was an exact multiple of TAU away from ±PI.
+    // Preserve the sign of the original input so both +PI and -PI map to themselves.
+    let shifted = (p + PI).rem_euclid(TAU);
+    if shifted == 0.0 {
+        if p >= 0.0 { PI } else { -PI }
+    } else {
+        shifted - PI
+    }
+}
+
+/// Per-bin 2nd-order PI phase-locked loop bank step. One iteration per bin per hop.
+///
+/// Update rule (per bin `k`):
+/// ```text
+/// err = wrap_phase(target_phase[k] - pll_phase[k])
+/// pll_freq[k]  += beta  * err
+/// pll_phase[k] += pll_freq[k] + alpha * err
+/// out_phase_error[k] = err
+/// ```
+///
+/// `alpha = 2 * zeta * omega_n`, `beta = omega_n * omega_n` with `omega_n` in
+/// cycles-per-hop (loop natural frequency). Defaults: `omega_n = 0.05`,
+/// `zeta = 0.707` (Butterworth-flat). See `ideas/next-gen-modules/16-modulate.md`
+/// research finding 1.
+///
+/// All four mutable slices and `target_phase` must have the same length.
+/// Caller is responsible for choosing which bins to step (e.g. skipping
+/// sub-100Hz bins for PLL Tear; finding 3).
+#[inline]
+pub fn pll_bank_step(
+    pll_phase: &mut [f32],
+    pll_freq: &mut [f32],
+    target_phase: &[f32],
+    alpha: f32,
+    beta: f32,
+    out_phase_error: &mut [f32],
+) {
+    debug_assert_eq!(pll_phase.len(), pll_freq.len());
+    debug_assert_eq!(pll_phase.len(), target_phase.len());
+    debug_assert_eq!(pll_phase.len(), out_phase_error.len());
+    let n = pll_phase.len();
+    for k in 0..n {
+        let err = wrap_phase(target_phase[k] - pll_phase[k]);
+        pll_freq[k] += beta * err;
+        pll_phase[k] += pll_freq[k] + alpha * err;
+        out_phase_error[k] = err;
+    }
+}

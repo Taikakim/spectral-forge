@@ -93,3 +93,84 @@ fn apply_energy_rise_hysteresis_scales_doubled_bins() {
     assert!(!rose_last[2]); // did not double -> false
     assert!(rose_last[3]);  // doubled -> true
 }
+
+#[test]
+fn wrap_phase_folds_into_minus_pi_to_pi() {
+    use std::f32::consts::PI;
+    assert!((wrap_phase(0.0) - 0.0).abs() < 1e-6);
+    assert!((wrap_phase(PI) - PI).abs() < 1e-6);
+    assert!((wrap_phase(-PI) - (-PI)).abs() < 1e-6);
+    // 1.5*PI -> -0.5*PI
+    assert!((wrap_phase(1.5 * PI) - (-0.5 * PI)).abs() < 1e-5);
+    // -1.5*PI -> 0.5*PI
+    assert!((wrap_phase(-1.5 * PI) - (0.5 * PI)).abs() < 1e-5);
+    // 5*PI -> PI (or -PI; either is fine within 1e-5)
+    let w = wrap_phase(5.0 * PI);
+    assert!(w.abs() <= PI + 1e-5);
+}
+
+#[test]
+fn pll_bank_step_locks_to_constant_target() {
+    use std::f32::consts::PI;
+    // 4 bins, all targets at PI/4. PLL starts at 0, should converge.
+    let mut pll_phase = vec![0.0_f32; 4];
+    let mut pll_freq = vec![0.0_f32; 4];
+    let target = vec![PI / 4.0; 4];
+    let mut err = vec![0.0_f32; 4];
+    // Butterworth-flat: omega_n = 0.05 cycles/hop, zeta = 0.707.
+    // alpha = 2 * zeta * omega_n, beta = omega_n^2.
+    let omega_n = 0.05_f32;
+    let zeta = 0.707_f32;
+    let alpha = 2.0 * zeta * omega_n;
+    let beta = omega_n * omega_n;
+
+    // Run 200 hops; final phase error must be near-zero.
+    for _ in 0..200 {
+        pll_bank_step(&mut pll_phase, &mut pll_freq, &target, alpha, beta, &mut err);
+    }
+    for k in 0..4 {
+        assert!(err[k].abs() < 0.01, "bin {} did not lock: err = {}", k, err[k]);
+        // PLL frequency should have settled near 0 (target is constant).
+        assert!(pll_freq[k].abs() < 0.01, "bin {} freq drift: {}", k, pll_freq[k]);
+    }
+}
+
+#[test]
+fn pll_bank_step_tracks_constant_velocity_target() {
+    // Target advances by 0.1 rad per hop. PLL should match the velocity.
+    let mut pll_phase = vec![0.0_f32];
+    let mut pll_freq = vec![0.0_f32];
+    let mut target = 0.0_f32;
+    let mut err = vec![0.0_f32];
+    let omega_n = 0.1_f32;
+    let zeta = 0.707_f32;
+    let alpha = 2.0 * zeta * omega_n;
+    let beta = omega_n * omega_n;
+
+    // 500 hops to fully settle.
+    for _ in 0..500 {
+        target += 0.1;
+        let target_v = vec![wrap_phase(target)];
+        pll_bank_step(&mut pll_phase, &mut pll_freq, &target_v, alpha, beta, &mut err);
+    }
+    // Steady-state error for a velocity ramp under a 2nd-order PI loop should
+    // approach zero (this loop is type-2, no steady-state ramp error).
+    assert!(err[0].abs() < 0.05, "velocity tracking err = {}", err[0]);
+    // Freq estimate should be near 0.1 rad/hop.
+    assert!((pll_freq[0] - 0.1).abs() < 0.01, "freq estimate = {}", pll_freq[0]);
+}
+
+#[test]
+fn pll_bank_step_lengths_must_match() {
+    // Debug assert; not a panic in release. Skip on release builds.
+    if cfg!(debug_assertions) {
+        let mut pll_phase = vec![0.0_f32; 3];
+        let mut pll_freq = vec![0.0_f32; 3];
+        let target = vec![0.0_f32; 4]; // mismatched
+        let mut err = vec![0.0_f32; 3];
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pll_bank_step(&mut pll_phase, &mut pll_freq, &target, 0.05, 0.0025, &mut err);
+        }));
+        assert!(result.is_err(), "expected debug assert panic on length mismatch");
+    }
+}
