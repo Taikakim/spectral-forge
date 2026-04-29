@@ -8,6 +8,88 @@ fn circuit_test_ctx(num_bins: usize) -> ModuleContext<'static> {
     )
 }
 
+#[test]
+fn circuit_slew_distortion_caps_rate_of_change_and_scrambles_phase() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::SlewDistortion);
+
+    let num_bins = 1025;
+    // Strong rate cap: thresh=0.1 means max delta-mag per hop = 0.1*(0.5+0.5*1.0)=0.1
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.1_f32; num_bins]; // rate cap = 0.1 per hop
+    let spread  = vec![0.0_f32; num_bins]; // unused
+    let release = vec![1.0_f32; num_bins]; // scramble_gain = 0.5
+    let mix     = vec![2.0_f32; num_bins]; // full wet
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    // Hop 1: settle prev_mag = 0 baseline.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+
+    // Hop 2: introduce a large transient at bin 100.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[100] = Complex::new(2.0, 0.0); // sudden jump from 0 to 2.0
+    let phase_in = bins[100].arg();
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+
+    let after_mag = bins[100].norm();
+    let after_phase = bins[100].arg();
+    // Magnitude should be rate-limited (≤ thresh × scale = 0.1 * 1.0 = 0.1).
+    assert!(after_mag < 1.0, "mag should be slew-capped (got {})", after_mag);
+    assert!(after_mag > 0.0, "mag should not be zero (got {})", after_mag);
+    // Phase should differ from input phase (scramble from excess slew).
+    let phase_diff = (after_phase - phase_in).abs();
+    assert!(phase_diff > 0.01, "phase should be scrambled by excess slew (diff={})", phase_diff);
+}
+
+#[test]
+fn circuit_slew_distortion_writes_bin_physics_slew() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::SlewDistortion);
+
+    let num_bins = 1025;
+    let amount  = vec![1.0_f32; num_bins];
+    let thresh  = vec![0.5_f32; num_bins]; // rate cap = 0.5
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); num_bins];
+    let mut physics = BinPhysics::new();
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, None, &curves, &mut suppression,
+                   Some(&mut physics), &ctx);
+
+    // The kernel writes thresh_c[k].clamp(0.001, 4.0) into slew[k].
+    // With thresh=0.5, all slew[k] in [0..num_bins] should be ~0.5.
+    for k in 0..num_bins {
+        let s = physics.slew[k];
+        assert!(s > 0.0, "slew[{}] should be non-zero after writeback (got {})", k, s);
+        assert!((s - 0.5).abs() < 0.01, "slew[{}] should be ~0.5 (got {})", k, s);
+    }
+}
+
 
 
 #[test]

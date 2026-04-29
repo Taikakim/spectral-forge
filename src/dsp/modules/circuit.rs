@@ -580,6 +580,73 @@ fn apply_pcb_crosstalk(
     }
 }
 
+// ── Slew Distortion helpers ────────────────────────────────────────────────
+
+/// Per-bin magnitude rate-limiter with excess-slew phase scramble.
+///
+/// Limits the delta-magnitude between consecutive hops to `rate_cap`. Any
+/// magnitude change exceeding that cap is called "excess slew"; the excess is
+/// converted into a random phase rotation proportional to `scramble_gain`.
+///
+/// Writes the per-bin rate cap into `slew_out` (when `Some`) so downstream
+/// modules can read the active slew budget via `BinPhysics::slew`.
+///
+/// Curves: `[AMOUNT, THRESH, SPREAD(unused), RELEASE, MIX]`.
+fn apply_slew_distortion(
+    bins: &mut [Complex<f32>],
+    prev_mag: &mut [f32],
+    rng: &mut crate::dsp::circuit_kernels::SimdRng,
+    slew_out: Option<&mut [f32]>,
+    curves: &[&[f32]],
+) {
+    let amount_c  = curves[0];
+    let thresh_c  = curves[1];
+    // curves[2] = SPREAD: unused by Slew Distortion.
+    let release_c = curves[3];
+    let mix_c     = curves[4];
+
+    let num_bins = bins.len();
+
+    for k in 0..num_bins {
+        let amount        = amount_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1
+        let rate_cap      = thresh_c[k].clamp(0.001, 4.0);               // max delta-mag per hop
+        let scramble_gain = release_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1
+        let mix           = mix_c[k].clamp(0.0, 2.0) * 0.5;              // 0..1
+
+        let dry = bins[k];
+        let in_mag   = dry.norm();
+        let in_phase = if in_mag > 1e-9 { dry.arg() } else { 0.0 };
+
+        let prev = prev_mag[k];
+        let delta   = in_mag - prev;
+        let allowed = rate_cap * (0.5 + 0.5 * amount); // amount scales the effective cap
+
+        let (capped_mag, excess) = if delta.abs() > allowed {
+            let new_mag = prev + delta.signum() * allowed;
+            (new_mag.max(0.0), delta.abs() - allowed)
+        } else {
+            (in_mag, 0.0)
+        };
+        prev_mag[k] = capped_mag;
+
+        // Excess slew → random phase rotation proportional to the excess.
+        let rand_centered = rng.next_f32_centered(); // strict [-1, 1)
+        let phase_kick = rand_centered * excess * scramble_gain * std::f32::consts::PI;
+        let new_phase  = in_phase + phase_kick;
+
+        let wet = Complex::from_polar(capped_mag, new_phase);
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+
+    // Write the per-bin rate cap into the physics slew field so downstream
+    // reader slots can see how tight the limiter was set.
+    if let Some(sout) = slew_out {
+        for k in 0..num_bins {
+            sout[k] = thresh_c[k].clamp(0.001, 4.0);
+        }
+    }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -592,6 +659,7 @@ pub enum CircuitMode {
     PowerSag,
     ComponentDrift,
     PcbCrosstalk,
+    SlewDistortion,
 }
 
 impl Default for CircuitMode {
@@ -625,6 +693,10 @@ pub struct CircuitModule {
     // (workspace2). Both are overwritten each hop — no set_circuit_mode() reset needed.
     pcb_workspace:  [Vec<f32>; 2],
     pcb_workspace2: [Vec<f32>; 2],
+    // Slew Distortion state: per-bin previous magnitude + per-channel PRNG.
+    // `slew_rng` uses SimdRng for strict [-1, 1) bounds (see circuit_kernels doc).
+    slew_prev_mag: [Vec<f32>; 2],
+    slew_rng: [crate::dsp::circuit_kernels::SimdRng; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -654,6 +726,11 @@ impl CircuitModule {
             ],
             pcb_workspace:  [Vec::new(), Vec::new()],
             pcb_workspace2: [Vec::new(), Vec::new()],
+            slew_prev_mag: [Vec::new(), Vec::new()],
+            slew_rng: [
+                crate::dsp::circuit_kernels::SimdRng::new(0xBADF00D5),
+                crate::dsp::circuit_kernels::SimdRng::new(0x0BADBEEF),
+            ],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -695,6 +772,10 @@ impl CircuitModule {
                 }
                 // drift_rng is intentionally left intact: preserving the LFSR state
                 // across mode changes avoids an audible restart of the drift trajectory.
+                for v in self.slew_prev_mag[ch].iter_mut() {
+                    *v = 0.0;
+                }
+                // slew_rng is intentionally left intact (same reasoning as drift_rng).
             }
         }
     }
@@ -825,6 +906,26 @@ impl SpectralModule for CircuitModule {
                 let ws2 = &mut self.pcb_workspace2[channel][..nb];
                 apply_pcb_crosstalk(&mut bins[..nb], ws, ws2, curves);
             }
+            CircuitMode::SlewDistortion => {
+                // As a writer slot, `physics = Some(&mut mix_phys)` from FxMatrix;
+                // `ctx.bin_physics = None`. We write the per-bin rate cap into
+                // `physics.slew` so downstream reader slots can see the active budget.
+                // Pattern mirrors ComponentDrift: `if let Some(bp) = physics` consumes
+                // the Option, yielding a `&mut BinPhysics` without reborrowing issues.
+                let nb = ctx.num_bins;
+                let slew_out: Option<&mut [f32]> = if let Some(bp) = physics {
+                    if bp.slew.len() >= nb { Some(&mut bp.slew[..nb]) } else { None }
+                } else {
+                    None
+                };
+                apply_slew_distortion(
+                    &mut bins[..nb],
+                    &mut self.slew_prev_mag[channel][..nb],
+                    &mut self.slew_rng[channel],
+                    slew_out,
+                    curves,
+                );
+            }
         }
 
         for s in suppression_out.iter_mut() {
@@ -870,6 +971,9 @@ impl SpectralModule for CircuitModule {
             self.pcb_workspace[ch].resize(num_bins, 0.0);
             self.pcb_workspace2[ch].clear();
             self.pcb_workspace2[ch].resize(num_bins, 0.0);
+            self.slew_prev_mag[ch].clear();
+            self.slew_prev_mag[ch].resize(num_bins, 0.0);
+            // slew_rng is NOT reset on FFT-size change (preserves PRNG trajectory).
         }
     }
 
