@@ -383,6 +383,11 @@ fn apply_component_drift(
 ) {
     use crate::dsp::circuit_kernels::lp_step;
 
+    // Knuth's golden-ratio multiplier (2^32 / φ): used to decorrelate adjacent
+    // bin indices so neighbouring bins get statistically independent drift targets
+    // from the single per-hop LFSR step.
+    const KNUTH_GOLDEN: u32 = 2_654_435_761;
+
     let amount_c  = curves[0];
     let thresh_c  = curves[1];
     // curves[2] = SPREAD — unused by Component Drift.
@@ -391,8 +396,8 @@ fn apply_component_drift(
 
     let num_bins = bins.len();
 
-    // Step LFSR once per hop. Per-bin variation via XOR with bin index * Knuth's
-    // golden-ratio constant so bins with close-by indices get uncorrelated targets.
+    // Step LFSR once per hop. Per-bin variation via XOR with bin index * KNUTH_GOLDEN
+    // so bins with close-by indices get uncorrelated drift targets.
     let lfsr_step = drift_rng.next_u32();
 
     // --- Pass 1: compute drift targets and apply gain. ---
@@ -406,10 +411,10 @@ fn apply_component_drift(
             let drift_tau = 1.0 + 4.0 * release; // 1..9 s — very slow modulation
             let alpha = (hop_dt / drift_tau).min(1.0);
 
-            // Per-bin random target: XOR with Knuth's golden-ratio constant so
+            // Per-bin random target: XOR with KNUTH_GOLDEN-scaled bin index so
             // adjacent bins get statistically independent pseudo-random targets.
             // shift-by-7 idiom gives strict [-1, 1) range (see doc-comment above).
-            let mixed = lfsr_step ^ (k as u32).wrapping_mul(2_654_435_761);
+            let mixed = lfsr_step ^ (k as u32).wrapping_mul(KNUTH_GOLDEN);
             let centered = ((mixed as i32) >> 7) as f32 / ((1u32 << 24) as f32);
 
             // Hot bins (above temp_gate) drift further — positive feedback from upstream.
