@@ -903,24 +903,16 @@ pub fn create_editor(
                                     }
                                 } else if is_circuit {
                                     let cur_mode = params.slot_circuit_mode.lock()[edit_slot];
-                                    use crate::dsp::modules::circuit::CircuitMode;
-                                    for (label, mode) in [
-                                        ("Crossover", CircuitMode::CrossoverDistortion),
-                                        ("Schmitt",   CircuitMode::SpectralSchmitt),
-                                        ("BBD",       CircuitMode::BbdBins),
-                                    ] {
-                                        let is_active = cur_mode == mode;
-                                        let fill     = if is_active { th::BORDER } else { th::BG };
-                                        let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
-                                        let btn = egui::Button::new(
-                                            egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
-                                        )
-                                        .fill(fill)
-                                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                                        let resp = ui.add(btn);
-                                        if resp.clicked() {
-                                            params.slot_circuit_mode.lock()[edit_slot] = mode;
-                                        }
+                                    let label = crate::editor::circuit_popup::mode_label(cur_mode);
+                                    let btn_text = format!("Mode: {}", label);
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(btn_text).color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                    )
+                                    .fill(th::BG)
+                                    .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                    let resp = ui.add(btn);
+                                    if resp.clicked() {
+                                        crate::editor::circuit_popup::open_at(ui, edit_slot, resp.rect.right_top());
                                     }
                                 } else if is_life {
                                     let cur_mode = params.slot_life_mode.lock()[edit_slot];
@@ -1199,6 +1191,7 @@ pub fn create_editor(
                     // Render popups (egui Area — appears above matrix)
                     let _ = crate::editor::module_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::amp_popup::show_popup(ui, &params, scale);
+                    let _ = crate::editor::circuit_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::life_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::past_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::kinetics_popup::show_popup(ui, &params, scale);
