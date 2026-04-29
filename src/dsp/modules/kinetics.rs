@@ -215,8 +215,8 @@ pub struct KineticsModule {
 
     /// Slow-attack envelope of the per-hop max-dry-magnitude, used as the cap reference in
     /// `apply_hooke` and `apply_gravity_well`.  Updated each `process()` call via a 1-pole
-    /// lowpass (`ALPHA ≈ 0.05`) so that upstream amplification (e.g. GravityWell in a
-    /// prior slot) cannot instantly raise the cap and feed a runaway displacement loop.
+    /// lowpass (`ALPHA = 0.01`, τ ≈ 100 hops) so that upstream amplification (e.g. GravityWell
+    /// in a prior slot) cannot instantly raise the cap and feed a runaway displacement loop.
     max_dry_smoothed: [f32; 2],
 
     sample_rate: f32,

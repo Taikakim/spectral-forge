@@ -12,7 +12,7 @@
 
 use num_complex::Complex;
 use spectral_forge::dsp::bin_physics::BinPhysics;
-use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, MassSource};
+use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode, MassSource, WellSource};
 use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
 use spectral_forge::params::{FxChannelTarget, StereoLink};
 
@@ -46,9 +46,9 @@ fn kinetics_inertial_mass_writes_then_other_module_reads() {
     let mut suppression = vec![0.0_f32; NUM_BINS];
     let ctx = make_ctx();
 
-    // Drive 30 hops so the 1-pole curve smoother (ALPHA ≈ 0.221, tau = 4·dt) has settled.
-    // After ~6 hops the smoothed MASS curve at bin 1024 already exceeds 3.0; 30 hops gives
-    // comfortable margin against the >3.0 lower bound.
+    // Drive 30 hops so the 1-pole curve smoother (ALPHA ≈ 0.221, τ = 4·dt ≈ 4.5 hops to e⁻¹)
+    // has settled. 30 hops ≈ 6.6·τ → smoother is within e⁻⁶·⁶ ≈ 0.14% of target, comfortably
+    // above the >3.0 lower bound at bin 1024 (curve target ≈ 5.0).
     for _ in 0..30 {
         writer.process(
             0, StereoLink::Linked, FxChannelTarget::All,
@@ -88,7 +88,7 @@ fn kinetics_chained_two_slots_in_serial_does_not_explode() {
     let mut s0 = KineticsModule::new();
     s0.reset(SR, FFT);
     s0.set_mode(KineticsMode::GravityWell);
-    // WellSource::Static is the default — no explicit set needed.
+    s0.set_well_source(WellSource::Static);
 
     let mut s1 = KineticsModule::new();
     s1.reset(SR, FFT);
