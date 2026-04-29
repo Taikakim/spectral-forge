@@ -2498,6 +2498,62 @@ fn modulate_gravity_phaser_sc_positioned_peaks_concentrate_momentum() {
 }
 
 #[test]
+fn modulate_gravity_phaser_phase_momentum_visible_to_next_slot() {
+    // Writer-feeds-reader sequencing test: cold-start (no seed), 20 hops.
+    // Verifies that the Gravity Phaser kernel populates phase_momentum across
+    // the full bin range so a downstream slot reading BinPhysics sees non-trivial
+    // state. Bin 200 is mid-spectrum, far from both DC and Nyquist edges.
+    use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_modulate_mode(ModulateMode::GravityPhaser);
+
+    let num_bins = 1025;
+    // Unit-real bins — non-zero amplitude so the kernel sees signal to act on.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+    // AMOUNT=1.5 (near-max, per plan), REACH=neutral, RATE=neutral, THRESH=neutral,
+    // AMPGATE=0 (gate disabled so all bins receive force), MIX=2 (full wet).
+    let amount  = vec![1.5_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let zeros   = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    // Cold start: BinPhysics freshly reset, no seeds.
+    let mut physics = BinPhysics::new();
+    physics.reset_active(num_bins, 48_000.0, 2048);
+
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+
+    // 20 hops: enough for the smoother to prime and momentum to integrate from cold start.
+    for _ in 0..20 {
+        module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                       &mut bins, None, &curves,
+                       &mut suppression, Some(&mut physics), &ctx);
+    }
+
+    // Primary claim: mid-spectrum bin 200 must have non-trivial momentum after 20 hops.
+    assert!(physics.phase_momentum[200].is_finite(),
+        "phase_momentum[200] is NaN/Inf after cold-start writer run");
+    assert!(physics.phase_momentum[200].abs() > 1e-6,
+        "Gravity Phaser did not write phase_momentum at bin 200 (cold start): {}",
+        physics.phase_momentum[200]);
+
+    // Secondary claim: all-bins finiteness sweep — next slot's reader must not see NaN.
+    for k in 0..num_bins {
+        assert!(physics.phase_momentum[k].is_finite(),
+            "NaN/Inf phase_momentum at bin {} after cold-start writer run", k);
+    }
+}
+
+#[test]
 fn modulate_pll_tear_locks_on_steady_input_and_passes_through() {
     use std::cell::Cell;
     use num_complex::Complex;
