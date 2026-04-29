@@ -111,9 +111,15 @@ mod tests {
     }
 
     #[test]
-    fn unknown_mode_falls_through() {
-        // mode_label returns "Unknown" for a mode not in MODES only if the enum
-        // ever gets a new variant. Verify the function returns a non-empty string.
-        assert!(!mode_label(CircuitMode::CrossoverDistortion).is_empty());
+    fn modes_have_no_duplicate_variants() {
+        for i in 0..MODES.len() {
+            for j in (i + 1)..MODES.len() {
+                assert_ne!(
+                    MODES[i].0, MODES[j].0,
+                    "MODES lists {:?} more than once (slots {} and {})",
+                    MODES[i].0, i, j
+                );
+            }
+        }
     }
 }
