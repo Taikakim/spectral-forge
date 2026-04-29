@@ -282,7 +282,8 @@ fn apply_transformer(
             let drive = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1
             let knee  = thresh_c[k].clamp(0.05, 4.0);
             let release = release_c[k].clamp(0.0, 2.0).max(0.01);
-            // Magnitude smoother time constant: 2 ms (fast) .. 62 ms (slow).
+            // Magnitude smoother time constant: with `release` clamped to [0.01, 2.0]
+            // and `tau = 0.020 * (0.1 + release)`, tau spans ~2.2 ms .. 42 ms.
             let tau   = 0.020 * (0.1 + release);
             let alpha = (hop_dt / tau).min(1.0);
 
@@ -334,9 +335,11 @@ fn apply_transformer(
     }
 
     // --- Pass 3: write flux back. ---
-    // Excess energy above the smoothed envelope (xfmr_lp >> in_mag after output)
-    // is stored as positive flux for downstream reader slots (e.g. Vactrol).
-    // A 5%/hop decay prevents indefinite accumulation.
+    // Excess energy above the smoothed envelope (xfmr_lp >> bins[k].norm() after
+    // output) is stored as positive flux for downstream reader slots (e.g. Vactrol).
+    // Per-hop blend: `f' = 0.95 f + 0.1 e`. With constant excess the steady state is
+    // `e * 0.1 / 0.05 = 2 e`, so flux tracks ~2× excess and decays by 5%/hop when
+    // excess collapses to zero. Hard-clamped to ±100 against pathological inputs.
     if let Some(flux_mut) = flux.as_deref_mut() {
         for k in 0..num_bins {
             let out_mag = bins[k].norm();
