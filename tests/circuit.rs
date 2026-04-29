@@ -549,6 +549,43 @@ fn circuit_component_drift_modulates_magnitudes_slowly() {
 }
 
 #[test]
+fn circuit_pcb_crosstalk_leaks_to_neighbours() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::PcbCrosstalk);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[200] = Complex::new(1.0, 0.0);
+
+    // AMOUNT=2 (full wet contribution), THRESH=0, SPREAD=1.0 (50% leak), RELEASE=0, MIX=2.
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.0_f32; num_bins];
+    let spread  = vec![1.0_f32; num_bins];
+    let release = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+
+    // Centre bin retains some energy; neighbours pick up.
+    assert!(bins[200].norm() < 1.0, "centre should bleed (got {})", bins[200].norm());
+    assert!(bins[199].norm() > 0.05, "left neighbour should pick up (got {})", bins[199].norm());
+    assert!(bins[201].norm() > 0.05, "right neighbour should pick up (got {})", bins[201].norm());
+    // Distant bins should remain zero.
+    assert!(bins[150].norm() < 1e-6);
+    assert!(bins[250].norm() < 1e-6);
+}
+
+#[test]
 fn circuit_vactrol_finite_after_long_run() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};

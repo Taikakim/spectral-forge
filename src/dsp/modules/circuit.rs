@@ -519,6 +519,69 @@ fn apply_power_sag(
 
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
+// ── PCB Crosstalk helpers ──────────────────────────────────────────────────
+
+/// 3-tap spread stencil: bins leak into neighbours. SPREAD curve drives strength,
+/// AMOUNT blends raw vs. spread, MIX controls dry/wet. No state — workspaces are
+/// overwritten each hop, so no `set_circuit_mode()` reset is needed.
+fn apply_pcb_crosstalk(
+    bins: &mut [Complex<f32>],
+    workspace: &mut [f32],
+    workspace2: &mut [f32],
+    curves: &[&[f32]],
+) {
+    use crate::dsp::circuit_kernels::spread_3tap;
+
+    let amount_c = curves[0];
+    // curves[1] = THRESHOLD: unused by PCB Crosstalk.
+    let spread_c = curves[2];
+    // curves[3] = RELEASE: unused by PCB Crosstalk.
+    let mix_c = curves[4];
+
+    let num_bins = bins.len();
+
+    // 1. Read pass: copy magnitudes into workspace.
+    for k in 0..num_bins {
+        workspace[k] = bins[k].norm();
+    }
+
+    // 2. Average SPREAD strength over all bins (curves are smooth at hop rate).
+    let spread_avg = if num_bins > 0 {
+        let mut sum = 0.0_f32;
+        for k in 0..num_bins {
+            sum += spread_c[k].clamp(0.0, 2.0) * 0.5;
+        }
+        sum / num_bins as f32
+    } else {
+        0.0
+    };
+
+    // 3. Apply 3-tap spread into workspace2 (distinct slice — no aliasing).
+    spread_3tap(&workspace[..num_bins], &mut workspace2[..num_bins], spread_avg);
+
+    // 4. Write back: blend raw vs. spread by amount, then mix dry/wet.
+    // For silent input bins where spread has leaked energy in, emit that energy
+    // as a real-positive bin (arbitrary unit phase) — mirrors apply_transformer.
+    for k in 0..num_bins {
+        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let in_mag = workspace[k];
+        // amount blends raw magnitude vs. spread magnitude.
+        let out_mag = workspace2[k] * amount + in_mag * (1.0 - amount);
+        let dry = bins[k];
+        let wet = if in_mag > 1e-9 {
+            // Phase preserved: scale the existing complex bin.
+            dry * (out_mag / in_mag)
+        } else {
+            // Silent input: emit spread energy as a real-positive bin.
+            Complex::new(out_mag, 0.0)
+        };
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
+// ── CircuitMode ────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CircuitMode {
     BbdBins,
@@ -528,6 +591,7 @@ pub enum CircuitMode {
     TransformerSaturation,
     PowerSag,
     ComponentDrift,
+    PcbCrosstalk,
 }
 
 impl Default for CircuitMode {
@@ -557,6 +621,10 @@ pub struct CircuitModule {
     // trajectory across host-driven size switches so the drift doesn't restart audibly.
     drift_env: [Vec<f32>; 2],
     drift_rng: [crate::dsp::circuit_kernels::SimdRng; 2],
+    // PCB Crosstalk state: per-channel magnitude scratch (workspace) and spread output
+    // (workspace2). Both are overwritten each hop — no set_circuit_mode() reset needed.
+    pcb_workspace:  [Vec<f32>; 2],
+    pcb_workspace2: [Vec<f32>; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -584,6 +652,8 @@ impl CircuitModule {
                 crate::dsp::circuit_kernels::SimdRng::new(0xACED_DEAD),
                 crate::dsp::circuit_kernels::SimdRng::new(0xFEED_FACE),
             ],
+            pcb_workspace:  [Vec::new(), Vec::new()],
+            pcb_workspace2: [Vec::new(), Vec::new()],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -743,6 +813,18 @@ impl SpectralModule for CircuitModule {
                     hop_dt,
                 );
             }
+            CircuitMode::PcbCrosstalk => {
+                // PCB Crosstalk does not read or write BinPhysics.
+                let _ = physics;
+                let nb = ctx.num_bins;
+                // Rebind both workspace vecs as locals before the call so the borrow
+                // checker sees two distinct &mut borrows (one from pcb_workspace,
+                // one from pcb_workspace2). These are separate Vec allocations so their
+                // slices are guaranteed non-overlapping — no aliasing.
+                let ws  = &mut self.pcb_workspace[channel][..nb];
+                let ws2 = &mut self.pcb_workspace2[channel][..nb];
+                apply_pcb_crosstalk(&mut bins[..nb], ws, ws2, curves);
+            }
         }
 
         for s in suppression_out.iter_mut() {
@@ -784,6 +866,10 @@ impl SpectralModule for CircuitModule {
             self.drift_env[ch].clear();
             self.drift_env[ch].resize(num_bins, 0.0);
             // drift_rng is NOT reset on FFT-size change (preserves LFSR trajectory).
+            self.pcb_workspace[ch].clear();
+            self.pcb_workspace[ch].resize(num_bins, 0.0);
+            self.pcb_workspace2[ch].clear();
+            self.pcb_workspace2[ch].resize(num_bins, 0.0);
         }
     }
 
