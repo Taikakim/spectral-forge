@@ -2100,3 +2100,63 @@ fn kinetics_tuning_fork_modulates_neighbour_phase() {
     // All bins must remain finite.
     for b in &bins { assert!(b.norm().is_finite()); }
 }
+
+#[test]
+fn kinetics_diamagnet_carves_and_redistributes_energy() {
+    use spectral_forge::dsp::modules::kinetics::{KineticsModule, KineticsMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use realfft::num_complex::Complex;
+
+    let mut module = KineticsModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(KineticsMode::Diamagnet);
+
+    let num_bins = 1025;
+    // Flat-ish dense spectrum.
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::new(((k as f32 * 0.05).cos() + 1.5) * 0.5, 0.0))
+        .collect();
+    let dry_total: f32 = bins.iter().map(|b| b.norm_sqr()).sum();
+
+    // STRENGTH curve creates a "carve zone" centred on bin 400 (Gaussian).
+    let strength: Vec<f32> = (0..num_bins).map(|k| {
+        let d = (k as f32 - 400.0) / 8.0;
+        1.0 + (-d * d).exp() // ranges 1.0 -> 2.0
+    }).collect();
+    let neutral = vec![1.0_f32; num_bins];
+    let mix = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&strength, &neutral, &neutral, &neutral, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, num_bins,
+        10.0, 100.0, 1.0, 0.0, false, false,
+    );
+
+    let dry_at_carve_centre = bins[400].norm();
+    let dry_at_far_left  = bins[380].norm();
+    let dry_at_far_right = bins[420].norm();
+
+    for _ in 0..15 {
+        module.process(
+            0, StereoLink::Linked, FxChannelTarget::All,
+            &mut bins, None, &curves, &mut suppression, None, &ctx,
+        );
+    }
+
+    // Carve zone should have less energy now.
+    let wet_at_carve_centre = bins[400].norm();
+    assert!(wet_at_carve_centre < dry_at_carve_centre * 0.7,
+        "Diamagnet did not carve: wet[400]={} dry[400]={}", wet_at_carve_centre, dry_at_carve_centre);
+    // Energy on the wings should have *increased*.
+    let wet_at_far_left  = bins[380].norm();
+    let wet_at_far_right = bins[420].norm();
+    assert!(wet_at_far_left > dry_at_far_left || wet_at_far_right > dry_at_far_right,
+        "Diamagnet did not redistribute carve energy outward: wet[380]={} dry[380]={} wet[420]={} dry[420]={}",
+        wet_at_far_left, dry_at_far_left, wet_at_far_right, dry_at_far_right);
+    // Conservation: total power within +/-10% (allow small loss to numerical roundoff).
+    let wet_total: f32 = bins.iter().map(|b| b.norm_sqr()).sum();
+    let loss = (dry_total - wet_total).abs() / dry_total;
+    assert!(loss < 0.10, "Diamagnet violated energy conservation by {}%", loss * 100.0);
+}

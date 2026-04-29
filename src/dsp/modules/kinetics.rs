@@ -203,6 +203,9 @@ pub struct KineticsModule {
     /// Pre-allocated per-channel scratch for input bin magnitudes (avoids audio-thread alloc).
     dry_mag_scratch: [Vec<f32>; 2],
 
+    /// Per-channel new-magnitude scratch for Diamagnet pass A (avoids polluting `displacement`).
+    diamagnet_new_mag: [Vec<f32>; 2],
+
     /// Per-channel xorshift32 RNG (Diamagnet jitter).
     rng_state: [u32; 2],
 
@@ -263,8 +266,9 @@ impl KineticsModule {
             tuning_forks:    [SmallVec::new(), SmallVec::new()],
             sc_env_smoothed: [0.0, 0.0],
             sc_env_prev:     [0.0, 0.0],
-            dry_mag_scratch: [Vec::new(), Vec::new()],
-            rng_state:       [0xC0FF_EE01, 0xBADD_CAFE],
+            dry_mag_scratch:    [Vec::new(), Vec::new()],
+            diamagnet_new_mag:  [Vec::new(), Vec::new()],
+            rng_state:          [0xC0FF_EE01, 0xBADD_CAFE],
             last_well_count: [0; 2],
             sample_rate:     48_000.0,
             fft_size:        2048,
@@ -989,18 +993,122 @@ impl KineticsModule {
         }
     }
 
-    /// Diamagnet — repulsion from high-magnitude neighbours + jitter.
-    /// Reads dry mag from `self.dry_mag_scratch[channel]`. Implemented in Task 12.
+    /// Minimum STRENGTH surplus before a bin is considered a carve source.
+    const DIAMAGNET_STRENGTH_BASELINE: f32 = 1.05;
+    /// Denominator mapping surplus above baseline into [0, DIAMAGNET_MAX_CARVE_FRAC].
+    const DIAMAGNET_STRENGTH_SCALE: f32 = 0.95;
+    /// Maximum fraction of a bin's magnitude that may be carved per hop.
+    const DIAMAGNET_MAX_CARVE_FRAC: f32 = 0.95;
+    /// Bins-per-unit-reach factor: reach_curve value of 1.0 → 16 neighbour bins.
+    const DIAMAGNET_REACH_SCALE: f32 = 16.0;
+    /// Guard against division by near-zero total weight (boundary bins with no neighbours).
+    const DIAMAGNET_MIN_TOTAL_W: f32 = 1e-6;
+    /// Guard against dividing by a near-zero dry magnitude when computing the scale factor.
+    const DIAMAGNET_MIN_DRY_MAG: f32 = 1e-9;
+    /// Minimum carve fraction below which a bin is skipped (avoid useless work).
+    const DIAMAGNET_MIN_CARVE_FRAC: f32 = 1e-6;
+
+    /// Diamagnet — energy-conserving spectral carving.
+    ///
+    /// High-STRENGTH bins donate a fraction of their magnitude to nearby bins
+    /// (weighted by 1/distance), conserving total spectral energy.
+    /// Reads dry magnitudes from `self.dry_mag_scratch[channel]` (pre-filled by
+    /// `process()` before kernel dispatch).
     #[allow(clippy::too_many_arguments)]
     fn apply_diamagnet(
         &mut self,
-        _channel: usize,
-        _bins: &mut [Complex<f32>],
+        channel: usize,
+        bins: &mut [Complex<f32>],
         _dt: f32,
-        _num_bins: usize,
+        num_bins: usize,
         _physics: Option<&BinPhysics>,
     ) {
-        // Implemented in Task 12.
+        // -- Bind immutable curve slices before taking any mutable borrows. --
+        // reach_curve cannot be bound here because pass B mutates self.diamagnet_new_mag
+        // simultaneously, requiring triple-index access inside the loop body.
+        let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
+        let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
+
+        // -- 1. Compute carve fraction per bin from STRENGTH curve. --
+        //    Stored in mag_prev[channel] used as scratch (process() immediately
+        //    overwrites mag_prev with KE+PE after this kernel returns).
+        {
+            let carve = &mut self.mag_prev[channel][..num_bins];
+            for k in 0..num_bins {
+                let s = strength_curve[k];
+                carve[k] = if s > Self::DIAMAGNET_STRENGTH_BASELINE {
+                    ((s - Self::DIAMAGNET_STRENGTH_BASELINE) / Self::DIAMAGNET_STRENGTH_SCALE)
+                        .clamp(0.0, Self::DIAMAGNET_MAX_CARVE_FRAC)
+                } else {
+                    0.0
+                };
+            }
+        }
+
+        // -- 2. Pass A: copy dry magnitudes into dedicated new_mag scratch. --
+        {
+            let dry_mag   = &self.dry_mag_scratch[channel][..num_bins];
+            let new_mag   = &mut self.diamagnet_new_mag[channel][..num_bins];
+            for k in 0..num_bins {
+                new_mag[k] = dry_mag[k];
+            }
+        }
+
+        // -- 3. Pass B: for each carve source, subtract from its bin and
+        //    redistribute outward to neighbours weighted by 1/distance. --
+        for k in 0..num_bins {
+            let frac = self.mag_prev[channel][k];
+            if frac < Self::DIAMAGNET_MIN_CARVE_FRAC { continue; }
+
+            let reach_val = self.smoothed_curves[channel][2][k];
+            let reach = (reach_val.clamp(0.1, 4.0) * Self::DIAMAGNET_REACH_SCALE).round() as usize;
+            if reach < 1 { continue; }
+
+            let dry_k = self.dry_mag_scratch[channel][k];
+            let take  = dry_k * frac;
+
+            // Subtract from this bin.
+            self.diamagnet_new_mag[channel][k] -= take;
+
+            // Sum neighbour weights.
+            let mut total_w = 0.0_f32;
+            for d in 1..=reach {
+                if k + d < num_bins { total_w += 1.0 / d as f32; }
+                if k >= d           { total_w += 1.0 / d as f32; }
+            }
+            if total_w < Self::DIAMAGNET_MIN_TOTAL_W {
+                // Boundary bin: nowhere to send energy; carved energy is lost.
+                continue;
+            }
+
+            // Distribute proportionally.
+            let inv_total_w = 1.0 / total_w;
+            for d in 1..=reach {
+                let share = take * (1.0 / d as f32) * inv_total_w;
+                if k + d < num_bins {
+                    self.diamagnet_new_mag[channel][k + d] += share;
+                }
+                if k >= d {
+                    self.diamagnet_new_mag[channel][k - d] += share;
+                }
+            }
+        }
+
+        // -- 4. Apply new magnitudes to bins, blended by MIX. --
+        for k in 0..num_bins {
+            let dry_k  = self.dry_mag_scratch[channel][k];
+            let new_k  = self.diamagnet_new_mag[channel][k].max(0.0);
+            let mix    = mix_curve[k].clamp(0.0, 1.0);
+            let scale  = if dry_k > Self::DIAMAGNET_MIN_DRY_MAG {
+                new_k / dry_k
+            } else {
+                new_k.min(1.0)
+            };
+            let wet_re = bins[k].re * scale;
+            let wet_im = bins[k].im * scale;
+            bins[k].re = bins[k].re * (1.0 - mix) + wet_re * mix;
+            bins[k].im = bins[k].im * (1.0 - mix) + wet_im * mix;
+        }
     }
 }
 
@@ -1161,6 +1269,8 @@ impl SpectralModule for KineticsModule {
             self.sc_env_prev[ch] = 0.0;
             self.dry_mag_scratch[ch].clear();
             self.dry_mag_scratch[ch].resize(num_bins, 0.0);
+            self.diamagnet_new_mag[ch].clear();
+            self.diamagnet_new_mag[ch].resize(num_bins, 0.0);
         }
         self.rng_state = [0xC0FF_EE01, 0xBADD_CAFE];
         self.last_well_count = [0; 2];
