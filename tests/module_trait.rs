@@ -521,18 +521,21 @@ fn life_module_constructs_and_passes_through() {
 }
 
 #[test]
-fn module_spec_writes_bin_physics_defaults_false_for_all_modules() {
+fn module_spec_writes_bin_physics_defaults_false_for_non_writers() {
+    // Non-writer modules must declare writes_bin_physics = false. Modules that
+    // *do* write physics — Life (5a), Kinetics (5b3), Modulate (5b4 GravityPhaser/
+    // PllTear) — are excluded and asserted true elsewhere via their own specs.
     use spectral_forge::dsp::modules::{ModuleType, module_spec};
     for ty in [
         ModuleType::Dynamics, ModuleType::Freeze, ModuleType::PhaseSmear,
         ModuleType::Contrast, ModuleType::Gain, ModuleType::MidSide,
         ModuleType::TransientSustainedSplit, ModuleType::Harmonic,
         ModuleType::Future, ModuleType::Punch, ModuleType::Rhythm,
-        ModuleType::Geometry, ModuleType::Modulate, ModuleType::Circuit,
+        ModuleType::Geometry, ModuleType::Circuit,
         ModuleType::Master, ModuleType::Empty,
     ] {
         assert!(!module_spec(ty).writes_bin_physics,
-            "{:?}: writes_bin_physics must default to false in Phase 3", ty);
+            "{:?}: writes_bin_physics must be false for non-writer modules", ty);
     }
 }
 
