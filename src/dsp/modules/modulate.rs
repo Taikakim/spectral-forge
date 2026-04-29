@@ -452,13 +452,19 @@ fn apply_pll_tear(
 
     let num_bins = bins.len();
 
-    // Loop natural frequency ωₙ from RATE curve at bin 0 (0..2 → 0..0.2 cycles/hop).
+    // RATE / THRESH / REACH are sampled at bin 0 (loop-global parameters); AMOUNT
+    // and MIX are read per-bin further down.
+    //
+    // Loop natural frequency ωₙ from RATE curve (0..2 → 0..0.2 cycles/hop).
     let omega_n = rate_c.first().copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.1;
     let zeta    = 0.707_f32;
     let alpha   = 2.0 * zeta * omega_n;
     let beta    = omega_n * omega_n;
 
-    // Tear threshold scales with THRESH curve (1.0 → π/2 default).
+    // Tear threshold scales with THRESH curve (1.0 → π/2 default). The user-facing
+    // clamp is 0.1..4.0, then we apply a hard cap of 2× so tear_thresh never
+    // exceeds π — beyond that, "phase error above threshold" is unreachable since
+    // wrap_phase folds errors into [-π, π].
     let thresh_scale = thresh_c.first().copied().unwrap_or(1.0).clamp(0.1, 4.0);
     let tear_thresh  = PLL_TEAR_THRESHOLD * thresh_scale.min(2.0);
 
@@ -529,6 +535,23 @@ fn apply_pll_tear(
     }
 }
 
+/// Local phase-unwrap fallback for when `ctx.unwrapped_phase` is unavailable.
+///
+/// Updates `unwrap_local[k]` with the wrapped delta `cur_phase[k] - prev_phase[k]`
+/// (so it accumulates a continuous unwrapped phase across hops) and then copies
+/// `cur_phase` into `prev_phase` for the next call.
+///
+/// All slices must be the same length; allocation-free.
+fn unwrap_phase_local(unwrap_local: &mut [f32], prev_phase: &mut [f32], cur_phase: &[f32]) {
+    use crate::dsp::physics_helpers::wrap_phase;
+    debug_assert_eq!(unwrap_local.len(), prev_phase.len());
+    debug_assert_eq!(prev_phase.len(),   cur_phase.len());
+    for k in 0..unwrap_local.len() {
+        unwrap_local[k] += wrap_phase(cur_phase[k] - prev_phase[k]);
+    }
+    prev_phase.copy_from_slice(cur_phase);
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
@@ -538,13 +561,13 @@ const MOD_HEAVY: [bool; 7] = [false, false, false, false, false, false, true /* 
 // ── PLL Tear constants ─────────────────────────────────────────────────────
 
 /// Skip sub-100 Hz bins (research finding 3) — avoids DC/sub-bass PLL instability.
-pub const PLL_MIN_BIN: usize = 16;
+const PLL_MIN_BIN: usize = 16;
 /// Number of consecutive hops with |err| < PLL_RELOCK_THRESHOLD required to re-lock.
-pub const PLL_RELOCK_HOPS: u8 = 4;
+const PLL_RELOCK_HOPS: u8 = 4;
 /// Phase error above which lock is declared lost (π/2 rad).
-pub const PLL_TEAR_THRESHOLD: f32 = std::f32::consts::FRAC_PI_2;
+const PLL_TEAR_THRESHOLD: f32 = std::f32::consts::FRAC_PI_2;
 /// Phase error below which re-lock count increments (π/8 rad).
-pub const PLL_RELOCK_THRESHOLD: f32 = std::f32::consts::FRAC_PI_4 * 0.5; // π/8
+const PLL_RELOCK_THRESHOLD: f32 = std::f32::consts::FRAC_PI_4 * 0.5; // π/8
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModulateMode {
@@ -804,17 +827,11 @@ impl SpectralModule for ModulateModule {
                         }
                     }
                     _ => {
-                        // Local unwrap fallback — update unwrap_local from prev_phase delta.
-                        for k in 0..num_bins {
-                            use crate::dsp::physics_helpers::wrap_phase;
-                            let cur  = self.prev_phase_scratch[channel][k];
-                            let prev = self.prev_phase[channel][k];
-                            self.unwrap_local[channel][k] += wrap_phase(cur - prev);
-                        }
-                        // Save current wrapped phases for next call.
-                        let (pp, pps) = (&mut self.prev_phase[channel],
-                                         &self.prev_phase_scratch[channel]);
-                        pp[..num_bins].copy_from_slice(&pps[..num_bins]);
+                        unwrap_phase_local(
+                            &mut self.unwrap_local[channel][..num_bins],
+                            &mut self.prev_phase[channel][..num_bins],
+                            &self.prev_phase_scratch[channel][..num_bins],
+                        );
                     }
                 }
 
