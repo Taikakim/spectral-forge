@@ -168,9 +168,9 @@ const VACTROL_TAU_SLOW: f32 = 0.250;  // 250 ms
 
 /// Cascaded 2-pole vactrol-style photocell per-bin.
 ///
-/// Drive (`d`) charges the fast cap; the fast cap drives the slow cap.
-/// Cell gain `g = slow / (1 + |slow|)` soft-saturates into `[0, 1)`.
-/// Phase is preserved when `in_mag > 1e-9`; silent bins get 0+0i.
+/// Drive charges the fast cap; the fast cap drives the slow cap. Cell gain
+/// `g = tanh(slow)` soft-saturates into `[0, 1)` — applied as a multiplicative
+/// gain on the bin (passive opto-coupler model: g attenuates, never amplifies).
 ///
 /// `flux` — optional per-bin flux from BinPhysics. When `Some`, each bin's
 /// drive is `flux[k] * amount` instead of `in_mag * amount`.
@@ -206,13 +206,12 @@ fn apply_vactrol(
         let alpha_fast = (hop_dt / tau_fast).min(1.0);
         let alpha_slow = (hop_dt / tau_slow).min(1.0);
 
-        let dry      = bins[k];
-        let in_mag   = dry.norm();
+        let dry = bins[k];
 
-        // Drive: use flux[k] when available, otherwise magnitude fallback.
+        // Drive: flux[k] when upstream BinPhysics is present, else magnitude.
         let raw_drive = match flux {
             Some(f) => f[k].abs(),
-            None    => in_mag,
+            None    => dry.norm(),
         };
         let drive = raw_drive * amount;
 
@@ -220,18 +219,11 @@ fn apply_vactrol(
         lp_step(&mut fast[k], drive, alpha_fast);
         lp_step(&mut slow[k], fast[k], alpha_slow);
 
-        // Soft-saturating cell gain via tanh: g ∈ [0, 1) for non-negative slow cap.
-        // tanh(1.0) ≈ 0.762 — ensures a fully-charged cap (slow = drive = in_mag) approaches
-        // the input level for unit-amplitude signals.  The rational approximation from
-        // circuit_kernels stays cheap (no exp).
+        // Soft-saturating cell gain via tanh: `g ∈ [0, 1)` for non-negative slow cap.
+        // tanh(1.0) ≈ 0.762, so a fully-charged cap on a unit-amplitude bin yields
+        // ~0.76× passthrough — the photocell is a passive divider, never gains above 1.
         let g = crate::dsp::circuit_kernels::tanh_levien_poly(slow[k]).max(0.0);
-
-        // Apply gain to the dry bin (preserving phase).
-        let wet = if in_mag > 1e-9 {
-            dry * (g / in_mag)
-        } else {
-            Complex::new(0.0, 0.0)
-        };
+        let wet = dry * g;
 
         bins[k] = dry * (1.0 - mix) + wet * mix;
     }
@@ -356,24 +348,15 @@ impl SpectralModule for CircuitModule {
                 apply_crossover(bins, curves);
             }
             CircuitMode::Vactrol => {
-                // Read flux from BinPhysics when available; fallback to magnitude computed inline.
-                // apply_vactrol reads bin magnitude directly — flux from ctx.bin_physics would
-                // override, but for v1 we use the magnitude fallback path (no flux write).
-                let num_bins = bins.len();
-                // Override the drive with flux[k] if present, writing into fast[] first.
-                // Rather than branching inside the hot loop, we pre-fill a scratch drive
-                // slice. But we must not allocate. Instead, pass flux via an Option<&[f32]>
-                // to apply_vactrol_inner or handle the two cases with a flag.
-                // For RT safety: use a flag; apply_vactrol already reads bins[k].norm()
-                // as the fallback drive. When flux is present, we'll call a variant.
-                let _ = num_bins; // suppress unused lint
-
-                // flux is read-only; physics is not written by Vactrol.
-                let flux: Option<&[f32]> = physics.as_ref()
-                    .and_then(|bp| {
-                        let f = &bp.flux[..];
-                        if f.len() >= bins.len() { Some(&f[..bins.len()]) } else { None }
-                    });
+                // Read upstream flux via the writer-slot's mixed `physics`, not
+                // `ctx.bin_physics`: Circuit declares `writes_bin_physics: true`,
+                // so FxMatrix passes `physics = Some(&mut mix_phys)` and leaves
+                // `ctx.bin_physics = None`. Vactrol does not write — `physics` is
+                // read-only here.
+                let flux: Option<&[f32]> = physics.as_ref().and_then(|bp| {
+                    let f = &bp.flux[..];
+                    if f.len() >= bins.len() { Some(&f[..bins.len()]) } else { None }
+                });
                 let fast = &mut self.vactrol_fast[channel];
                 let slow = &mut self.vactrol_slow[channel];
                 apply_vactrol(bins, fast, slow, curves, hop_dt, flux);
