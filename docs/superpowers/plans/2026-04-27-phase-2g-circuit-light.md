@@ -2,6 +2,8 @@
 
 > **Status:** IMPLEMENTED — all 10 tasks landed on `feature/next-gen-modules-plans`. Phase 2 sub-plan; depends on Phase 1 foundation infra (`docs/superpowers/plans/2026-04-27-phase-1-foundation-infra.md`).
 >
+> **Superseded for curve layout by Phase 5c (`docs/superpowers/plans/2026-04-27-phase-5c-full-circuit.md`):** Phase 5c bumps `num_curves` to 5 (inserts SPREAD at index 2; RELEASE moves to 3; MIX moves to 4) and migrates the 3 v1 kernels in-place. Adds 7 new BinPhysics-aware modes (Vactrol / Transformer / Power Sag / Component Drift / PCB Crosstalk / Slew Distortion / Bias Fuzz). The original 3-mode contract test in `tests/circuit.rs` was extended to all 10 modes by Phase 5c task 14.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the Circuit module with three light/medium-CPU analog-style modes — **BBD Bins**, **Spectral Schmitt**, and **Crossover Distortion** — using only the existing SpectralModule trait. Defers Vactrol, Transformer, Power Sag, Component Drift, PCB Crosstalk, Slew Distortion, Bias Fuzz, and Resonant Feedback to Phase 5c (BinPhysics-aware modes).

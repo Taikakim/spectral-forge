@@ -1,6 +1,6 @@
 # Phase 5c — Full Circuit Retrofit Implementation Plan
 
-> **Status:** PLANNED — implementation pending. Phase 5 sub-plan; depends on:
+> **Status:** IMPLEMENTED — all 15 tasks landed on `feature/next-gen-modules-plans` (commits `0a92315` … `f434088`). Phase 5 sub-plan; depends on:
 > - Phase 1 foundation infra (`docs/superpowers/plans/2026-04-27-phase-1-foundation-infra.md`) — `ModuleContext` `'block` lifetime + `bin_physics: Option<&'block BinPhysics>` slot + `writes_bin_physics`/`heavy_cpu_per_mode` `ModuleSpec` extensions.
 > - Phase 2g Circuit-light (`docs/superpowers/plans/2026-04-27-phase-2g-circuit-light.md`) — base `CircuitModule` with BbdBins / SpectralSchmitt / CrossoverDistortion modes.
 > - Phase 3 BinPhysics infra (`docs/superpowers/plans/2026-04-27-phase-3-bin-physics.md`) — `BinPhysics` struct (with `flux`, `temperature`, `bias`, `slew` fields).
