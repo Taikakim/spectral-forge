@@ -97,11 +97,20 @@ use spectral_forge::dsp::modules::{module_spec, ModuleType};
 #[test]
 fn no_existing_module_declares_needs_if() {
     use ModuleType::*;
-    for &ty in &[
+    // Exhaustive match: when a new ModuleType variant lands the compiler will
+    // refuse to build this test until the new variant is added below, forcing
+    // an explicit decision about whether the new module reads IF.
+    let all: &[ModuleType] = &[
         Empty, Dynamics, Freeze, PhaseSmear, Contrast, Gain, MidSide,
         TransientSustainedSplit, Harmonic, Future, Punch, Rhythm, Geometry,
         Modulate, Circuit, Life, Past, Kinetics, Master,
-    ] {
+    ];
+    for &ty in all {
+        let _exhaustive_guard: () = match ty {
+            Empty | Dynamics | Freeze | PhaseSmear | Contrast | Gain | MidSide
+            | TransientSustainedSplit | Harmonic | Future | Punch | Rhythm
+            | Geometry | Modulate | Circuit | Life | Past | Kinetics | Master => (),
+        };
         let spec = module_spec(ty);
         assert!(!spec.needs_instantaneous_freq,
             "{:?} should not need IF in v1 (Phase 6+ opt-in)", ty);
