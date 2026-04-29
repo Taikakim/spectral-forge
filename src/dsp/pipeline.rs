@@ -678,6 +678,17 @@ impl Pipeline {
             self.fx_matrix.set_past_sort_keys(&*keys);
         }
 
+        // Propagate kinetics modes + sources each block (try_lock is non-blocking; skipped if GUI holds lock).
+        if let Some(modes) = params.slot_kinetics_mode.try_lock() {
+            self.fx_matrix.set_kinetics_modes(&*modes);
+        }
+        if let Some(srcs) = params.slot_kinetics_well_source.try_lock() {
+            self.fx_matrix.set_kinetics_well_sources(&*srcs);
+        }
+        if let Some(srcs) = params.slot_kinetics_mass_source.try_lock() {
+            self.fx_matrix.set_kinetics_mass_sources(&*srcs);
+        }
+
         // Propagate rhythm modes + grids each block (try_lock is non-blocking; skipped if GUI holds lock).
         // The two locks are independent — if either is held by GUI, skip dispatch this block;
         // the next block will pick up the GUI-side write.

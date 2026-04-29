@@ -2164,3 +2164,28 @@ fn kinetics_diamagnet_carves_and_redistributes_energy() {
     let loss = (dry_total - wet_total).abs() / dry_total;
     assert!(loss < 0.10, "Diamagnet violated energy conservation by {}%", loss * 100.0);
 }
+
+#[test]
+fn kinetics_default_mode_is_hooke() {
+    use spectral_forge::dsp::modules::kinetics::KineticsMode;
+    assert_eq!(KineticsMode::default(), KineticsMode::Hooke);
+}
+
+#[test]
+fn kinetics_well_source_default_is_static() {
+    use spectral_forge::dsp::modules::kinetics::WellSource;
+    assert_eq!(WellSource::default(), WellSource::Static);
+}
+
+#[test]
+fn kinetics_mass_source_default_is_static() {
+    use spectral_forge::dsp::modules::kinetics::MassSource;
+    assert_eq!(MassSource::default(), MassSource::Static);
+}
+
+#[test]
+fn params_carries_slot_kinetics_mode() {
+    // Smoke: existence of the field on params + Mutex initialisation works.
+    use spectral_forge::params::SpectralForgeParams;
+    let _params = SpectralForgeParams::default();
+}
