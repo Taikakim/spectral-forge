@@ -659,6 +659,9 @@ impl Pipeline {
         if let Some(modes) = params.slot_modulate_mode.try_lock() {
             self.fx_matrix.set_modulate_modes(&*modes);
         }
+        if let Some(repels) = params.slot_modulate_repel.try_lock() {
+            self.fx_matrix.set_modulate_repels(&*repels);
+        }
 
         // Propagate circuit modes each block (try_lock is non-blocking; skipped if GUI holds lock).
         if let Some(modes) = params.slot_circuit_mode.try_lock() {

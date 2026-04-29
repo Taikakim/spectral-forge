@@ -279,6 +279,16 @@ impl FxMatrix {
         }
     }
 
+    /// Propagate per-slot Modulate Repel toggle from params to ModulateModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_modulate_repels(&mut self, repels: &[bool; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_modulate_repel(repels[s]);
+            }
+        }
+    }
+
     /// Propagate per-slot CircuitMode from params to CircuitModule instances.
     /// Called once per audio block (before process_hop).
     pub fn set_circuit_modes(&mut self, modes: &[CircuitMode; 9]) {

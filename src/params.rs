@@ -196,6 +196,10 @@ pub struct SpectralForgeParams {
     /// for `ModulateModule`. Single mutex over the array so audio thread takes one lock per block.
     pub slot_modulate_mode: Arc<Mutex<[ModulateMode; 9]>>,
 
+    /// Per-slot Repel toggle for Modulate.GravityPhaser (false = pull, true = push).
+    /// Single mutex over the array (matches `slot_modulate_mode`) so audio thread takes one lock per block.
+    pub slot_modulate_repel: Arc<Mutex<[bool; 9]>>,
+
     /// Per-slot BbdBins / SpectralSchmitt / CrossoverDistortion selector for `CircuitModule`.
     /// Single mutex over the array (matches `slot_modulate_mode`) so audio thread takes one lock per block.
     pub slot_circuit_mode: Arc<Mutex<[CircuitMode; 9]>>,
@@ -411,6 +415,7 @@ impl Default for SpectralForgeParams {
             slot_rhythm_mode: Arc::new(Mutex::new([RhythmMode::default(); 9])),
             slot_geometry_mode: Arc::new(Mutex::new([GeometryMode::default(); 9])),
             slot_modulate_mode: Arc::new(Mutex::new([ModulateMode::default(); 9])),
+            slot_modulate_repel: Arc::new(Mutex::new([false; 9])),
             slot_circuit_mode: Arc::new(Mutex::new([CircuitMode::default(); 9])),
             slot_life_mode:    Arc::new(Mutex::new([LifeMode::default();    9])),
             slot_past_mode:     Arc::new(Mutex::new([PastMode::default(); 9])),
@@ -908,6 +913,7 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_rhythm_mode",   slot_rhythm_mode);
         persist_out!("slot_geometry_mode", slot_geometry_mode);
         persist_out!("slot_modulate_mode", slot_modulate_mode);
+        persist_out!("slot_modulate_repel", slot_modulate_repel);
         persist_out!("slot_circuit_mode",  slot_circuit_mode);
         persist_out!("slot_life_mode",     slot_life_mode);
         persist_out!("slot_past_mode",     slot_past_mode);
@@ -969,6 +975,7 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_rhythm_mode"    => persist_in!("slot_rhythm_mode",    slot_rhythm_mode,    data),
                 "slot_geometry_mode"  => persist_in!("slot_geometry_mode",  slot_geometry_mode,  data),
                 "slot_modulate_mode"  => persist_in!("slot_modulate_mode",  slot_modulate_mode,  data),
+                "slot_modulate_repel" => persist_in!("slot_modulate_repel", slot_modulate_repel, data),
                 "slot_circuit_mode"   => persist_in!("slot_circuit_mode",   slot_circuit_mode,   data),
                 "slot_life_mode"      => persist_in!("slot_life_mode",      slot_life_mode,      data),
                 "slot_past_mode"      => persist_in!("slot_past_mode",      slot_past_mode,      data),

@@ -2357,3 +2357,53 @@ fn modulate_gravity_phaser_writes_phase_momentum_and_rotates() {
         "bin-100 seed did not differentiate: m[100]={}, m[50]={}",
         physics.phase_momentum[100], physics.phase_momentum[50]);
 }
+
+#[test]
+fn modulate_gravity_phaser_repel_inverts_rotation_direction() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::bin_physics::BinPhysics;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    fn run_with_repel(repel: bool) -> f32 {
+        let mut module = ModulateModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_modulate_mode(ModulateMode::GravityPhaser);
+        module.set_modulate_repel(repel);
+
+        let num_bins = 1025;
+        let mut bins: Vec<Complex<f32>> = (0..num_bins).map(|_| Complex::new(1.0, 0.0)).collect();
+
+        // AMOUNT=2 (max), REACH=neutral, RATE=neutral, THRESH=neutral, AMPGATE=0, MIX=2 full-wet
+        let amount = vec![2.0_f32; num_bins];
+        let neutral = vec![1.0_f32; num_bins];
+        let zeros = vec![0.0_f32; num_bins];
+        let mix = vec![2.0_f32; num_bins];
+        let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &zeros, &mix];
+
+        let mut suppression = vec![0.0_f32; num_bins];
+        let mut physics = BinPhysics::new();
+        physics.reset_active(num_bins, 48_000.0, 2048);
+
+        let ctx = ModuleContext::new(
+            48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false,
+        );
+
+        for _ in 0..15 {
+            module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                           &mut bins, None, &curves,
+                           &mut suppression, Some(&mut physics), &ctx);
+        }
+        physics.phase_momentum[200] // sample any bin where ampgate=0 produces equal force
+    }
+
+    let pull_momentum = run_with_repel(false);
+    let push_momentum = run_with_repel(true);
+    assert!(pull_momentum.is_finite() && push_momentum.is_finite(),
+        "non-finite momentum: pull={}, push={}", pull_momentum, push_momentum);
+    // Repel must invert sign of accumulated momentum and produce non-trivial magnitude.
+    assert!(pull_momentum.abs() > 1e-6, "pull momentum trivially small: {}", pull_momentum);
+    assert!(pull_momentum.signum() == -push_momentum.signum(),
+        "Repel did not invert sign: pull={}, push={}", pull_momentum, push_momentum);
+}

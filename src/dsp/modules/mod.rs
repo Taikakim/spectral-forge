@@ -288,6 +288,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Modulate modules. Default no-op for all other types.
     fn set_modulate_mode(&mut self, _: crate::dsp::modules::modulate::ModulateMode) {}
 
+    /// Update the per-slot Repel toggle for Modulate.GravityPhaser. Default no-op.
+    fn set_modulate_repel(&mut self, _repel: bool) {}
+
     /// Update the operating mode for Circuit modules. Default no-op for all other types.
     fn set_circuit_mode(&mut self, _: crate::dsp::modules::circuit::CircuitMode) {}
 

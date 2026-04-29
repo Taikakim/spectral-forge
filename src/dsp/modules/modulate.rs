@@ -335,6 +335,8 @@ impl Default for ModulateMode {
 
 pub struct ModulateModule {
     mode: ModulateMode,
+    /// When true, GravityPhaser inverts force sign (push instead of pull).
+    repel: bool,
     /// Accumulated hop count per channel (used by phase animation kernels).
     hop_count: [u64; 2],
     /// Per-channel scratch buffer for BinSwapper (length = num_bins after reset).
@@ -359,6 +361,7 @@ impl ModulateModule {
     pub fn new() -> Self {
         Self {
             mode:         ModulateMode::default(),
+            repel:        false,
             hop_count:    [0; 2],
             swap_scratch: [Vec::<Complex<f32>>::new(), Vec::<Complex<f32>>::new()],
             rms_history:  [[0.0; 16]; 2],
@@ -488,7 +491,7 @@ impl SpectralModule for ModulateModule {
                 let smoothed = self.smoothed_curves_for(channel);
                 if let Some(p) = physics.as_mut() {
                     let momentum = &mut p.phase_momentum[..num_bins];
-                    apply_gravity_phaser(bins, &smoothed, momentum, /* repel */ false);
+                    apply_gravity_phaser(bins, &smoothed, momentum, self.repel);
                 } else {
                     debug_assert!(false,
                         "GravityPhaser requires Some(physics) — FxMatrix must supply it for writes_bin_physics modules");
@@ -539,6 +542,10 @@ impl SpectralModule for ModulateModule {
 
     fn set_modulate_mode(&mut self, mode: ModulateMode) {
         self.set_mode(mode);
+    }
+
+    fn set_modulate_repel(&mut self, repel: bool) {
+        self.repel = repel;
     }
 
     #[cfg(any(test, feature = "probe"))]
