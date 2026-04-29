@@ -332,10 +332,12 @@ fn find_sidechain_peaks(
     let n = sc.len();
     if n < 3 { return; }
     for k in 1..(n - 1) {
-        if sc[k] > thresh && sc[k] > sc[k - 1] && sc[k] > sc[k + 1] {
-            if out.len() < MAX_GP_NODES {
-                out.push((k, sc[k]));
-            }
+        if sc[k] > thresh
+            && sc[k] > sc[k - 1]
+            && sc[k] > sc[k + 1]
+            && out.len() < MAX_GP_NODES
+        {
+            out.push((k, sc[k]));
         }
     }
 }
@@ -360,19 +362,21 @@ fn apply_gravity_phaser_sc_positioned(
     let reach_c  = smoothed[1];
     let mix_c    = smoothed[5];
     let num_bins = bins.len();
+    debug_assert!(phase_momentum.len() >= num_bins,
+        "phase_momentum must be at least num_bins long");
     let sign: f32 = if repel { -1.0 } else { 1.0 };
 
     if nodes.is_empty() {
         // No peaks found — pure momentum decay; bins pass through unchanged.
-        for k in 0..num_bins {
-            phase_momentum[k] *= 0.95;
+        for m in phase_momentum.iter_mut().take(num_bins) {
+            *m *= 0.95;
         }
         return;
     }
 
     for k in 0..num_bins {
         let amount = amount_c[k].clamp(0.0, 2.0);
-        let reach  = reach_c[k].clamp(0.1, 4.0);
+        let reach  = reach_c[k].clamp(0.0, 4.0);
         let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
 
         let width_bins = (reach * 12.0).max(1.0);
@@ -586,8 +590,10 @@ impl SpectralModule for ModulateModule {
                     let momentum = &mut p.phase_momentum[..num_bins];
                     if self.sc_positioned {
                         // Populate gp_nodes before borrowing smoothed_curves.
-                        // Threshold from THRESH curve at bin 0, scaled to [0.005, 2.0].
-                        // We need the thresh value before borrowing smoothed, so read it directly.
+                        // Global threshold from THRESH curve at bin 0 (intentional simplification:
+                        // SC-positioned mode tests the sidechain peaks against a single threshold,
+                        // not per-bin). Direct field access sidesteps a borrow conflict between
+                        // `smoothed_curves_for(channel)` and `&mut self.gp_nodes[channel]`.
                         let thresh = self.smoothed_curves[channel][3]
                             .first().copied().unwrap_or(1.0).clamp(0.01, 4.0) * 0.5;
                         if let Some(sc) = sidechain {
@@ -639,6 +645,7 @@ impl SpectralModule for ModulateModule {
                 self.smoothed_curves[ch][c].resize(num_bins, 0.0);
             }
             self.smoothed_primed[ch] = false;
+            self.gp_nodes[ch].clear();
         }
         self.hop_count = [0; 2];
         // self.mode is preserved across reset (user choice survives FFT-size change).
