@@ -191,9 +191,14 @@ fn circuit_transformer_writes_flux_visible_to_next_slot() {
         module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, Some(&mut physics), &ctx);
     }
 
-    // Flux should have built up where the magnitude was saturating.
+    // Flux should have built up where the magnitude was saturating. With constant
+    // input mag=3.0, knee=1.0, and 40 hops to settle, every bin's flux contribution
+    // (≈ 2 × (lp - sat_mag) ≈ 2 × 2.1 ≈ 4.2) sums to ~4300 across 1025 bins. Use a
+    // threshold an order of magnitude below the analytical mean to catch any
+    // regression that drops most of the write energy without flaking on numeric
+    // jitter.
     let total_flux: f32 = physics.flux[..num_bins].iter().sum();
-    assert!(total_flux > 0.5, "Transformer should write flux; total = {}", total_flux);
+    assert!(total_flux > 500.0, "Transformer should write substantial flux; total = {}", total_flux);
 }
 
 #[test]
@@ -204,10 +209,11 @@ fn circuit_vactrol_reads_incoming_flux() {
     use spectral_forge::params::StereoLink;
     use spectral_forge::params::FxChannelTarget;
 
-    let mut module = CircuitModule::new();
-    module.reset(48_000.0, 2048);
-    module.set_circuit_mode(CircuitMode::Vactrol);
-
+    // A/B test: Vactrol must read flux through the writer-slot `physics` arg, not
+    // `ctx.bin_physics`. Run twice with identical inputs except for the flux field
+    // and assert the flux-set run charges its slow cap strictly more than the
+    // zero-flux baseline. Mirrors the FxMatrix writer-slot pattern:
+    // `physics = Some(&mut mix_phys)` and `ctx.bin_physics = None`.
     let num_bins = 1025;
 
     let amount  = vec![1.0_f32; num_bins];
@@ -216,28 +222,48 @@ fn circuit_vactrol_reads_incoming_flux() {
     let release = vec![1.0_f32; num_bins];
     let mix     = vec![2.0_f32; num_bins];
     let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
-    let mut suppression = vec![0.0_f32; num_bins];
 
-    // Build a physics view with a strong flux peak at bin 200.
-    let mut physics_view = BinPhysics::new();
-    physics_view.reset_active(num_bins, 48_000.0, 2048);
-    physics_view.flux[200] = 4.0;
-    let view_ref: &BinPhysics = &physics_view;
+    fn run(num_bins: usize, curves: &[&[f32]], flux_value: f32) -> f32 {
+        let mut module = CircuitModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_circuit_mode(CircuitMode::Vactrol);
 
-    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); num_bins];
+        let mut suppression = vec![0.0_f32; num_bins];
+        let mut physics = BinPhysics::new();
+        physics.reset_active(num_bins, 48_000.0, 2048);
 
-    let ctx = phase_test_ctx(num_bins, Some(view_ref));
+        let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.5, 0.0); num_bins];
+        let ctx = phase_test_ctx(num_bins, None);
 
-    // Several hops: vactrol cap should charge primarily at bin 200 (high flux).
-    for _ in 0..50 {
-        for b in bins.iter_mut() { *b = Complex::new(0.5, 0.0); }
-        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+        for _ in 0..50 {
+            // Re-seed flux every hop: Vactrol does not write `physics`, but other
+            // writer-slot modes that set `physics: Some(&mut)` would; keep this
+            // pattern consistent so the flux value the kernel reads is exact.
+            for k in 0..num_bins { physics.flux[k] = flux_value; }
+            for b in bins.iter_mut() { *b = Complex::new(0.5, 0.0); }
+            module.process(
+                0, StereoLink::Linked, FxChannelTarget::All,
+                &mut bins, None, curves, &mut suppression,
+                Some(&mut physics), &ctx,
+            );
+        }
+
+        let probe: CircuitProbe = module.probe_state(0);
+        probe.vactrol_slow_avg
     }
 
-    let probe: CircuitProbe = module.probe_state(0);
-    // The probe averages across all bins; with a single hot bin among 1025 the avg
-    // is small but should still be > 0 (the cap charges with flux drive).
-    assert!(probe.vactrol_slow_avg > 0.0, "vactrol should charge from incoming flux (avg={})", probe.vactrol_slow_avg);
+    let avg_flux_set  = run(num_bins, &curves, 4.0);
+    let avg_zero_flux = run(num_bins, &curves, 0.0);
+
+    // Drive in flux-set run is `flux.abs() * amount = 4.0`; in zero-flux run drive is
+    // 0.0, so slow cap settles to 0. Gap should be substantial — well above any
+    // numeric jitter — confirming Vactrol reads `physics.flux`, not the fallback
+    // (`dry.norm()`) or `ctx.bin_physics`.
+    assert!(
+        avg_flux_set > avg_zero_flux + 1.0,
+        "Vactrol must charge from physics.flux: flux=4.0 → slow_avg={}, flux=0.0 → slow_avg={}",
+        avg_flux_set, avg_zero_flux,
+    );
 }
 
 #[test]
@@ -272,6 +298,10 @@ fn circuit_bias_fuzz_roundtrips_bias_field() {
         module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, Some(&mut physics), &ctx);
     }
 
+    // Bias Fuzz writes bias_out = 0.95*bias_out + 0.05*bias_lp every hop, where
+    // bias_lp converges toward in_mag = 2.0. After 100 hops bias_out is near 2.0
+    // per bin; total ≈ 2050 across 1025 bins. Use ~10% of analytical mean to catch
+    // regressions that drop most write energy without flaking on numeric jitter.
     let total_bias: f32 = physics.bias[..num_bins].iter().sum();
-    assert!(total_bias > 0.5, "Bias Fuzz should write bias; total = {}", total_bias);
+    assert!(total_bias > 200.0, "Bias Fuzz should write substantial bias; total = {}", total_bias);
 }
