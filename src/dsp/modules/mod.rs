@@ -386,6 +386,12 @@ pub struct ModuleSpec {
     /// schedule writers before readers within a hop, and to skip the BinPhysics
     /// assembly step entirely when no slot needs it.
     pub writes_bin_physics: bool,
+
+    /// True if this module reads `ModuleContext::instantaneous_freq`. The
+    /// pipeline only computes per-bin IF when at least one active slot declares
+    /// this. Defaults false for every shipped module; flipped per-module by
+    /// Phase 6.1+ consumers.
+    pub needs_instantaneous_freq: bool,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -401,6 +407,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -412,6 +419,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -423,6 +431,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -434,6 +443,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -445,6 +455,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -456,6 +467,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -467,6 +479,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -478,6 +491,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -489,6 +503,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static PUNCH: ModuleSpec = ModuleSpec {
         display_name: "Punch",
@@ -502,6 +517,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: true,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static RHY: ModuleSpec = ModuleSpec {
         display_name: "Rhythm",
@@ -513,6 +529,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain:    false,
         panel_widget: Some(crate::editor::rhythm_panel::render),
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static GEO: ModuleSpec = ModuleSpec {
         display_name: "Geometry",
@@ -524,6 +541,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static MODULATE: ModuleSpec = ModuleSpec {
         display_name: "Modulate",
@@ -535,6 +553,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: true,
         panel_widget: None,
         writes_bin_physics: true,
+        needs_instantaneous_freq: false,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
@@ -548,6 +567,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // Opt-in ahead of Phases 5c.4–5c.10 (Vactrol/Transformer/Sag/Drift/Slew/BiasFuzz).
         // v1 BBD/Schmitt/Crossover kernels do not yet write any BinPhysics field.
         writes_bin_physics: true,
+        needs_instantaneous_freq: false,
     };
     static LIFE: ModuleSpec = ModuleSpec {
         display_name: "LIFE",
@@ -559,6 +579,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: true,
+        needs_instantaneous_freq: false,
     };
     static PAST: ModuleSpec = ModuleSpec {
         display_name: "PAST",
@@ -570,6 +591,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain:    false,
         panel_widget:       None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static KIN: ModuleSpec = ModuleSpec {
         display_name: "KINETICS",
@@ -581,6 +603,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: true,
+        needs_instantaneous_freq: false,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -592,6 +615,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -603,6 +627,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        needs_instantaneous_freq: false,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,

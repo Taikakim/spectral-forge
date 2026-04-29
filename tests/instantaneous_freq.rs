@@ -87,3 +87,23 @@ fn if_finite_for_all_bins_under_random_phase() {
         assert!(v.is_finite(), "bin {} produced non-finite IF: {}", k, v);
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Task 3 tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+use spectral_forge::dsp::modules::{module_spec, ModuleType};
+
+#[test]
+fn no_existing_module_declares_needs_if() {
+    use ModuleType::*;
+    for &ty in &[
+        Empty, Dynamics, Freeze, PhaseSmear, Contrast, Gain, MidSide,
+        TransientSustainedSplit, Harmonic, Future, Punch, Rhythm, Geometry,
+        Modulate, Circuit, Life, Past, Kinetics, Master,
+    ] {
+        let spec = module_spec(ty);
+        assert!(!spec.needs_instantaneous_freq,
+            "{:?} should not need IF in v1 (Phase 6+ opt-in)", ty);
+    }
+}
