@@ -213,6 +213,12 @@ pub struct KineticsModule {
     /// process() so the ProbeState reflects the correct mode's well count.
     last_well_count: [u16; 2],
 
+    /// Slow-attack envelope of the per-hop max-dry-magnitude, used as the cap reference in
+    /// `apply_hooke` and `apply_gravity_well`.  Updated each `process()` call via a 1-pole
+    /// lowpass (`ALPHA ≈ 0.05`) so that upstream amplification (e.g. GravityWell in a
+    /// prior slot) cannot instantly raise the cap and feed a runaway displacement loop.
+    max_dry_smoothed: [f32; 2],
+
     sample_rate: f32,
     fft_size:    usize,
 
@@ -270,6 +276,7 @@ impl KineticsModule {
             diamagnet_new_mag:  [Vec::new(), Vec::new()],
             rng_state:          [0xC0FF_EE01, 0xBADD_CAFE],
             last_well_count: [0; 2],
+            max_dry_smoothed: [0.0; 2],
             sample_rate:     48_000.0,
             fft_size:        2048,
             #[cfg(any(test, feature = "probe"))]
@@ -358,20 +365,19 @@ impl KineticsModule {
         }
 
         // -- 2. Translate displacement → magnitude multiplier and blend with dry.
-        let max_mag = {
-            let mut m = 0.0_f32;
-            for k in 0..num_bins {
-                let v = self.dry_mag_scratch[channel][k];
-                if v > m { m = v; }
-            }
-            m
-        };
-        let cap = 4.0 * max_mag.max(1e-6);
-
+        //
         // Pass A skips k=0 (DC) and k=num_bins-1 (Nyquist) — their displacement stays zero,
         // so the wet path here reduces to identity for those bins. Intentional.
+        //
+        // Cap uses max_dry_smoothed (a slow-attack envelope of the per-hop max dry mag)
+        // rather than the current-hop max.  Without this, an upstream kernel (e.g.
+        // GravityWell) that amplifies bins each hop would immediately raise the cap, enabling
+        // Hooke to keep accumulating displacement through harmonic spring coupling in a
+        // runaway positive-feedback loop.  The slow attack (τ ≈ 100 hops) prevents the cap
+        // from tracking rapid upstream amplification.
+        let cap = 4.0 * self.max_dry_smoothed[channel].max(1e-6);
         for k in 0..num_bins {
-            let mix = self.smoothed_curves[channel][4][k].clamp(0.0, 1.0);
+            let mix   = self.smoothed_curves[channel][4][k].clamp(0.0, 1.0);
             let dry_k = self.dry_mag_scratch[channel][k];
             let new_mag = (dry_k + self.displacement[channel][k]).clamp(0.0, cap);
             if dry_k > 1e-9 {
@@ -523,12 +529,13 @@ impl KineticsModule {
         }
 
         // -- 3. Translate displacement → magnitude bend; blend with dry via MIX. --
-        let max_mag = {
-            let dry_mag_scratch = &self.dry_mag_scratch[channel][..num_bins];
-            dry_mag_scratch.iter().fold(0.0_f32, |a, &b| a.max(b))
-        };
-        let cap = 4.0 * max_mag.max(1e-6);
-
+        //
+        // Cap uses max_dry_smoothed (a slow-attack envelope of the per-hop max dry mag)
+        // rather than the current-hop max.  Without this, GravityWell's own amplified output
+        // feeds back as the next hop's input, raising max_dry each hop and growing the cap
+        // in a runaway positive-feedback loop.  The slow attack (τ ≈ 100 hops) prevents the
+        // cap from instantly tracking rapid upstream amplification.
+        let cap = 4.0 * self.max_dry_smoothed[channel].max(1e-6);
         let dry_mag_scratch = &self.dry_mag_scratch[channel][..num_bins];
         let displacement    = &self.displacement[channel][..num_bins];
         for k in 0..num_bins {
@@ -1158,6 +1165,25 @@ impl SpectralModule for KineticsModule {
             self.dry_mag_scratch[channel][k] = bins[k].norm();
         }
 
+        // Update the slow-attack max_dry envelope used as the displacement-cap reference in
+        // apply_hooke and apply_gravity_well.  A VERY slow attack (alpha = 0.01, τ ≈ 100 hops)
+        // means the cap cannot quickly track an upstream kernel's amplified output, preventing
+        // the runaway loop where GravityWell's growing bins raise Hooke's cap each hop.
+        // On the very first hop after a reset the pre-update value is 0; we prime the smoother
+        // directly to `cur_max` so the cap is meaningful from hop 1.
+        {
+            let cur_max = self.dry_mag_scratch[channel][..num_bins]
+                .iter().fold(0.0_f32, |a, &b| a.max(b));
+            const ALPHA: f32 = 0.01; // τ ≈ 100 hops
+            let prev = self.max_dry_smoothed[channel];
+            if prev < 1e-9 {
+                // Cold start: prime to current max so the cap is correct on hop 1.
+                self.max_dry_smoothed[channel] = cur_max.max(1e-6);
+            } else {
+                self.max_dry_smoothed[channel] = prev * (1.0 - ALPHA) + cur_max * ALPHA;
+            }
+        }
+
         // -- 3. Apply the active mode's force kernel. --
         // Reborrow physics for each arm via as_deref / as_deref_mut so the
         // borrow checker sees independent borrows per arm (Rust 2021 NLL).
@@ -1278,6 +1304,7 @@ impl SpectralModule for KineticsModule {
         }
         self.rng_state = [0xC0FF_EE01, 0xBADD_CAFE];
         self.last_well_count = [0; 2];
+        self.max_dry_smoothed = [0.0; 2];
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::Kinetics }
