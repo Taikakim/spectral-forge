@@ -368,6 +368,13 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
         CircuitMode::CrossoverDistortion,
         CircuitMode::SpectralSchmitt,
         CircuitMode::BbdBins,
+        CircuitMode::Vactrol,
+        CircuitMode::TransformerSaturation,
+        CircuitMode::PowerSag,
+        CircuitMode::ComponentDrift,
+        CircuitMode::PcbCrosstalk,
+        CircuitMode::SlewDistortion,
+        CircuitMode::BiasFuzz,
     ] {
         let mut module = CircuitModule::new();
         module.reset(48_000.0, 2048);
