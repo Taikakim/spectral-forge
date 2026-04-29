@@ -80,6 +80,10 @@ const SC_MASS_RATE_SCALE: f32 = 5.0;
 const TUNING_FORK_MIN_SEP: usize = 4;
 const MAX_PEAKS: usize = 16;
 const ORBITAL_SAT_HALF_WINDOW: usize = 16;
+/// OrbitalPhase peak detection: a bin counts as a "peak" only if its magnitude
+/// exceeds this factor times the local-window mean (window half-width =
+/// `ORBITAL_SAT_HALF_WINDOW`). Higher values reject more micro-peaks.
+const ORBITAL_PEAK_THRESHOLD_FACTOR: f32 = 2.0;
 /// Strength curve must exceed this baseline to register as a static gravity well.
 const STATIC_WELL_BASELINE: f32 = 1.05;
 /// Sidechain peak must reach this fraction of the per-hop max to register as a well.
@@ -608,7 +612,7 @@ impl KineticsModule {
                 let lo   = k.saturating_sub(ORBITAL_SAT_HALF_WINDOW);
                 let hi   = (k + ORBITAL_SAT_HALF_WINDOW).min(num_bins - 1);
                 let mean = (lo..=hi).map(|i| bins[i].norm()).sum::<f32>() / (hi - lo + 1) as f32;
-                if m > 2.0 * mean {
+                if m > ORBITAL_PEAK_THRESHOLD_FACTOR * mean {
                     if peaks.len() < MAX_PEAKS {
                         peaks.push((k, m));
                     }
@@ -621,26 +625,27 @@ impl KineticsModule {
         // Bins are read+mutated here; the peak list (Pass A) is complete so there is
         // no conflict between the read of bins[k].norm() above and the write below.
         for &(km, m_amp) in peaks.iter() {
+            let alpha = 0.5 * strength_curve[km] * dt;
             // Upper bound for d: stay within the array AND respect ORBITAL_SAT_HALF_WINDOW.
+            // d_max derivation guarantees kp = km + d ≤ num_bins - 1, so no bounds guard is
+            // needed on the +d satellite block.
             let d_max = ORBITAL_SAT_HALF_WINDOW.min(
                 num_bins.saturating_sub(km).max(1) - 1
             );
             for d in 1..=d_max {
-                let alpha = 0.5 * strength_curve[km] * dt;
-                let denom = (d as f32 * d as f32).max(1.0);
+                // d ≥ 1 in this loop, so d² ≥ 1 — no defensive .max(1.0) needed.
+                let denom = (d as f32) * (d as f32);
 
                 // +d satellite: rotate by +Δφ
                 let kp = km + d;
-                if kp < num_bins {
-                    let dphi_pos = alpha * m_amp / denom;
-                    let mix      = mix_curve[kp].clamp(0.0, 1.0);
-                    let dphi     = dphi_pos * mix;
-                    let (c, s)   = (dphi.cos(), dphi.sin());
-                    let re = bins[kp].re * c - bins[kp].im * s;
-                    let im = bins[kp].re * s + bins[kp].im * c;
-                    bins[kp].re = re;
-                    bins[kp].im = im;
-                }
+                let dphi_pos = alpha * m_amp / denom;
+                let mix      = mix_curve[kp].clamp(0.0, 1.0);
+                let dphi     = dphi_pos * mix;
+                let (c, s)   = (dphi.cos(), dphi.sin());
+                let re = bins[kp].re * c - bins[kp].im * s;
+                let im = bins[kp].re * s + bins[kp].im * c;
+                bins[kp].re = re;
+                bins[kp].im = im;
 
                 // -d satellite: rotate by -Δφ (opposite sign)
                 if km >= d {
