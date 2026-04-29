@@ -125,6 +125,10 @@ pub struct Pipeline {
     /// Previous-frame wrapped phase used by `compute_instantaneous_freq`. Independent of
     /// PLPV's `prev_phase`. Sized at MAX_NUM_BINS. Zeroed by both `clear_state()` and `reset()`.
     if_prev_phase: Vec<Vec<f32>>,
+    /// MIDI state mirrored from `lib.rs::process()`. Updated before each block,
+    /// read inside the hop closure to populate ModuleContext.
+    held_notes:         [bool; crate::dsp::midi::NUM_MIDI_NOTES],
+    held_pitch_classes: [bool; crate::dsp::midi::NUM_PITCH_CLASSES],
     sample_rate: f32,
     num_channels: usize,
 }
@@ -232,6 +236,8 @@ impl Pipeline {
             if_offset_buf,
             if_buffer,
             if_prev_phase,
+            held_notes:         [false; crate::dsp::midi::NUM_MIDI_NOTES],
+            held_pitch_classes: [false; crate::dsp::midi::NUM_PITCH_CLASSES],
             sample_rate,
             fft_size,
             num_channels,
@@ -284,6 +290,7 @@ impl Pipeline {
         for v in &mut self.if_offset_buf { *v = 0.0; }
         for v in &mut self.if_buffer     { v.fill(0.0); }
         for v in &mut self.if_prev_phase { v.fill(0.0); }
+        crate::dsp::midi::clear_midi_state(&mut self.held_notes, &mut self.held_pitch_classes);
         self.history.reset();
         self.fx_matrix.clear_state();
     }
@@ -334,6 +341,7 @@ impl Pipeline {
         for v in &mut self.if_offset_buf { *v = 0.0; }
         for v in &mut self.if_buffer     { v.fill(0.0); }
         for v in &mut self.if_prev_phase { v.fill(0.0); }
+        crate::dsp::midi::clear_midi_state(&mut self.held_notes, &mut self.held_pitch_classes);
         // History Buffer: rebuild if the depth changed; otherwise reset in place.
         let new_capacity = {
             let hop = (fft_size / OVERLAP).max(1) as f32;
@@ -1062,6 +1070,23 @@ impl Pipeline {
             shared.sc_envelope_tx.input_buffer_mut().fill(0.0);
         }
         shared.sc_envelope_tx.publish();
+    }
+
+    /// Apply a NoteOn from the host. Called from `SpectralForge::process()` per event.
+    #[inline]
+    pub fn note_on(&mut self, note: u8) {
+        crate::dsp::midi::apply_note_on(note, &mut self.held_notes, &mut self.held_pitch_classes);
+    }
+
+    /// Apply a NoteOff from the host. Called from `SpectralForge::process()` per event.
+    #[inline]
+    pub fn note_off(&mut self, note: u8) {
+        crate::dsp::midi::apply_note_off(note, &mut self.held_notes, &mut self.held_pitch_classes);
+    }
+
+    /// Read-only access to the current held-notes snapshot — used by tests.
+    pub fn held_notes(&self) -> &[bool; crate::dsp::midi::NUM_MIDI_NOTES] {
+        &self.held_notes
     }
 
     /// Test-only snapshot of HistoryBuffer state. Used by `tests/calibration.rs`
