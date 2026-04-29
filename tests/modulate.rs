@@ -546,9 +546,11 @@ fn modulate_mode_dispatch_via_trait_setter() {
 /// every output bin is finite and below the runaway threshold (1e6), and every
 /// suppression entry is finite and non-negative.
 ///
-/// GravityPhaser requires Some(physics); PllTear is a pass-through in this phase.
+/// GravityPhaser requires Some(physics) and exercises Repel + SidechainPositioned.
+/// PllTear exercises the PLPV consumer path via a synthetic unwrapped_phase.
 #[test]
 fn modulate_finite_bounded_all_modes_dual_channel() {
+    use std::cell::Cell;
     use num_complex::Complex;
     use spectral_forge::dsp::bin_physics::BinPhysics;
     use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
@@ -556,6 +558,13 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
     use spectral_forge::params::{FxChannelTarget, StereoLink};
 
     let num_bins = 1025;
+
+    // Synthetic unwrapped-phase target: smooth ramp across bins.
+    // Built once (fft size is fixed across all modes) and handed to PllTear
+    // so its PLPV consumer path (ctx.unwrapped_phase Some branch) is exercised.
+    let unwrapped_cells: Vec<Cell<f32>> = (0..num_bins)
+        .map(|k| Cell::new((k as f32) * 0.05))
+        .collect();
 
     for mode in [
         ModulateMode::PhasePhaser,
@@ -569,6 +578,13 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
         let mut module = ModulateModule::new();
         module.reset(48_000.0, 2048);
         module.set_mode(mode);
+
+        // GravityPhaser: enable Repel so bins push apart, and SidechainPositioned
+        // so the sidechain drives attractor positions — both are non-trivial paths.
+        if mode == ModulateMode::GravityPhaser {
+            module.set_modulate_repel(true);
+            module.set_modulate_sc_positioned(true);
+        }
 
         // Non-trivial complex spectrum with varying magnitudes across bins.
         let mut bins_l: Vec<Complex<f32>> = (0..num_bins)
@@ -593,7 +609,7 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
         let curves: Vec<&[f32]> = vec![&amount, &neutral, &neutral, &neutral, &neutral, &mix];
 
         let mut suppression = vec![0.0_f32; num_bins];
-        let ctx = ModuleContext::new(
+        let ctx_base = ModuleContext::new(
             48_000.0, 2048, num_bins,
             10.0, 100.0, 1.0,
             0.5, false, false,
@@ -608,6 +624,13 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
 
         for hop in 0..200 {
             for ch in 0..2_usize {
+                // PllTear: provide unwrapped_phase so the PLPV consumer branch is
+                // taken rather than the local-unwrap fallback.
+                let mut ctx = ctx_base;
+                if mode == ModulateMode::PllTear {
+                    ctx.unwrapped_phase = Some(&unwrapped_cells[..]);
+                }
+
                 let bins = if ch == 0 { &mut bins_l } else { &mut bins_r };
                 let phys_arg = if needs_physics { Some(&mut physics) } else { None };
                 module.process(
@@ -639,6 +662,23 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
                         "bad suppression: mode={:?} hop={} ch={} idx={} val={}",
                         mode, hop, ch, i, s
                     );
+                }
+                // Physics bound: momentum must remain finite and bounded.
+                // The kernel decay factor is 0.95 with bounded force, so 100.0 is
+                // a generous ceiling; runaway here indicates an integration bug.
+                if needs_physics {
+                    for k in 0..num_bins {
+                        assert!(
+                            physics.phase_momentum[k].is_finite(),
+                            "physics NaN: mode={:?} hop={} ch={} bin={}",
+                            mode, hop, ch, k
+                        );
+                        assert!(
+                            physics.phase_momentum[k].abs() < 100.0,
+                            "physics runaway: mode={:?} hop={} ch={} bin={} m={}",
+                            mode, hop, ch, k, physics.phase_momentum[k]
+                        );
+                    }
                 }
             }
         }
