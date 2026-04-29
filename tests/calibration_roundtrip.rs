@@ -1241,7 +1241,7 @@ fn circuit_bbd_bins_mix_max_probes_100_pct() {
     let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
     m.set_circuit_mode(CircuitMode::BbdBins);
     let nc = m.num_curves();
-    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4] (Circuit has 5 curves post Phase 5c.1)
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
     let observed = probe.mix_pct.expect("circuit must probe mix_pct");
     assert!((observed - 100.0).abs() < 2.0, "BbdBins MIX=2.0 → 100%, got {}", observed);
 }
@@ -1274,7 +1274,7 @@ fn circuit_spectral_schmitt_mix_max_probes_100_pct() {
     let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
     m.set_circuit_mode(CircuitMode::SpectralSchmitt);
     let nc = m.num_curves();
-    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4] (Circuit has 5 curves post Phase 5c.1)
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
     let observed = probe.mix_pct.expect("circuit must probe mix_pct");
     assert!((observed - 100.0).abs() < 2.0, "SpectralSchmitt MIX=2.0 → 100%, got {}", observed);
 }
@@ -1307,7 +1307,7 @@ fn circuit_crossover_distortion_mix_max_probes_100_pct() {
     let mut m = create_module(ModuleType::Circuit, SAMPLE_RATE, FFT_SIZE);
     m.set_circuit_mode(CircuitMode::CrossoverDistortion);
     let nc = m.num_curves();
-    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4] (Circuit has 5 curves post Phase 5c.1)
+    let probe = run_case(&mut m, nc, 4, 2.0);   // MIX is curves[4]
     let observed = probe.mix_pct.expect("circuit must probe mix_pct");
     assert!((observed - 100.0).abs() < 2.0, "CrossoverDistortion MIX=2.0 → 100%, got {}", observed);
 }

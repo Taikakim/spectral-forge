@@ -545,6 +545,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
+        // Opt-in ahead of Phases 5c.4–5c.10 (Vactrol/Transformer/Sag/Drift/Slew/BiasFuzz).
+        // v1 BBD/Schmitt/Crossover kernels do not yet write any BinPhysics field.
         writes_bin_physics: true,
     };
     static LIFE: ModuleSpec = ModuleSpec {

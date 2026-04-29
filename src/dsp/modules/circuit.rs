@@ -134,7 +134,8 @@ fn apply_schmitt(
 /// Curves: `[AMOUNT, THRESH(unused), SPREAD(unused), RELEASE(unused), MIX]`.
 fn apply_crossover(bins: &mut [Complex<f32>], curves: &[&[f32]]) {
     let amount_c = curves[0];
-    // curves[1] = THRESH, curves[2] = SPREAD, curves[3] = RELEASE — all unused by v1 Crossover kernel.
+    // curves[1] = THRESH, curves[3] = RELEASE — unused by v1 Crossover kernel.
+    // curves[2] = SPREAD — reserved for Phase 5c.8 (PCB Crosstalk).
     let mix_c = curves[4];
 
     let num_bins = bins.len();

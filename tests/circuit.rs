@@ -255,7 +255,7 @@ fn circuit_finite_bounded_all_modes_dual_channel() {
         let amount = vec![1.5_f32; num_bins];
         let mid = vec![1.0_f32; num_bins];
         let mix = vec![1.0_f32; num_bins];
-        // [AMOUNT, THRESH, SPREAD, RELEASE, MIX] — 5-curve layout post Phase 5c.1
+        // [AMOUNT, THRESH, SPREAD, RELEASE, MIX]
         let curves: Vec<&[f32]> = vec![&amount, &mid, &mid, &mid, &mix];
 
         let mut suppression = vec![0.0_f32; num_bins];
