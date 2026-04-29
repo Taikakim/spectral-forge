@@ -2351,4 +2351,9 @@ fn modulate_gravity_phaser_writes_phase_momentum_and_rotates() {
     let momentum_after = physics.phase_momentum[100];
     assert!(momentum_after.is_finite(), "momentum NaN after Gravity Phaser");
     assert!(momentum_after.abs() > 0.0, "Gravity Phaser did not write phase_momentum");
+    // The bin-100 seed must still differentiate from a cold bin (50): seeded
+    // bin starts ahead and stays ahead under identical force, so |m[100]| > |m[50]|.
+    assert!(physics.phase_momentum[100].abs() > physics.phase_momentum[50].abs(),
+        "bin-100 seed did not differentiate: m[100]={}, m[50]={}",
+        physics.phase_momentum[100], physics.phase_momentum[50]);
 }

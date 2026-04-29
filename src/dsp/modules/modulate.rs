@@ -277,6 +277,7 @@ fn apply_gravity_phaser(
     for k in 0..num_bins {
         let amount  = amount_c[k].clamp(0.0, 2.0);
         let reach   = reach_c[k].clamp(0.0, 4.0);
+        // 0.01 floor prevents div-by-zero in gate_factor when thresh_c[k] is 0.
         let thresh  = thresh_c[k].clamp(0.01, 4.0);
         let ampgate = ampgate_c[k].clamp(0.0, 2.0);
         let mix     = mix_c[k].clamp(0.0, 2.0) * 0.5;
@@ -290,9 +291,12 @@ fn apply_gravity_phaser(
         };
 
         // Force = sign * amount * (reach * 0.05) — `reach` widens the per-bin influence.
-        // 5%/hop momentum decay prevents unbounded growth.
+        // 5%/hop momentum decay prevents unbounded growth. Steady-state at max
+        // params (force=0.4) is ±8.0; ±10.0 clamp gives headroom and caps the
+        // sin/cos arg-reduction precision loss above ~2^20 rad regardless of
+        // any future parameter-range widening.
         let force = sign * amount * reach * 0.05 * gate_factor;
-        phase_momentum[k] = phase_momentum[k] * 0.95 + force;
+        phase_momentum[k] = (phase_momentum[k] * 0.95 + force).clamp(-10.0, 10.0);
 
         let rotation = phase_momentum[k] * PI;
         let cos_r = rotation.cos();
