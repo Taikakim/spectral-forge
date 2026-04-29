@@ -254,6 +254,10 @@ fn apply_ground_loop(
 
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
+/// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
+/// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear.
+const MOD_HEAVY: [bool; 7] = [false, false, false, false, false, false, true];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModulateMode {
     PhasePhaser,
@@ -261,6 +265,8 @@ pub enum ModulateMode {
     RmFmMatrix,
     DiodeRm,
     GroundLoop,
+    GravityPhaser,
+    PllTear,
 }
 
 impl Default for ModulateMode {
@@ -365,6 +371,9 @@ impl SpectralModule for ModulateModule {
                 let idx     = &mut self.rms_idx[channel];
                 apply_ground_loop(bins, history, idx, self.sample_rate, self.fft_size, curves);
             }
+            ModulateMode::GravityPhaser | ModulateMode::PllTear => {
+                // Kernels added in Tasks 5b4.4 / 5b4.7. Pass through unchanged.
+            }
         }
 
         for s in suppression_out.iter_mut() { *s = 0.0; }
@@ -395,6 +404,10 @@ impl SpectralModule for ModulateModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Modulate }
     fn num_curves(&self) -> usize { 6 }
+
+    fn heavy_cpu_for_mode(&self) -> bool {
+        MOD_HEAVY[self.mode as usize]
+    }
 
     fn set_modulate_mode(&mut self, mode: ModulateMode) {
         self.set_mode(mode);

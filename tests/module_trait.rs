@@ -2192,3 +2192,36 @@ fn params_carries_slot_kinetics_mode() {
     let _ = params.slot_kinetics_well_source.try_lock().expect("well-src mutex contended on fresh init");
     let _ = params.slot_kinetics_mass_source.try_lock().expect("mass-src mutex contended on fresh init");
 }
+
+// ── Phase 5b4.1 — Modulate GravityPhaser + PllTear ────────────────────────
+
+#[test]
+fn modulate_spec_advertises_physics_writer() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+    let spec = module_spec(ModuleType::Modulate);
+    assert!(spec.writes_bin_physics, "Gravity Phaser writes phase_momentum");
+}
+
+#[test]
+fn modulate_heavy_cpu_only_for_pll_tear() {
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    let mut m = ModulateModule::new();
+    // Default mode = PhasePhaser (light)
+    assert!(!m.heavy_cpu_for_mode(), "PhasePhaser must be light");
+    for light in [ModulateMode::PhasePhaser, ModulateMode::BinSwapper,
+                  ModulateMode::RmFmMatrix, ModulateMode::DiodeRm,
+                  ModulateMode::GroundLoop, ModulateMode::GravityPhaser] {
+        m.set_mode(light);
+        assert!(!m.heavy_cpu_for_mode(), "{:?} should be light", light);
+    }
+    m.set_mode(ModulateMode::PllTear);
+    assert!(m.heavy_cpu_for_mode(), "PllTear must be heavy");
+}
+
+#[test]
+fn modulate_mode_enum_has_new_variants() {
+    use spectral_forge::dsp::modules::modulate::ModulateMode;
+    let _ = ModulateMode::GravityPhaser;
+    let _ = ModulateMode::PllTear;
+}

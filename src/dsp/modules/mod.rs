@@ -517,7 +517,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         supports_sidechain: true,
         wants_sidechain: true,
         panel_widget: None,
-        writes_bin_physics: false,
+        writes_bin_physics: true,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
