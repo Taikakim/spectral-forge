@@ -862,6 +862,8 @@ pub fn create_editor(
                                         ("RM/FM",        ModulateMode::RmFmMatrix),
                                         ("Diode RM",     ModulateMode::DiodeRm),
                                         ("Ground Loop",  ModulateMode::GroundLoop),
+                                        ("Gravity",      ModulateMode::GravityPhaser),
+                                        ("PLL Tear",     ModulateMode::PllTear),
                                     ] {
                                         let is_active = cur_mode == mode;
                                         let fill     = if is_active { th::BORDER } else { th::BG };
@@ -874,6 +876,29 @@ pub fn create_editor(
                                         let resp = ui.add(btn);
                                         if resp.clicked() {
                                             params.slot_modulate_mode.lock()[edit_slot] = mode;
+                                        }
+                                    }
+                                    if cur_mode == ModulateMode::GravityPhaser {
+                                        ui.add_space(6.0);
+                                        {
+                                            let mut repel = params.slot_modulate_repel.lock()[edit_slot];
+                                            let resp = ui.checkbox(
+                                                &mut repel,
+                                                egui::RichText::new("Repel").size(th::scaled(th::FONT_SIZE_LABEL, scale)),
+                                            );
+                                            if resp.changed() {
+                                                params.slot_modulate_repel.lock()[edit_slot] = repel;
+                                            }
+                                        }
+                                        {
+                                            let mut scp = params.slot_modulate_sc_positioned.lock()[edit_slot];
+                                            let resp = ui.checkbox(
+                                                &mut scp,
+                                                egui::RichText::new("SC-pos").size(th::scaled(th::FONT_SIZE_LABEL, scale)),
+                                            );
+                                            if resp.changed() {
+                                                params.slot_modulate_sc_positioned.lock()[edit_slot] = scp;
+                                            }
                                         }
                                     }
                                 } else if is_circuit {
