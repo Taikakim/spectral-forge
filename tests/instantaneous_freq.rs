@@ -116,3 +116,70 @@ fn no_existing_module_declares_needs_if() {
             "{:?} should not need IF in v1 (Phase 6+ opt-in)", ty);
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Task 8 tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn if_kernel_independent_per_channel_invocation() {
+    // Two simulated channels with different inputs. The kernel is stateless
+    // per call; this test pins per-call separation — neither channel's IF
+    // should be influenced by the other's data.
+    let sample_rate = 48000.0_f32;
+    let fft_size    = 2048_usize;
+    let hop_size    = 512_usize;
+    let num_bins    = fft_size / 2 + 1;
+    let bin_freq_hz = sample_rate / fft_size as f32;
+    let bin_l       = (1000.0_f32 / bin_freq_hz).round() as usize;
+    let bin_r       = (2000.0_f32 / bin_freq_hz).round() as usize;
+    let frame_seconds = (hop_size as f32) / sample_rate;
+
+    // L: 1 kHz tone at bin_l; R: 2 kHz tone at bin_r. Wrap phases to (-π, π]
+    // to mirror real FFT output (matches the convention of the other tests
+    // in this file).
+    let mut prev_l = vec![0.0_f32; num_bins];
+    let mut prev_r = vec![0.0_f32; num_bins];
+    let mut curr_l = vec![0.0_f32; num_bins];
+    let mut curr_r = vec![0.0_f32; num_bins];
+    prev_l[bin_l] = principal_argument(0.0);
+    prev_r[bin_r] = principal_argument(0.0);
+    curr_l[bin_l] = principal_argument(2.0 * std::f32::consts::PI * 1000.0 * frame_seconds);
+    curr_r[bin_r] = principal_argument(2.0 * std::f32::consts::PI * 2000.0 * frame_seconds);
+
+    let mut if_l = vec![0.0_f32; num_bins];
+    let mut if_r = vec![0.0_f32; num_bins];
+    compute_instantaneous_freq(&prev_l, &curr_l, &mut if_l, sample_rate, hop_size, fft_size);
+    compute_instantaneous_freq(&prev_r, &curr_r, &mut if_r, sample_rate, hop_size, fft_size);
+
+    // Each channel resolves its own tone correctly.
+    assert!((if_l[bin_l] - 1000.0).abs() < 1.0,
+        "L channel must report ~1 kHz at bin {}; got {} Hz", bin_l, if_l[bin_l]);
+    assert!((if_r[bin_r] - 2000.0).abs() < 1.0,
+        "R channel must report ~2 kHz at bin {}; got {} Hz", bin_r, if_r[bin_r]);
+
+    // Cross-channel non-bleed: the L IF array at bin_r (which received zero
+    // input on the L channel) must equal the silent-bin baseline, not the
+    // R channel's resolved 2 kHz. Compute that baseline independently:
+    // IF[k] = k*bin_freq_hz + principal_argument(-TAU*k*hop/fft) * sr/(hop*TAU)
+    let hop_per_fft = hop_size as f32 / fft_size as f32;
+    let radians_to_hz = sample_rate / (hop_size as f32 * 2.0 * std::f32::consts::PI);
+    let silent_bin_if = |k: usize| {
+        let dev = principal_argument(-(2.0 * std::f32::consts::PI) * k as f32 * hop_per_fft);
+        k as f32 * bin_freq_hz + dev * radians_to_hz
+    };
+    let expected_l_at_bin_r = silent_bin_if(bin_r);
+    let expected_r_at_bin_l = silent_bin_if(bin_l);
+    assert!((if_l[bin_r] - expected_l_at_bin_r).abs() < 1e-2,
+        "L channel at bin_r must equal silent-bin baseline ({} Hz), not R's tone; got {} Hz",
+        expected_l_at_bin_r, if_l[bin_r]);
+    assert!((if_r[bin_l] - expected_r_at_bin_l).abs() < 1e-2,
+        "R channel at bin_l must equal silent-bin baseline ({} Hz), not L's tone; got {} Hz",
+        expected_r_at_bin_l, if_r[bin_l]);
+    // And the two channels must disagree at each other's active bin —
+    // a weaker but intuitive check that the calls are truly independent.
+    assert!((if_l[bin_r] - if_r[bin_r]).abs() > 1.0,
+        "L and R must differ at bin_r; both returned {} Hz", if_l[bin_r]);
+    assert!((if_r[bin_l] - if_l[bin_l]).abs() > 1.0,
+        "L and R must differ at bin_l; both returned {} Hz", if_r[bin_l]);
+}
