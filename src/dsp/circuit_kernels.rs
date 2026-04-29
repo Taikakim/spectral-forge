@@ -94,8 +94,13 @@ impl SimdRng {
     }
 
     /// Uniform `f32` in `[0, 1)`.
+    ///
+    /// Divides by 2^32 (= 4294967296.0) rather than `u32::MAX as f32`
+    /// (which rounds to 4294967296.0 in f32, the same value the maximum
+    /// raw u32 also rounds to — yielding ratio = 1.0 exactly and breaking
+    /// the half-open upper bound).
     #[inline]
     pub fn next_f32_unit(&mut self) -> f32 {
-        (self.next_u32() as f32) / (u32::MAX as f32)
+        (self.next_u32() as f32) / 4294967296.0_f32
     }
 }
