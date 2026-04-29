@@ -694,6 +694,12 @@ impl KineticsModule {
     ///
     /// where `α = STRENGTH[km] * FERRO_ALPHA_SCALE`.  Magnitudes are preserved; only
     /// phase is rotated.  MIX curve blends the pull amount (0 = dry phase, 1 = full pull).
+    ///
+    /// **Limitation**: When two peaks' satellite spheres overlap, pulls are applied
+    /// sequentially in peak-detection order — the second peak reads the magnitudes/
+    /// phases the first peak already wrote, so its pull is non-linear and order-
+    /// dependent. A proper blend would require a scratch accumulator buffer; deferred
+    /// to v2 since dense overlapping peaks are uncommon in practice.
     fn apply_ferromagnetism(
         &mut self,
         channel: usize,
@@ -748,6 +754,7 @@ impl KineticsModule {
 
             for d in 1..=reach_bins {
                 // Exponential decay: weight = exp(-d / reach_bins).
+                // .max(1) is defensive; reach_bins is already ≥ 2 given the clamp(0.1, 4.0) * 16.0 formula above.
                 let weight = (-(d as f32) / reach_bins.max(1) as f32).exp();
                 let pull   = (alpha * weight / (1.0 + resistance)).min(FERRO_PULL_CAP);
 
@@ -758,6 +765,7 @@ impl KineticsModule {
                     let cur_ph  = bins[kp].arg();
                     let mix     = mix_curve[kp].clamp(0.0, 1.0);
                     // Shortest-arc phase difference, wrapped to (-π, π].
+                    // .arg() returns phase in (-π, π], so diff ∈ (-2π, 2π]; each while loop runs at most once.
                     let mut diff = target_phase - cur_ph;
                     while diff >  PI { diff -= 2.0 * PI; }
                     while diff < -PI { diff += 2.0 * PI; }

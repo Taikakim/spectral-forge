@@ -1984,4 +1984,12 @@ fn kinetics_ferromagnetism_aligns_neighbour_phases_to_peak() {
     assert!(new_offset_302 < dry_offset_302,
         "neighbour 302 did not align toward peak phase: dry_offset={}, new_offset={}",
         dry_offset_302, new_offset_302);
+
+    // Magnitudes must be preserved (kernel rotates phase only, not amplitude).
+    let mag_298 = bins[298].norm();
+    let mag_302 = bins[302].norm();
+    assert!((mag_298 - 0.5).abs() < 1e-3,
+        "Ferro must preserve magnitude at bin 298: got {}", mag_298);
+    assert!((mag_302 - 0.5).abs() < 1e-3,
+        "Ferro must preserve magnitude at bin 302: got {}", mag_302);
 }
