@@ -38,8 +38,11 @@ fn if_pure_tone_at_1khz_resolves_to_1khz() {
     let bin_freq_hz = sample_rate / fft_size as f32;
     let target_bin  = (freq_hz / bin_freq_hz).round() as usize;
     let frame_n_seconds      = (hop_size as f32) / sample_rate;
-    let prev_phase_at_target = 0.0_f32;
-    let curr_phase_at_target = 2.0 * std::f32::consts::PI * freq_hz * frame_n_seconds;
+    // Phases come from the FFT in (-π, π], so wrap before storing — keeps the test
+    // representative of real Pipeline data and ensures the deviation arithmetic is
+    // exercised end-to-end (the prior un-wrapped phase only worked by coincidence).
+    let prev_phase_at_target = principal_argument(0.0_f32);
+    let curr_phase_at_target = principal_argument(2.0 * std::f32::consts::PI * freq_hz * frame_n_seconds);
     let mut prev = vec![0.0_f32; num_bins];
     let mut curr = vec![0.0_f32; num_bins];
     prev[target_bin] = prev_phase_at_target;
