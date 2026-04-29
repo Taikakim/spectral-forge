@@ -22,15 +22,15 @@ const MODES: &[(KineticsMode, &str, &str)] = &[
     (KineticsMode::Diamagnet,        "Diamagnet",         "Energy-conserving spectral carving with 1/d redistribution"),
 ];
 
-const WELL_SOURCES: &[(WellSource, &str)] = &[
-    (WellSource::Static,    "Static (curve-driven)"),
-    (WellSource::Sidechain, "Sidechain (peak follower)"),
-    (WellSource::MIDI,      "MIDI (note-on)"),
+const WELL_SOURCES: &[(WellSource, &str, &str)] = &[
+    (WellSource::Static,    "Static (curve-driven)",    "Well centre tracks the STRENGTH curve peak"),
+    (WellSource::Sidechain, "Sidechain (peak follower)","Well centre tracks the loudest sidechain bin"),
+    (WellSource::MIDI,      "MIDI (note-on)",           "Well centre snaps to the most-recent MIDI note frequency"),
 ];
 
-const MASS_SOURCES: &[(MassSource, &str)] = &[
-    (MassSource::Static,    "Static (curve-driven)"),
-    (MassSource::Sidechain, "Sidechain (rate of change)"),
+const MASS_SOURCES: &[(MassSource, &str, &str)] = &[
+    (MassSource::Static,    "Static (curve-driven)",       "Mass per bin = MASS curve value"),
+    (MassSource::Sidechain, "Sidechain (rate of change)",  "Mass per bin scales with sidechain envelope velocity"),
 ];
 
 pub fn mode_label(mode: KineticsMode) -> &'static str {
@@ -101,9 +101,10 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
                             .color(th::LABEL_DIM)
                             .size(th::scaled(th::FONT_SIZE_LABEL, scale))
                     );
-                    for &(source, label) in WELL_SOURCES {
+                    for &(source, label, hint) in WELL_SOURCES {
                         let selected = current_source == source;
-                        let resp = ui.selectable_label(selected, label);
+                        let resp = ui.selectable_label(selected, label)
+                            .on_hover_text(hint);
                         if resp.clicked() && !selected {
                             params.slot_kinetics_well_source.lock()[slot] = source;
                             consumed = true;
@@ -117,9 +118,10 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
                             .color(th::LABEL_DIM)
                             .size(th::scaled(th::FONT_SIZE_LABEL, scale))
                     );
-                    for &(source, label) in MASS_SOURCES {
+                    for &(source, label, hint) in MASS_SOURCES {
                         let selected = current_source == source;
-                        let resp = ui.selectable_label(selected, label);
+                        let resp = ui.selectable_label(selected, label)
+                            .on_hover_text(hint);
                         if resp.clicked() && !selected {
                             params.slot_kinetics_mass_source.lock()[slot] = source;
                             consumed = true;
