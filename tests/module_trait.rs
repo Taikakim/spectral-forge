@@ -2185,7 +2185,10 @@ fn kinetics_mass_source_default_is_static() {
 
 #[test]
 fn params_carries_slot_kinetics_mode() {
-    // Smoke: existence of the field on params + Mutex initialisation works.
+    // Smoke: all three Mutexes are reachable + lockable from a fresh defaults instance.
     use spectral_forge::params::SpectralForgeParams;
-    let _params = SpectralForgeParams::default();
+    let params = SpectralForgeParams::default();
+    let _ = params.slot_kinetics_mode.try_lock().expect("mode mutex contended on fresh init");
+    let _ = params.slot_kinetics_well_source.try_lock().expect("well-src mutex contended on fresh init");
+    let _ = params.slot_kinetics_mass_source.try_lock().expect("mass-src mutex contended on fresh init");
 }

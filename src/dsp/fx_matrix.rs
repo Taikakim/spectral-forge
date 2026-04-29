@@ -330,6 +330,7 @@ impl FxMatrix {
     }
 
     /// Propagate per-slot WellSource from params to KineticsModule instances.
+    /// Called once per audio block (before process_hop).
     pub fn set_kinetics_well_sources(&mut self, srcs: &[crate::dsp::modules::kinetics::WellSource; 9]) {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
@@ -339,6 +340,7 @@ impl FxMatrix {
     }
 
     /// Propagate per-slot MassSource from params to KineticsModule instances.
+    /// Called once per audio block (before process_hop).
     pub fn set_kinetics_mass_sources(&mut self, srcs: &[crate::dsp::modules::kinetics::MassSource; 9]) {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {

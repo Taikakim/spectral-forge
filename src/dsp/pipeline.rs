@@ -682,11 +682,11 @@ impl Pipeline {
         if let Some(modes) = params.slot_kinetics_mode.try_lock() {
             self.fx_matrix.set_kinetics_modes(&*modes);
         }
-        if let Some(srcs) = params.slot_kinetics_well_source.try_lock() {
-            self.fx_matrix.set_kinetics_well_sources(&*srcs);
+        if let Some(well_srcs) = params.slot_kinetics_well_source.try_lock() {
+            self.fx_matrix.set_kinetics_well_sources(&*well_srcs);
         }
-        if let Some(srcs) = params.slot_kinetics_mass_source.try_lock() {
-            self.fx_matrix.set_kinetics_mass_sources(&*srcs);
+        if let Some(mass_srcs) = params.slot_kinetics_mass_source.try_lock() {
+            self.fx_matrix.set_kinetics_mass_sources(&*mass_srcs);
         }
 
         // Propagate rhythm modes + grids each block (try_lock is non-blocking; skipped if GUI holds lock).
