@@ -586,6 +586,76 @@ fn circuit_pcb_crosstalk_leaks_to_neighbours() {
 }
 
 #[test]
+fn circuit_pcb_crosstalk_amount_zero_disables_leak() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::PcbCrosstalk);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+    bins[200] = Complex::new(1.0, 0.0);
+
+    // AMOUNT=0 (raw passthrough), SPREAD=1.0 (would otherwise leak), MIX=2 (full wet).
+    let amount  = vec![0.0_f32; num_bins];
+    let thresh  = vec![0.0_f32; num_bins];
+    let spread  = vec![1.0_f32; num_bins];
+    let release = vec![0.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+    module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+
+    // out_mag = workspace2 * 0 + in_mag * 1 = in_mag — neighbours stay silent, centre intact.
+    assert!((bins[200].norm() - 1.0).abs() < 1e-6, "centre should pass through (got {})", bins[200].norm());
+    assert!(bins[199].norm() < 1e-6, "left neighbour should not leak (got {})", bins[199].norm());
+    assert!(bins[201].norm() < 1e-6, "right neighbour should not leak (got {})", bins[201].norm());
+}
+
+#[test]
+fn circuit_pcb_crosstalk_spread_average_scales_leak() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    // Two passes with the same module: first SPREAD=1.0 uniform (avg 0.5),
+    // second SPREAD=0.5 uniform (avg 0.25). Lower average → smaller leak.
+    let amount  = vec![2.0_f32; 1025];
+    let thresh  = vec![0.0_f32; 1025];
+    let release = vec![0.0_f32; 1025];
+    let mix     = vec![2.0_f32; 1025];
+
+    let leak_for_spread = |s: f32| -> f32 {
+        let mut module = CircuitModule::new();
+        module.reset(48_000.0, 2048);
+        module.set_circuit_mode(CircuitMode::PcbCrosstalk);
+
+        let num_bins = 1025;
+        let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); num_bins];
+        bins[200] = Complex::new(1.0, 0.0);
+        let spread = vec![s; num_bins];
+        let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+        let mut suppression = vec![0.0_f32; num_bins];
+        let ctx = circuit_test_ctx(num_bins);
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+        bins[199].norm()
+    };
+
+    let leak_full = leak_for_spread(1.0);
+    let leak_half = leak_for_spread(0.5);
+
+    assert!(leak_full > leak_half, "leak at SPREAD=1.0 ({}) should exceed leak at SPREAD=0.5 ({})", leak_full, leak_half);
+    assert!(leak_half > 0.0, "leak should still be positive at SPREAD=0.5 (got {})", leak_half);
+}
+
+#[test]
 fn circuit_vactrol_finite_after_long_run() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};
