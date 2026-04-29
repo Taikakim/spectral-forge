@@ -431,6 +431,83 @@ fn circuit_transformer_spread_leaks_to_neighbours() {
 }
 
 #[test]
+fn circuit_power_sag_attenuates_under_high_energy() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::PowerSag);
+
+    let num_bins = 1025;
+
+    // AMOUNT=2 (deep sag), THRESHOLD=0.1 (low energy threshold), SPREAD=0, RELEASE=1, MIX=2.
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.1_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    // High-energy input: every bin at magnitude 2.0.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(2.0, 0.0); num_bins];
+    let initial_total: f32 = bins.iter().map(|b| b.norm()).sum();
+
+    // Settle 100 hops.
+    for _ in 0..100 {
+        for b in bins.iter_mut() { *b = Complex::new(2.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+
+    let final_total: f32 = bins.iter().map(|b| b.norm()).sum();
+    assert!(final_total < initial_total * 0.95, "sag should attenuate (initial={}, final={})", initial_total, final_total);
+    assert!(final_total > initial_total * 0.05, "sag should not zero out (final={})", final_total);
+}
+
+#[test]
+fn circuit_power_sag_recovers_when_energy_drops() {
+    use spectral_forge::dsp::modules::circuit::{CircuitModule, CircuitMode};
+    use spectral_forge::dsp::modules::SpectralModule;
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let mut module = CircuitModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_circuit_mode(CircuitMode::PowerSag);
+
+    let num_bins = 1025;
+    let amount  = vec![2.0_f32; num_bins];
+    let thresh  = vec![0.1_f32; num_bins];
+    let spread  = vec![0.0_f32; num_bins];
+    let release = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &thresh, &spread, &release, &mix];
+    let mut suppression = vec![0.0_f32; num_bins];
+    let ctx = circuit_test_ctx(num_bins);
+
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(2.0, 0.0); num_bins];
+    // High-energy ramp-up.
+    for _ in 0..50 {
+        for b in bins.iter_mut() { *b = Complex::new(2.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+    let probe_high = module.probe_state(0);
+    // Now drop energy to silence.
+    for _ in 0..200 {
+        for b in bins.iter_mut() { *b = Complex::new(0.0, 0.0); }
+        module.process(0, StereoLink::Linked, FxChannelTarget::All, &mut bins, None, &curves, &mut suppression, None, &ctx);
+    }
+    let probe_low = module.probe_state(0);
+    assert!(probe_low.sag_envelope < probe_high.sag_envelope * 0.5,
+        "sag envelope should recover (high={}, low={})", probe_high.sag_envelope, probe_low.sag_envelope);
+}
+
+#[test]
 fn circuit_vactrol_finite_after_long_run() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::circuit::{CircuitMode, CircuitModule};

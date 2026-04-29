@@ -351,6 +351,72 @@ fn apply_transformer(
 
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
+/// Per-channel power-sag envelope — energy rises above threshold drive a scalar
+/// sag depth; hot bins (high `BinPhysics::temperature`) absorb more gain reduction
+/// than cool bins. Reader-only: does not write any BinPhysics field.
+///
+/// AMOUNT/THRESHOLD/RELEASE drive a global per-channel envelope; the bin-0 sample
+/// is taken as the canonical value rather than averaging — matches the user's mental
+/// model of a single sag knob.
+fn apply_power_sag(
+    bins: &mut [Complex<f32>],
+    sag_env: &mut f32,
+    gain_red: &mut [f32],
+    temperature: Option<&[f32]>,
+    curves: &[&[f32]],
+    hop_dt: f32,
+) {
+    use crate::dsp::circuit_kernels::lp_step;
+
+    let amount_c  = curves[0];
+    let thresh_c  = curves[1];
+    // curves[2] = SPREAD: unused by Power Sag.
+    let release_c = curves[3];
+    let mix_c     = curves[4];
+
+    let num_bins = bins.len();
+
+    // --- 1. Compute total input energy (sum of magnitudes). Cheap proxy for power. ---
+    let mut total_energy = 0.0_f32;
+    for k in 0..num_bins {
+        total_energy += bins[k].norm();
+    }
+    let energy_norm = total_energy / num_bins.max(1) as f32; // average per bin
+
+    // --- 2. Update sag envelope: rises with energy above threshold, decays toward 0 below. ---
+    // AMOUNT/THRESHOLD/RELEASE drive a global per-channel envelope, so the bin-0 sample
+    // is taken as the canonical value rather than averaging — matches user's mental model
+    // of a single sag knob.
+    let amount  = amount_c[0].clamp(0.0, 2.0) * 0.5;
+    let thresh  = thresh_c[0].clamp(0.0, 4.0);
+    let release = release_c[0].clamp(0.0, 2.0).max(0.01);
+    let attack_tau  = 0.05;                        // 50 ms attack (sag onset)
+    let release_tau = 0.5 * (0.1 + release);       // 50..1050 ms recovery
+    let alpha_attack  = (hop_dt / attack_tau).min(1.0);
+    let alpha_release = (hop_dt / release_tau).min(1.0);
+
+    let drive = (energy_norm - thresh).max(0.0) * amount;
+    let alpha = if drive > *sag_env { alpha_attack } else { alpha_release };
+    lp_step(sag_env, drive, alpha);
+    *sag_env = sag_env.clamp(0.0, 4.0);
+
+    // --- 3. Per-bin gain reduction weighted by temperature. ---
+    for k in 0..num_bins {
+        let temp = temperature.map(|t| t[k].abs()).unwrap_or(0.0_f32);
+        // Hot bins absorb more sag. Reduction factor = 1 / (1 + sag * (1 + temp)).
+        let target = 1.0 / (1.0 + *sag_env * (1.0 + temp.min(4.0)));
+        // Smooth the per-bin reduction to avoid hop-rate clicks.
+        lp_step(&mut gain_red[k], target, alpha_attack);
+
+        let dry = bins[k];
+        let wet = dry * gain_red[k];
+        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        bins[k] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
+// ── CircuitMode ────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CircuitMode {
     BbdBins,
@@ -358,6 +424,7 @@ pub enum CircuitMode {
     CrossoverDistortion,
     Vactrol,
     TransformerSaturation,
+    PowerSag,
 }
 
 impl Default for CircuitMode {
@@ -379,6 +446,9 @@ pub struct CircuitModule {
     // Transformer state: magnitude one-pole smoother + SPREAD scratch.
     xfmr_lp:        [Vec<f32>; 2],
     xfmr_workspace:  [Vec<f32>; 2],
+    // Power Sag state: per-channel scalar sag depth + per-bin smoothed gain reduction.
+    sag_envelope:     [f32; 2],
+    sag_gain_reduction: [Vec<f32>; 2],
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -399,6 +469,8 @@ impl CircuitModule {
             vactrol_slow: [Vec::new(), Vec::new()],
             xfmr_lp:       [Vec::new(), Vec::new()],
             xfmr_workspace: [Vec::new(), Vec::new()],
+            sag_envelope:      [0.0, 0.0],
+            sag_gain_reduction: [Vec::new(), Vec::new()],
             sample_rate: 48_000.0,
             fft_size: 2048,
             #[cfg(any(test, feature = "probe"))]
@@ -430,6 +502,10 @@ impl CircuitModule {
                 }
                 for v in self.xfmr_workspace[ch].iter_mut() {
                     *v = 0.0;
+                }
+                self.sag_envelope[ch] = 0.0;
+                for v in self.sag_gain_reduction[ch].iter_mut() {
+                    *v = 1.0;
                 }
             }
         }
@@ -508,6 +584,26 @@ impl SpectralModule for CircuitModule {
                 let ws  = &mut self.xfmr_workspace[channel][..nb];
                 apply_transformer(&mut bins[..nb], lp, ws, flux, curves, hop_dt);
             }
+            CircuitMode::PowerSag => {
+                // Read upstream temperature via the writer-slot's mixed `physics`,
+                // not `ctx.bin_physics`: Circuit declares `writes_bin_physics: true`,
+                // so FxMatrix passes `physics = Some(&mut mix_phys)` and leaves
+                // `ctx.bin_physics = None`. Power Sag is reader-only — it does not
+                // write any BinPhysics field.
+                let nb = ctx.num_bins;
+                let temp: Option<&[f32]> = physics.as_ref().and_then(|bp| {
+                    let t = &bp.temperature[..];
+                    if t.len() >= nb { Some(&t[..nb]) } else { None }
+                });
+                apply_power_sag(
+                    &mut bins[..nb],
+                    &mut self.sag_envelope[channel],
+                    &mut self.sag_gain_reduction[channel][..nb],
+                    temp,
+                    curves,
+                    hop_dt,
+                );
+            }
         }
 
         for s in suppression_out.iter_mut() {
@@ -543,6 +639,9 @@ impl SpectralModule for CircuitModule {
             self.xfmr_lp[ch].resize(num_bins, 0.0);
             self.xfmr_workspace[ch].clear();
             self.xfmr_workspace[ch].resize(num_bins, 0.0);
+            self.sag_envelope[ch] = 0.0;
+            self.sag_gain_reduction[ch].clear();
+            self.sag_gain_reduction[ch].resize(num_bins, 1.0); // 1.0 = no reduction
         }
     }
 
@@ -574,6 +673,8 @@ pub struct CircuitProbe {
     /// Average magnitude one-pole smoother value across all bins.
     /// Non-zero only in `TransformerSaturation` mode.
     pub xfmr_lp_avg:      f32,
+    /// Per-channel scalar sag depth. Non-zero only in `PowerSag` mode.
+    pub sag_envelope:     f32,
 }
 
 #[cfg(any(test, feature = "probe"))]
@@ -595,11 +696,17 @@ impl CircuitModule {
         } else {
             0.0
         };
+        let sag_envelope = if self.mode == CircuitMode::PowerSag {
+            self.sag_envelope[ch]
+        } else {
+            0.0
+        };
         CircuitProbe {
             active_mode:      self.mode,
             vactrol_fast_avg: fa,
             vactrol_slow_avg: sa,
             xfmr_lp_avg,
+            sag_envelope,
         }
     }
 }
