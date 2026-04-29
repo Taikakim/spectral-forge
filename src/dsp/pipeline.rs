@@ -123,7 +123,7 @@ pub struct Pipeline {
     /// Only populated when `any_needs_if` is true for the current block.
     if_buffer: Vec<Vec<f32>>,
     /// Previous-frame wrapped phase used by `compute_instantaneous_freq`. Independent of
-    /// PLPV's `prev_phase`. Sized at MAX_NUM_BINS. Reset to zero on `Pipeline::reset()`.
+    /// PLPV's `prev_phase`. Sized at MAX_NUM_BINS. Zeroed by both `clear_state()` and `reset()`.
     if_prev_phase: Vec<Vec<f32>>,
     sample_rate: f32,
     num_channels: usize,
