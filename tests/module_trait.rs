@@ -2406,4 +2406,10 @@ fn modulate_gravity_phaser_repel_inverts_rotation_direction() {
     assert!(pull_momentum.abs() > 1e-6, "pull momentum trivially small: {}", pull_momentum);
     assert!(pull_momentum.signum() == -push_momentum.signum(),
         "Repel did not invert sign: pull={}, push={}", pull_momentum, push_momentum);
+    // Kernel is fully deterministic and identical except for the sign flip, so the two
+    // runs should be exact mirrors. Catches a hypothetical bug where Repel multiplied
+    // by something other than -1.0 (e.g. 0.0 → no-op, or 0.5 → asymmetric scale).
+    assert!((pull_momentum + push_momentum).abs() < 1e-5,
+        "Repel not exact sign flip: pull={}, push={}, sum={}",
+        pull_momentum, push_momentum, pull_momentum + push_momentum);
 }
