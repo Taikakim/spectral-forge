@@ -387,9 +387,12 @@ fn apply_power_sag(
     // AMOUNT/THRESHOLD/RELEASE drive a global per-channel envelope, so the bin-0 sample
     // is taken as the canonical value rather than averaging — matches user's mental model
     // of a single sag knob.
-    let amount  = amount_c[0].clamp(0.0, 2.0) * 0.5;
-    let thresh  = thresh_c[0].clamp(0.0, 4.0);
-    let release = release_c[0].clamp(0.0, 2.0).max(0.01);
+    // Defensive `.get(0)` matches the file-wide pattern (see probe captures in `process()`):
+    // pipeline always supplies full-length curves, but an empty slice from a future call
+    // site shouldn't panic mid-audio-thread.
+    let amount  = amount_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 0.5;
+    let thresh  = thresh_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 4.0);
+    let release = release_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0).max(0.01);
     let attack_tau  = 0.05;                        // 50 ms attack (sag onset)
     let release_tau = 0.5 * (0.1 + release);       // 50..1050 ms recovery
     let alpha_attack  = (hop_dt / attack_tau).min(1.0);
@@ -401,10 +404,13 @@ fn apply_power_sag(
     *sag_env = sag_env.clamp(0.0, 4.0);
 
     // --- 3. Per-bin gain reduction weighted by temperature. ---
+    // `clamp(0.0, 4.0)` (not `.min(4.0)`): clamp sanitizes NaN to the lower bound, so a
+    // single NaN-poisoned `temperature[k]` from an upstream writer can't propagate into
+    // the smoothed gain and stick there forever (`f32::min` returns NaN against NaN).
     for k in 0..num_bins {
-        let temp = temperature.map(|t| t[k].abs()).unwrap_or(0.0_f32);
+        let temp = temperature.map(|t| t[k].abs().clamp(0.0, 4.0)).unwrap_or(0.0_f32);
         // Hot bins absorb more sag. Reduction factor = 1 / (1 + sag * (1 + temp)).
-        let target = 1.0 / (1.0 + *sag_env * (1.0 + temp.min(4.0)));
+        let target = 1.0 / (1.0 + *sag_env * (1.0 + temp));
         // Smooth the per-bin reduction to avoid hop-rate clicks.
         lp_step(&mut gain_red[k], target, alpha_attack);
 
