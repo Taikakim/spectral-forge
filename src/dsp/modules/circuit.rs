@@ -721,10 +721,14 @@ fn apply_bias_fuzz(
     let spread_avg = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 2.0) * 0.5).sum::<f32>()
         / num_bins.max(1) as f32;
     if spread_avg > 0.001 && num_bins >= 3 {
+        // Symmetric self-pad at both ends: bin 0 uses bias_lp[0] as left neighbour,
+        // bin num_bins-1 uses bias_lp[num_bins-1] as right neighbour. Prevents the
+        // top bin from bleeding energy into a fictitious zero past Nyquist (which
+        // would slowly drain the highest-frequency bias envelope).
         let mut prev_b = bias_lp[0];
         let mut curr_b = bias_lp[0];
         for k in 0..num_bins {
-            let next_b = if k + 1 < num_bins { bias_lp[k + 1] } else { 0.0 };
+            let next_b = if k + 1 < num_bins { bias_lp[k + 1] } else { curr_b };
             let bleed  = 0.5 * spread_avg * (prev_b + next_b);
             bias_lp[k] = (1.0 - spread_avg) * curr_b + bleed;
             prev_b = curr_b;
