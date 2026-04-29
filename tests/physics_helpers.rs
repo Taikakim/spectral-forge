@@ -104,9 +104,12 @@ fn wrap_phase_folds_into_minus_pi_to_pi() {
     assert!((wrap_phase(1.5 * PI) - (-0.5 * PI)).abs() < 1e-5);
     // -1.5*PI -> 0.5*PI
     assert!((wrap_phase(-1.5 * PI) - (0.5 * PI)).abs() < 1e-5);
-    // 5*PI -> PI (or -PI; either is fine within 1e-5)
+    // 5*PI -> +PI (positive input → positive boundary, per the sign-preserving fix).
     let w = wrap_phase(5.0 * PI);
-    assert!(w.abs() <= PI + 1e-5);
+    assert!((w - PI).abs() < 1e-5, "5*PI wrapped to {}, expected +PI", w);
+    // -5*PI -> -PI (negative input → negative boundary).
+    let w = wrap_phase(-5.0 * PI);
+    assert!((w - (-PI)).abs() < 1e-5, "-5*PI wrapped to {}, expected -PI", w);
 }
 
 #[test]
@@ -147,10 +150,13 @@ fn pll_bank_step_tracks_constant_velocity_target() {
     let alpha = 2.0 * zeta * omega_n;
     let beta = omega_n * omega_n;
 
+    // Pre-allocate target buffer outside the loop (mirrors hot-path callers; avoids
+    // a per-iter Vec alloc that obscures whether helper is actually realloc-free).
+    let mut target_v = vec![0.0_f32; 1];
     // 500 hops to fully settle.
     for _ in 0..500 {
         target += 0.1;
-        let target_v = vec![wrap_phase(target)];
+        target_v[0] = wrap_phase(target);
         pll_bank_step(&mut pll_phase, &mut pll_freq, &target_v, alpha, beta, &mut err);
     }
     // Steady-state error for a velocity ramp under a 2nd-order PI loop should
