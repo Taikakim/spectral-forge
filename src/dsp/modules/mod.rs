@@ -125,6 +125,10 @@ pub struct ModuleContext<'block> {
     pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
     pub midi_notes:           Option<&'block [bool; 128]>, // Phase 6.3
     pub held_pitch_classes:   Option<&'block [bool; 12]>,  // Phase 6.3
+    /// Per-channel cepstrum (length = `fft_size`). Populated by Pipeline
+    /// inside the hop closure when at least one active slot declares
+    /// `needs_cepstrum`. Phase 6.4 lazy infra; `None` otherwise.
+    pub cepstrum_buf:         Option<&'block [f32]>,       // Phase 6.4
     pub bpm:                  f32,                         // live from host transport (0.0 if unavailable)
     pub beat_position:        f64,                         // live from host transport (0.0 if unavailable)
     pub sidechain_derivative: Option<&'block [f32]>,      // Phase 5b/Modulate Slew Lag
@@ -151,6 +155,7 @@ impl<'block> ModuleContext<'block> {
             chromagram: None,
             midi_notes: None,
             held_pitch_classes: None,
+            cepstrum_buf: None,
             bpm: 0.0,
             beat_position: 0.0,
             sidechain_derivative: None,
