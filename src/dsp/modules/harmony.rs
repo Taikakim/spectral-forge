@@ -36,6 +36,8 @@ pub struct HarmonyModule {
     scratch_out:        Vec<Complex<f32>>,
     /// xorshift32 RNG state for Shuffler mode; seeded deterministically.
     rng_state:          u32,
+    /// Pre-allocated peak buffer for HarmonicGenerator mode (K=5).
+    peaks_buf:          [crate::dsp::modules::harmony_helpers::PeakRecord; 5],
 }
 
 impl HarmonyModule {
@@ -49,6 +51,7 @@ impl HarmonyModule {
             scratch_mag: Vec::new(),
             scratch_out: Vec::new(),
             rng_state: 0xC0FFEE_u32,
+            peaks_buf: [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5],
         }
     }
 
@@ -111,6 +114,66 @@ impl HarmonyModule {
     }
 }
 
+impl HarmonyModule {
+    fn process_harmonic_generator(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        use crate::dsp::modules::harmony_helpers::find_top_k_peaks;
+
+        let n = self.num_bins;
+        let amount      = curves.get(0).copied().unwrap_or(&[]);
+        let threshold   = curves.get(1).copied().unwrap_or(&[]);
+        let spread      = curves.get(3).copied().unwrap_or(&[]);
+        let coefficient = curves.get(4).copied().unwrap_or(&[]);
+        let mix         = curves.get(5).copied().unwrap_or(&[]);
+
+        // Pre-compute magnitudes into scratch.
+        for k in 0..n { self.scratch_mag[k] = bins[k].norm(); }
+
+        // Threshold is sampled at centre-of-spectrum to keep peak detection one-shot.
+        let thr_centre = threshold.get(n / 2).copied().unwrap_or(0.1);
+        let n_peaks = find_top_k_peaks(&self.scratch_mag[..n], thr_centre, &mut self.peaks_buf);
+
+        // For each detected peak, generate its harmonic series.
+        for p in 0..n_peaks {
+            let pk = self.peaks_buf[p];
+            let f0 = match ctx.instantaneous_freq {
+                Some(if_buf) => if_buf.get(pk.bin).copied().unwrap_or(0.0),
+                None => (pk.bin as f32) * ctx.sample_rate / ctx.fft_size as f32,
+            };
+            if f0 <= 0.0 { continue; }
+
+            let amp_root = pk.mag;
+            let amt      = amount.get(pk.bin).copied().unwrap_or(0.0).clamp(0.0, 4.0);
+            if amt < 1e-9 { continue; }
+            let mix_v    = mix.get(pk.bin).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            // SPREAD ∈ [0,2] → decay ∈ [0.95, 0.40] (slow → fast).
+            let s = spread.get(pk.bin).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+            let decay = 0.95 - 0.275 * s;
+            // COEFFICIENT ∈ [0,2] → harmonic count ∈ [2, 32].
+            let c = coefficient.get(pk.bin).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+            let hcount = 2 + (c * 15.0) as usize; // 2..=32
+
+            let phase = bins[pk.bin].arg();
+            let bin_freq = ctx.sample_rate / ctx.fft_size as f32;
+
+            let mut amp = amp_root;
+            for h in 2..=hcount {
+                amp *= decay;
+                let target_freq = f0 * h as f32;
+                if target_freq >= ctx.sample_rate * 0.5 { break; }
+                let target_bin = (target_freq / bin_freq + 0.5) as usize;
+                if target_bin == 0 || target_bin >= n - 1 { break; }
+                let added = Complex::from_polar(amp * amt * mix_v, phase);
+                bins[target_bin] += added;
+            }
+        }
+    }
+}
+
 impl SpectralModule for HarmonyModule {
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         self.rng_state   = 0xC0FFEE_u32;
@@ -119,6 +182,7 @@ impl SpectralModule for HarmonyModule {
         self.num_bins    = fft_size / 2 + 1;
         self.scratch_mag.resize(self.num_bins, 0.0);
         self.scratch_out.resize(self.num_bins, Complex::new(0.0, 0.0));
+        self.peaks_buf   = [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5];
     }
 
     fn process(
@@ -131,7 +195,7 @@ impl SpectralModule for HarmonyModule {
         curves: &[&[f32]],
         suppression_out: &mut [f32],
         _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
-        _ctx: &ModuleContext<'_>,
+        ctx: &ModuleContext<'_>,
     ) {
         suppression_out.fill(0.0);
 
@@ -149,7 +213,7 @@ impl SpectralModule for HarmonyModule {
             HarmonyMode::FormantRotation   => { /* TODO Task 9 */ }
             HarmonyMode::Lifter            => { /* TODO Task 10 */ }
             HarmonyMode::Inharmonic        => { /* TODO Task 7 */ }
-            HarmonyMode::HarmonicGenerator => { /* TODO Task 5 */ }
+            HarmonyMode::HarmonicGenerator => self.process_harmonic_generator(bins, curves, ctx),
             HarmonyMode::Shuffler          => self.process_shuffler(bins, curves),
         }
     }

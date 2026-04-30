@@ -10,6 +10,12 @@ fn ctx_default<'a>() -> ModuleContext<'a> {
     ModuleContext::new(48_000.0, 2048, 1025, 10.0, 100.0, 0.5, 0.0, false, false)
 }
 
+fn ctx_with_if<'a>(if_buf: &'a [f32]) -> ModuleContext<'a> {
+    let mut c = ctx_default();
+    c.instantaneous_freq = Some(if_buf);
+    c
+}
+
 #[test]
 fn harmony_mode_dispatch_passthrough_when_amount_zero() {
     let mut m = HarmonyModule::new();
@@ -131,6 +137,48 @@ fn shuffler_mode_swaps_some_bins_when_amount_high() {
         "shuffler at AMOUNT=1 must change a substantial fraction of bins, got {}",
         changed
     );
+}
+
+#[test]
+fn harmonic_generator_adds_partials() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::HarmonicGenerator);
+
+    let n = 1025;
+    // One loud peak at bin 50, rest near zero.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
+    bins[50] = Complex::new(1.0, 0.0);
+
+    // IF buffer: bin centre frequencies (no IF refinement).
+    let if_buf: Vec<f32> = (0..n).map(|k| (k as f32) * 48_000.0 / 2048.0).collect();
+    let ctx = ctx_with_if(&if_buf);
+
+    let amount: Vec<f32> = vec![1.0; n];
+    let threshold: Vec<f32> = vec![0.5; n]; // only bin 50 passes (mag=1.0 > 0.5)
+    let stability: Vec<f32> = vec![0.0; n];
+    let spread: Vec<f32> = vec![1.0; n]; // mid decay
+    let coefficient: Vec<f32> = vec![1.5; n]; // ~24 harmonics
+    let mix: Vec<f32> = vec![1.0; n];
+    let curve_refs: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0; n];
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curve_refs, &mut sup, None, &ctx,
+    );
+
+    // Original peak preserved.
+    assert!(bins[50].norm() >= 0.99, "bin 50 must remain >= 1.0, got {}", bins[50].norm());
+    // 2nd, 3rd, 4th harmonics added at bins 100, 150, 200.
+    assert!(bins[100].norm() > 0.05, "2nd harmonic missing at bin 100");
+    assert!(bins[150].norm() > 0.02, "3rd harmonic missing at bin 150");
+    assert!(bins[200].norm() > 0.01, "4th harmonic missing at bin 200");
+    // No phantom energy at non-harmonic bins.
+    assert!(bins[75].norm() < 1e-6, "phantom energy at non-harmonic bin 75");
+    assert!(bins[125].norm() < 1e-6, "phantom energy at non-harmonic bin 125");
 }
 
 #[test]

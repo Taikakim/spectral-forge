@@ -95,11 +95,12 @@ fn if_finite_for_all_bins_under_random_phase() {
 use spectral_forge::dsp::modules::{module_spec, ModuleType};
 
 #[test]
-fn no_existing_module_declares_needs_if() {
+fn only_approved_modules_declare_needs_if() {
     use ModuleType::*;
     // Exhaustive match: when a new ModuleType variant lands the compiler will
     // refuse to build this test until the new variant is added below, forcing
     // an explicit decision about whether the new module reads IF.
+    // Phase 6.5 Task 5: Harmony is approved to use IF (HarmonicGenerator mode).
     let all: &[ModuleType] = &[
         Empty, Dynamics, Freeze, PhaseSmear, Contrast, Gain, MidSide,
         TransientSustainedSplit, Harmonic, Future, Punch, Rhythm, Geometry,
@@ -112,8 +113,14 @@ fn no_existing_module_declares_needs_if() {
             | Geometry | Modulate | Circuit | Life | Past | Kinetics | Harmony | Master => (),
         };
         let spec = module_spec(ty);
-        assert!(!spec.needs_instantaneous_freq,
-            "{:?} should not need IF in v1 (Phase 6+ opt-in)", ty);
+        let approved_for_if = matches!(ty, Harmony);
+        if approved_for_if {
+            assert!(spec.needs_instantaneous_freq,
+                "{:?} is approved for IF but spec has needs_instantaneous_freq=false", ty);
+        } else {
+            assert!(!spec.needs_instantaneous_freq,
+                "{:?} should not need IF (add to approved_for_if if intentional)", ty);
+        }
     }
 }
 
