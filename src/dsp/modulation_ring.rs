@@ -81,3 +81,70 @@ impl RingStateBank {
         }
     }
 }
+
+// ─── Audio-thread ring transform state ───────────────────────────────────────
+
+/// Per-key audio-thread state for the modulation ring transform.
+///
+/// Lives exclusively on the Pipeline (audio thread); never shared with the GUI.
+/// All sentinel values use `f32::NAN` or `-1.0` so that "not yet latched" is
+/// detectable without an extra boolean field.
+///
+/// `RingTransformState` is `Copy` so a full `[RingTransformState; RING_KEY_COUNT]`
+/// reset is a single `[Default::default(); RING_KEY_COUNT]` bulk copy — no heap
+/// allocation, RT-safe.
+#[derive(Clone, Copy, Debug)]
+pub struct RingTransformState {
+    latched_value:   f32,  // f32::NAN  = "not yet latched"
+    last_latch_beat: f32,  // -1.0      = "never latched"
+    prev_out_value:  f32,  // f32::NAN  = "no previous output"
+}
+
+impl Default for RingTransformState {
+    fn default() -> Self {
+        Self {
+            latched_value:   f32::NAN,
+            last_latch_beat: -1.0,
+            prev_out_value:  f32::NAN,
+        }
+    }
+}
+
+impl RingTransformState {
+    /// Returns `true` once a value has been latched.
+    #[inline]
+    pub fn is_latched(&self) -> bool {
+        !self.latched_value.is_nan()
+    }
+
+    /// Returns the latched value, or `0.0` if not yet latched.
+    #[inline]
+    pub fn latched_value(&self) -> f32 {
+        if self.latched_value.is_nan() { 0.0 } else { self.latched_value }
+    }
+
+    /// Returns the beat position at which the last latch occurred (`-1.0` if never).
+    #[inline]
+    pub fn last_latch_beat(&self) -> f32 {
+        self.last_latch_beat
+    }
+
+    /// Record a new latch: capture `value` and stamp `beat`.
+    #[inline]
+    pub fn set_latched(&mut self, value: f32, beat: f32) {
+        self.latched_value   = value;
+        self.last_latch_beat = beat;
+    }
+
+    /// Store the most recent output value (used for Legato interpolation).
+    #[inline]
+    pub fn set_prev_out(&mut self, value: f32) {
+        self.prev_out_value = value;
+    }
+
+    /// Returns the previous output value, or `0.0` if none has been stored.
+    #[inline]
+    pub fn prev_out(&self) -> f32 {
+        if self.prev_out_value.is_nan() { 0.0 } else { self.prev_out_value }
+    }
+}

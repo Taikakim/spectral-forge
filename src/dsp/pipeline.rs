@@ -2,6 +2,7 @@ use num_complex::Complex;
 use realfft::RealFftPlanner;
 use nih_plug::util::StftHelper;
 use crate::bridge::SharedState;
+use crate::dsp::modulation_ring::{RingTransformState, RING_KEY_COUNT};
 use crate::dsp::modules::PeakInfo;
 use crate::params::{FxChannelTarget, ScChannel, StereoLink};
 
@@ -142,6 +143,10 @@ pub struct Pipeline {
     /// read inside the hop closure to populate ModuleContext.
     held_notes:         [bool; crate::dsp::midi::NUM_MIDI_NOTES],
     held_pitch_classes: [bool; crate::dsp::midi::NUM_PITCH_CLASSES],
+    /// Per-(slot, curve, node) audio-thread ring transform state.
+    /// Fixed array of 378 entries (9 × 7 × 6); indexed via `RingStateBank::key_index`.
+    /// No heap allocation. Reset to sentinel defaults by both `new()` and `reset()`.
+    ring_transforms: [RingTransformState; RING_KEY_COUNT],
     sample_rate: f32,
     num_channels: usize,
 }
@@ -268,6 +273,7 @@ impl Pipeline {
             harmonic_groups,
             held_notes:         [false; crate::dsp::midi::NUM_MIDI_NOTES],
             held_pitch_classes: [false; crate::dsp::midi::NUM_PITCH_CLASSES],
+            ring_transforms: [RingTransformState::default(); RING_KEY_COUNT],
             sample_rate,
             fft_size,
             num_channels,
@@ -404,6 +410,8 @@ impl Pipeline {
         } else {
             self.history.reset();
         }
+        // Reset all ring-transform state back to sentinel defaults (no latch, no prev output).
+        self.ring_transforms = [RingTransformState::default(); RING_KEY_COUNT];
         // Reset clears all amp-node state — preset load + FFT-size change both warm up from zero.
         self.fx_matrix.reset(sample_rate, fft_size);
     }

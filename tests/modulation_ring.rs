@@ -1,4 +1,4 @@
-use spectral_forge::dsp::modulation_ring::{RingKey, RingStateBank, RING_KEY_COUNT};
+use spectral_forge::dsp::modulation_ring::{RingKey, RingStateBank, RingTransformState, RING_KEY_COUNT};
 use spectral_forge::editor::mod_ring::ModRingToggle;
 
 /// The bank must start with all entries empty (all flags zero).
@@ -71,4 +71,13 @@ fn clear_all_empties_bank() {
 
     bank.clear_all();
     assert_eq!(bank.entry_count(), 0, "clear_all must empty the bank");
+}
+
+/// A freshly default-constructed `RingTransformState` must be in the "not yet latched" state.
+#[test]
+fn ring_transform_state_default_is_unlatched() {
+    let s = RingTransformState::default();
+    assert!(!s.is_latched());
+    assert_eq!(s.latched_value(), 0.0);
+    assert_eq!(s.last_latch_beat(), -1.0);
 }
