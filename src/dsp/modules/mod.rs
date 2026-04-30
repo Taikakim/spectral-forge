@@ -394,6 +394,11 @@ pub struct ModuleSpec {
     /// this. Defaults false for every shipped module; flipped per-module by
     /// Phase 6.1+ consumers.
     pub needs_instantaneous_freq: bool,
+
+    /// Set true when the module reads `ModuleContext::cepstrum_buf`.
+    /// Pipeline only computes the extra inverse FFT when at least one active
+    /// slot needs it. Phase 6.4 lazy gate.
+    pub needs_cepstrum:           bool,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -410,6 +415,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -422,6 +428,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -434,6 +441,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -446,6 +454,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -458,6 +467,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -470,6 +480,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -482,6 +493,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -494,6 +506,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -506,6 +519,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static PUNCH: ModuleSpec = ModuleSpec {
         display_name: "Punch",
@@ -520,6 +534,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static RHY: ModuleSpec = ModuleSpec {
         display_name: "Rhythm",
@@ -532,6 +547,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: Some(crate::editor::rhythm_panel::render),
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static GEO: ModuleSpec = ModuleSpec {
         display_name: "Geometry",
@@ -544,6 +560,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static MODULATE: ModuleSpec = ModuleSpec {
         display_name: "Modulate",
@@ -556,6 +573,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
@@ -570,6 +588,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // v1 BBD/Schmitt/Crossover kernels do not yet write any BinPhysics field.
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static LIFE: ModuleSpec = ModuleSpec {
         display_name: "LIFE",
@@ -582,6 +601,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static PAST: ModuleSpec = ModuleSpec {
         display_name: "PAST",
@@ -594,6 +614,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget:       None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static KIN: ModuleSpec = ModuleSpec {
         display_name: "KINETICS",
@@ -606,6 +627,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -618,6 +640,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -630,6 +653,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
+        needs_cepstrum: false,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,

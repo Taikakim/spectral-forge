@@ -1,5 +1,26 @@
 use spectral_forge::dsp::cepstrum::CepstrumBuf;
+use spectral_forge::dsp::modules::{module_spec, ModuleType};
 use num_complex::Complex;
+
+#[test]
+fn no_existing_module_declares_needs_cepstrum() {
+    for &ty in &[
+        ModuleType::Empty,
+        ModuleType::Dynamics,
+        ModuleType::Freeze,
+        ModuleType::PhaseSmear,
+        ModuleType::Contrast,
+        ModuleType::Gain,
+        ModuleType::MidSide,
+        ModuleType::TransientSustainedSplit,
+        ModuleType::Harmonic,
+        ModuleType::Master,
+    ] {
+        let spec = module_spec(ty);
+        assert!(!spec.needs_cepstrum,
+            "{:?} should not need cepstrum in v1 (Harmony Lifter is the v1 consumer in 6.5)", ty);
+    }
+}
 
 #[test]
 fn cepstrum_of_pure_tone_has_low_quefrency_envelope_and_pitch_spike() {
