@@ -18,9 +18,12 @@ fn ring_state_toggle_round_trip() {
 }
 
 #[test]
-fn ring_toggles_are_disabled_until_bpm_sync_lands() {
+fn ring_toggles_are_enabled_after_phase_6_7() {
+    // Phase 6.7 activates the ring toggles unconditionally (the audio thread
+    // degrades gracefully when no transport is running). This replaces the Phase
+    // 1 scaffold test that asserted `false` while the infrastructure was pending.
     let s = ModRingState::default();
-    assert!(!s.toggles_enabled());
+    assert!(s.toggles_enabled());
 }
 
 #[test]

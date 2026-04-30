@@ -34,9 +34,11 @@ impl ModRingState {
     pub fn set(&mut self, t: ModRingToggle)      { self.flags |= t.bit(); }
     pub fn clear(&mut self, t: ModRingToggle)    { self.flags &= !t.bit(); }
     pub fn is_empty(&self) -> bool               { self.flags == 0 }
-    /// Phase 4 will replace the constant `false` with a runtime check
-    /// (e.g. `bpm_available && plpv_phase_ready`).
-    pub fn toggles_enabled(&self) -> bool { false }
+    /// Phase 6.7 activates the ring toggles unconditionally. The audio thread
+    /// reads ring state each block via `RingStateBank`; with no transport running,
+    /// `crossed_tick_at_beat` with `last_beat=-1` always returns `true`, so the
+    /// ring latches immediately and scales by 1.0 — a safe pass-through.
+    pub fn toggles_enabled(&self) -> bool { true }
 }
 
 /// Draw the modulation ring overlay around an anchor point. Returns the

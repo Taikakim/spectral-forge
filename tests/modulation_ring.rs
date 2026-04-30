@@ -258,3 +258,15 @@ fn sync_16_tick_math_handles_loop_wrap() {
     // Treat any backward jump as a cross.
     assert!(crossed_tick_at_beat(3.95, 0.05, 0.25));
 }
+
+/// Regression guard (Task 7): the bank wired into the editor is the same bank
+/// the Pipeline reads — a lookup by node must return what was stored.
+#[test]
+fn ring_state_bank_lookup_by_node_returns_set_state() {
+    use spectral_forge::dsp::modulation_ring::{RingStateBank, RingKey};
+    use spectral_forge::editor::ModRingToggle;
+    let mut bank = RingStateBank::default();
+    let key = RingKey { slot: 3, curve: 1, node: 4 };
+    bank.set_toggle(key, ModRingToggle::Legato, true);
+    assert!(bank.get(key).is_set(ModRingToggle::Legato));
+}
