@@ -695,7 +695,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // Lifter mode reads ctx.cepstrum_buf (Phase 6.5 Task 8). Flip to true so
         // Pipeline lazy-computes cepstrum whenever a Harmony slot is active.
         needs_cepstrum: true,
-        needs_chromagram: false,
+        // Chordification mode reads ctx.chromagram (Phase 6.5 Task 10). Flip to true so
+        // Pipeline lazy-computes the chromagram whenever a Harmony slot is active.
+        needs_chromagram: true,
         needs_harmonic_groups: false,
     };
     static MASTER: ModuleSpec = ModuleSpec {

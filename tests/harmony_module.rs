@@ -3,7 +3,7 @@ use spectral_forge::dsp::modules::{
     create_module, ModuleContext, ModuleType, SpectralModule,
     HarmonyModule, HarmonyMode,
 };
-use spectral_forge::dsp::modules::harmony_helpers::{find_top_k_peaks, PeakRecord};
+use spectral_forge::dsp::modules::harmony_helpers::{find_top_k_peaks, PeakRecord, best_chord_template};
 use spectral_forge::dsp::modules::harmony::HarmonyInharmonicSubmode;
 use spectral_forge::dsp::cepstrum::CepstrumBuf;
 use spectral_forge::params::{FxChannelTarget, StereoLink};
@@ -374,4 +374,67 @@ fn formant_rotation_passthrough_when_coefficient_one() {
         if err > max_err { max_err = err; }
     }
     assert!(max_err < 0.15, "ratio=1 must approximately passthrough, max err {}", max_err);
+}
+
+#[test]
+fn chord_template_matches_c_major() {
+    let mut chroma = [0.0_f32; 12];
+    chroma[0] = 1.0;  // C
+    chroma[4] = 1.0;  // E
+    chroma[7] = 1.0;  // G
+    let (best, score) = best_chord_template(&chroma);
+    assert_eq!(best, 0, "C major template should win, got idx {} score {}", best, score);
+    assert!(score > 0.99, "exact match must score near 1.0, got {}", score);
+}
+
+#[test]
+fn chord_template_matches_a_minor() {
+    let mut chroma = [0.0_f32; 12];
+    chroma[9] = 1.0;  // A
+    chroma[0] = 1.0;  // C
+    chroma[4] = 1.0;  // E
+    let (best, score) = best_chord_template(&chroma);
+    assert_eq!(best, 12 + 9, "A minor (template idx 21) should win, got {}", best);
+    assert!(score > 0.99);
+}
+
+#[test]
+fn chordification_snaps_off_chord_partial_toward_chord_tone() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Chordification);
+
+    let n = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
+    bins[40] = Complex::new(1.0, 0.0); // arbitrary bin
+
+    // Chromagram = pure C major: C, E, G all max.
+    let chroma_arr: [f32; 12] = {
+        let mut a = [0.0_f32; 12];
+        a[0] = 1.0; a[4] = 1.0; a[7] = 1.0;
+        a
+    };
+
+    let mut ctx = ctx_default();
+    ctx.chromagram = Some(&chroma_arr);
+
+    let amount      = vec![1.0_f32; n];
+    let threshold   = vec![0.5_f32; n];
+    let stability   = vec![0.0_f32; n];
+    let spread      = vec![1.0_f32; n];
+    let coefficient = vec![0.0_f32; n];
+    let mix         = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    // The original bin should be reduced; some bin in the C/E/G class above
+    // it should be increased.
+    assert!(bins[40].norm() < 0.99, "off-chord partial must be attenuated, got {}", bins[40].norm());
 }

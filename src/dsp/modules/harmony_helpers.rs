@@ -63,3 +63,62 @@ pub fn find_top_k_peaks(mag: &[f32], threshold: f32, out: &mut [PeakRecord]) -> 
     }
     filled
 }
+
+/// 24-element chord template bank: 12 major + 12 minor.
+/// Each template is a 12-element [0/1] pitch-class profile.
+/// Index 0..=11: major (C, C#, …, B). Index 12..=23: minor (Cm, C#m, …, Bm).
+pub const CHORD_TEMPLATES_24: [[f32; 12]; 24] = [
+    // Major
+    /* C  */ [1.,0.,0.,0.,1.,0.,0.,1.,0.,0.,0.,0.],
+    /* C# */ [0.,1.,0.,0.,0.,1.,0.,0.,1.,0.,0.,0.],
+    /* D  */ [0.,0.,1.,0.,0.,0.,1.,0.,0.,1.,0.,0.],
+    /* D# */ [0.,0.,0.,1.,0.,0.,0.,1.,0.,0.,1.,0.],
+    /* E  */ [0.,0.,0.,0.,1.,0.,0.,0.,1.,0.,0.,1.],
+    /* F  */ [1.,0.,0.,0.,0.,1.,0.,0.,0.,1.,0.,0.],
+    /* F# */ [0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,1.,0.],
+    /* G  */ [0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,1.],
+    /* G# */ [1.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.],
+    /* A  */ [0.,1.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.],
+    /* A# */ [0.,0.,1.,0.,0.,1.,0.,0.,0.,0.,1.,0.],
+    /* B  */ [0.,0.,0.,1.,0.,0.,1.,0.,0.,0.,0.,1.],
+    // Minor
+    /* Cm */  [1.,0.,0.,1.,0.,0.,0.,1.,0.,0.,0.,0.],
+    /* C#m */ [0.,1.,0.,0.,1.,0.,0.,0.,1.,0.,0.,0.],
+    /* Dm */  [0.,0.,1.,0.,0.,1.,0.,0.,0.,1.,0.,0.],
+    /* D#m */ [0.,0.,0.,1.,0.,0.,1.,0.,0.,0.,1.,0.],
+    /* Em */  [0.,0.,0.,0.,1.,0.,0.,1.,0.,0.,0.,1.],
+    /* Fm */  [1.,0.,0.,0.,0.,1.,0.,0.,1.,0.,0.,0.],
+    /* F#m */ [0.,1.,0.,0.,0.,0.,1.,0.,0.,1.,0.,0.],
+    /* Gm */  [0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,1.,0.],
+    /* G#m */ [0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,1.],
+    /* Am */  [1.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.],
+    /* A#m */ [0.,1.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.],
+    /* Bm */  [0.,0.,1.,0.,0.,0.,1.,0.,0.,0.,0.,1.],
+];
+
+/// Cosine similarity between two equal-length f32 vectors. Returns 0.0 for empty
+/// or zero-norm inputs to avoid NaN.
+#[inline]
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let mut dot = 0.0_f32;
+    let mut a2 = 0.0_f32;
+    let mut b2 = 0.0_f32;
+    for i in 0..a.len().min(b.len()) {
+        dot += a[i] * b[i];
+        a2  += a[i] * a[i];
+        b2  += b[i] * b[i];
+    }
+    let denom = (a2 * b2).sqrt();
+    if denom < 1e-12 { 0.0 } else { dot / denom }
+}
+
+/// Find the chord template best matching `chromagram`. Returns (index, score).
+pub fn best_chord_template(chromagram: &[f32; 12]) -> (usize, f32) {
+    let mut best_i = 0_usize;
+    let mut best_s = -1.0_f32;
+    for (i, tmpl) in CHORD_TEMPLATES_24.iter().enumerate() {
+        let s = cosine_similarity(chromagram, tmpl);
+        if s > best_s { best_s = s; best_i = i; }
+    }
+    (best_i, best_s)
+}

@@ -432,6 +432,75 @@ impl HarmonyModule {
 }
 
 impl HarmonyModule {
+    fn process_chordification(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        use crate::dsp::modules::harmony_helpers::{best_chord_template, CHORD_TEMPLATES_24};
+
+        let n = self.num_bins;
+        let chroma = match ctx.chromagram {
+            Some(c) => c,
+            None => return,
+        };
+        let (chord_idx, _score) = best_chord_template(chroma);
+        let chord = &CHORD_TEMPLATES_24[chord_idx];
+
+        let amount    = curves.get(0).copied().unwrap_or(&[]);
+        let threshold = curves.get(1).copied().unwrap_or(&[]);
+        let spread    = curves.get(3).copied().unwrap_or(&[]);
+        let mix       = curves.get(5).copied().unwrap_or(&[]);
+
+        let bin_freq = ctx.sample_rate / ctx.fft_size as f32;
+
+        for k in 1..n {
+            let mag = bins[k].norm();
+            let thr = threshold.get(k).copied().unwrap_or(0.0);
+            if mag < thr { continue; }
+            let amt = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            if amt < 1e-9 { continue; }
+
+            // Estimate pitch class from bin's IF-refined frequency.
+            let f = match ctx.instantaneous_freq {
+                Some(if_buf) => if_buf.get(k).copied().unwrap_or(0.0),
+                None => k as f32 * bin_freq,
+            };
+            if f < 27.5 { continue; } // below A0
+            let midi = 12.0 * (f / 440.0).log2() + 69.0;
+            let pc = ((midi.round() as i32).rem_euclid(12)) as usize;
+
+            // If already in chord, skip.
+            if chord[pc] > 0.5 { continue; }
+
+            // Find nearest in-chord PC.
+            let mut nearest_d = 12_i32;
+            for cpc in 0..12 {
+                if chord[cpc] < 0.5 { continue; }
+                let d = ((pc as i32 - cpc as i32) + 6).rem_euclid(12) - 6; // signed −6..=5
+                if d.abs() < nearest_d.abs() { nearest_d = d; }
+            }
+            let delta_semitones = -(nearest_d as f32);
+            // SPREAD ∈ [0,2] → snap radius ∈ [0.0, 1.0] of full snap.
+            let s = spread.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.5;
+            let snap = amt * s;
+
+            let new_midi = midi + snap * delta_semitones;
+            let new_freq = 440.0 * 2.0_f32.powf((new_midi - 69.0) / 12.0);
+            let target_bin = (new_freq / bin_freq + 0.5) as usize;
+            if target_bin == 0 || target_bin >= n - 1 { continue; }
+            if target_bin == k { continue; }
+
+            let mix_v = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            let original = bins[k];
+            bins[k] = original * (1.0 - mix_v);
+            bins[target_bin] += original * mix_v;
+        }
+    }
+}
+
+impl HarmonyModule {
     /// Formant Rotation mode: cepstrum-domain envelope preservation + harmonic shift.
     ///
     /// Extracts the spectral envelope from the low-quefrency portion of the cepstrum,
@@ -557,7 +626,7 @@ impl SpectralModule for HarmonyModule {
         if amount_centre.abs() < 1e-9 { return; }
 
         match self.mode {
-            HarmonyMode::Chordification    => { /* TODO Task 11 */ }
+            HarmonyMode::Chordification    => self.process_chordification(bins, curves, ctx),
             HarmonyMode::Undertone         => self.process_undertone(bins, curves, ctx),
             HarmonyMode::Companding        => { /* TODO Task 12 */ }
             HarmonyMode::FormantRotation   => self.process_formant_rotation(bins, curves, ctx),
