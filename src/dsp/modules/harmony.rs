@@ -247,6 +247,95 @@ impl HarmonyModule {
     }
 }
 
+impl HarmonyModule {
+    fn process_inharmonic(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        use crate::dsp::modules::harmony_helpers::{
+            find_top_k_peaks, BESSEL_J0_ZEROS, SMALL_PRIMES,
+        };
+
+        let n = self.num_bins;
+        let amount      = curves.get(0).copied().unwrap_or(&[]);
+        let threshold   = curves.get(1).copied().unwrap_or(&[]);
+        let coefficient = curves.get(4).copied().unwrap_or(&[]);
+        let mix         = curves.get(5).copied().unwrap_or(&[]);
+
+        for k in 0..n { self.scratch_mag[k] = bins[k].norm(); }
+        let thr_centre = threshold.get(n / 2).copied().unwrap_or(0.1);
+        let n_peaks = find_top_k_peaks(&self.scratch_mag[..n], thr_centre, &mut self.peaks_buf);
+        if n_peaks == 0 { return; }
+
+        let bin_freq = ctx.sample_rate / ctx.fft_size as f32;
+        let nyquist  = ctx.sample_rate * 0.5;
+
+        // The first peak (loudest) is treated as fundamental; remaining peaks are partials.
+        let pk0 = self.peaks_buf[0];
+        let f0 = match ctx.instantaneous_freq {
+            Some(if_buf) => if_buf.get(pk0.bin).copied().unwrap_or(0.0),
+            None => (pk0.bin as f32) * bin_freq,
+        };
+        if f0 <= 0.0 { return; }
+
+        // COEFFICIENT ∈ [0, 2] in all sub-modes — interpretation depends on submode.
+        let coef_centre = coefficient.get(n / 2).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+
+        // Copy submode to a local to avoid borrow-checker conflict with &mut self in closure.
+        let submode = self.inharmonic_submode;
+
+        let target_freq_for_n = |n_idx: usize| -> f32 {
+            match submode {
+                HarmonyInharmonicSubmode::Stiffness => {
+                    // B ∈ [0, 0.001] for COEFFICIENT ∈ [0, 2]. Piano-like B ≈ 0.0004.
+                    let b = coef_centre * 0.0005;
+                    let n_f = n_idx as f32;
+                    f0 * n_f * (1.0 + b * n_f * n_f).sqrt()
+                }
+                HarmonyInharmonicSubmode::Bessel => {
+                    // n_idx = 1 → 2nd partial uses BESSEL_J0_ZEROS[1] / [0].
+                    let idx = (n_idx - 1).min(BESSEL_J0_ZEROS.len() - 1);
+                    f0 * BESSEL_J0_ZEROS[idx] / BESSEL_J0_ZEROS[0]
+                }
+                HarmonyInharmonicSubmode::Prime => {
+                    let idx = (n_idx - 1).min(SMALL_PRIMES.len() - 1);
+                    f0 * SMALL_PRIMES[idx] as f32 / SMALL_PRIMES[0] as f32
+                }
+            }
+        };
+
+        // For partials 2..n_peaks: estimate which harmonic n the source peak is,
+        // then move it to the target frequency.
+        for p in 1..n_peaks {
+            let pk = self.peaks_buf[p];
+            let amt = amount.get(pk.bin).copied().unwrap_or(0.0).clamp(0.0, 4.0);
+            if amt < 1e-9 { continue; }
+            let mix_v = mix.get(pk.bin).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+
+            let pk_freq = match ctx.instantaneous_freq {
+                Some(if_buf) => if_buf.get(pk.bin).copied().unwrap_or(0.0),
+                None => (pk.bin as f32) * bin_freq,
+            };
+            if pk_freq <= 0.0 { continue; }
+            let n_idx = (pk_freq / f0).round().max(1.0) as usize;
+            if n_idx <= 1 { continue; }
+
+            let target_freq = target_freq_for_n(n_idx);
+            if target_freq <= 0.0 || target_freq >= nyquist { continue; }
+            let target_bin = (target_freq / bin_freq + 0.5) as usize;
+            if target_bin == 0 || target_bin >= n - 1 { continue; }
+
+            // Move energy: attenuate source by amt, add same amt to target.
+            let attn = (1.0 - amt * mix_v).max(0.0);
+            let original = bins[pk.bin];
+            bins[pk.bin] = original * attn;
+            bins[target_bin] += original * (amt * mix_v);
+        }
+    }
+}
+
 impl SpectralModule for HarmonyModule {
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         self.rng_state   = 0xC0FFEE_u32;
@@ -285,7 +374,7 @@ impl SpectralModule for HarmonyModule {
             HarmonyMode::Companding        => { /* TODO Task 12 */ }
             HarmonyMode::FormantRotation   => { /* TODO Task 9 */ }
             HarmonyMode::Lifter            => { /* TODO Task 10 */ }
-            HarmonyMode::Inharmonic        => { /* TODO Task 7 */ }
+            HarmonyMode::Inharmonic        => self.process_inharmonic(bins, curves, ctx),
             HarmonyMode::HarmonicGenerator => self.process_harmonic_generator(bins, curves, ctx),
             HarmonyMode::Shuffler          => self.process_shuffler(bins, curves),
         }

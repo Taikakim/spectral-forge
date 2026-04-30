@@ -8,6 +8,26 @@ pub struct PeakRecord {
     pub mag: f32,
 }
 
+/// First 32 positive zeros of the Bessel function J_0.
+/// Source: NIST DLMF Table 10.21.iii.
+pub const BESSEL_J0_ZEROS: [f32; 32] = [
+     2.4048256, 5.5200781, 8.6537280, 11.7915344, 14.9309177,
+    18.0710640, 21.2116366, 24.3524715, 27.4934791, 30.6346065,
+    33.7758202, 36.9170984, 40.0584258, 43.1997917, 46.3411884,
+    49.4826099, 52.6240518, 55.7655108, 58.9069839, 62.0484692,
+    65.1899648, 68.3314693, 71.4729816, 74.6145006, 77.7560256,
+    80.8975559, 84.0390908, 87.1806298, 90.3221726, 93.4637186,
+    96.6052677, 99.7468195,
+];
+
+/// First 32 primes.
+pub const SMALL_PRIMES: [u32; 32] = [
+     2,  3,  5,  7, 11, 13, 17, 19, 23, 29,
+    31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+    73, 79, 83, 89, 97,101,103,107,109,113,
+   127,131,
+];
+
 /// Find local maxima in `mag` above `threshold`, keeping the top `out.len()`
 /// by magnitude. Output is sorted descending by magnitude. Unused slots are
 /// zeroed. Returns the number of valid entries written.

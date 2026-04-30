@@ -4,6 +4,7 @@ use spectral_forge::dsp::modules::{
     HarmonyModule, HarmonyMode,
 };
 use spectral_forge::dsp::modules::harmony_helpers::{find_top_k_peaks, PeakRecord};
+use spectral_forge::dsp::modules::harmony::HarmonyInharmonicSubmode;
 use spectral_forge::params::{FxChannelTarget, StereoLink};
 
 fn ctx_default<'a>() -> ModuleContext<'a> {
@@ -239,4 +240,48 @@ fn undertone_generator_adds_partials_below_loud_peak() {
     assert!(bins[67].norm() > 0.02 || bins[66].norm() > 0.02,
             "f/3 undertone missing near bin 67");
     assert!(bins[50].norm() > 0.01, "f/4 undertone missing at bin 50");
+}
+
+#[test]
+fn inharmonic_stiffness_shifts_high_partials_upward() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Inharmonic);
+    m.set_inharmonic_submode(HarmonyInharmonicSubmode::Stiffness);
+
+    let n = 1025;
+    // Two peaks: fundamental at bin 50, 5th harmonic at bin 250.
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
+    bins[50]  = Complex::new(1.0, 0.0);
+    bins[250] = Complex::new(0.5, 0.0);
+    let snapshot = bins.clone();
+
+    let if_buf: Vec<f32> = (0..n).map(|k| (k as f32) * 48_000.0 / 2048.0).collect();
+    let ctx = ctx_with_if(&if_buf);
+
+    let amount      = vec![1.0_f32; n];
+    let threshold   = vec![0.4_f32; n];
+    let stability   = vec![0.0_f32; n];
+    let spread      = vec![0.0_f32; n];
+    let coefficient = vec![1.0_f32; n]; // moderate B
+    let mix         = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    // Bin 250 (5th harmonic) must have moved upward (stiffness pushes high partials up).
+    let mut energy_above = 0.0_f32;
+    for k in 251..n { energy_above += bins[k].norm(); }
+    assert!(energy_above > 0.1, "expected stiffness to push energy above bin 250, got {}", energy_above);
+    // Original bin 250 should be reduced.
+    assert!(
+        bins[250].norm() < snapshot[250].norm() * 0.9,
+        "original 5th-harmonic peak must be attenuated, got {} vs {}",
+        bins[250].norm(), snapshot[250].norm(),
+    );
 }
