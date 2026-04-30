@@ -123,6 +123,7 @@ pub struct ModuleContext<'block> {
     /// becomes meaningful once Phase 4's per-channel IF cache is wired in.
     pub if_offset: Option<&'block [f32]>,
     pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
+    pub harmonic_groups:      Option<&'block [crate::dsp::harmonic_groups::HarmonicGroup]>, // Phase 6.2
     pub midi_notes:           Option<&'block [bool; 128]>, // Phase 6.3
     pub held_pitch_classes:   Option<&'block [bool; 12]>,  // Phase 6.3
     /// Per-channel cepstrum (length = `fft_size`). Populated by Pipeline
@@ -153,6 +154,7 @@ impl<'block> ModuleContext<'block> {
             peaks: None,
             instantaneous_freq: None,
             chromagram: None,
+            harmonic_groups: None,
             midi_notes: None,
             held_pitch_classes: None,
             cepstrum_buf: None,

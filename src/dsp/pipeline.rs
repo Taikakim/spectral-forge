@@ -130,6 +130,14 @@ pub struct Pipeline {
     /// inside the hop closure when at least one active slot declares
     /// `needs_cepstrum`. Phase 6.4 lazy infra.
     cepstrum_buf: Vec<crate::dsp::cepstrum::CepstrumBuf>,
+    /// Per-channel chromagram (12 pitch-class energy accumulators). Allocated at
+    /// construction; resized on `reset()`. Only computed when at least one active
+    /// slot declares `needs_chromagram`. Phase 6.2 lazy infra.
+    chromagram_buf: Vec<[f32; crate::dsp::chromagram::NUM_PITCH_CLASSES]>,
+    /// Per-channel harmonic-group detector output. Allocated at construction;
+    /// resized on `reset()`. Only `detect()`-d when at least one active slot
+    /// declares `needs_harmonic_groups`. Phase 6.2 lazy infra.
+    harmonic_groups: Vec<crate::dsp::harmonic_groups::HarmonicGroupBuf>,
     /// MIDI state mirrored from `lib.rs::process()`. Updated before each block,
     /// read inside the hop closure to populate ModuleContext.
     held_notes:         [bool; crate::dsp::midi::NUM_MIDI_NOTES],
@@ -213,6 +221,15 @@ impl Pipeline {
                 .map(|_| crate::dsp::cepstrum::CepstrumBuf::new(fft_size))
                 .collect();
 
+        let chromagram_buf: Vec<[f32; crate::dsp::chromagram::NUM_PITCH_CLASSES]> =
+            (0..num_channels)
+                .map(|_| [0.0_f32; crate::dsp::chromagram::NUM_PITCH_CLASSES])
+                .collect();
+        let harmonic_groups: Vec<crate::dsp::harmonic_groups::HarmonicGroupBuf> =
+            (0..num_channels)
+                .map(|_| crate::dsp::harmonic_groups::HarmonicGroupBuf::new())
+                .collect();
+
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
             fft_plan,
@@ -247,6 +264,8 @@ impl Pipeline {
             if_buffer,
             if_prev_phase,
             cepstrum_buf,
+            chromagram_buf,
+            harmonic_groups,
             held_notes:         [false; crate::dsp::midi::NUM_MIDI_NOTES],
             held_pitch_classes: [false; crate::dsp::midi::NUM_PITCH_CLASSES],
             sample_rate,
@@ -360,6 +379,12 @@ impl Pipeline {
         for cb in self.cepstrum_buf.iter_mut() {
             cb.resize(self.fft_size);
         }
+        self.chromagram_buf.resize(num_channels, [0.0; crate::dsp::chromagram::NUM_PITCH_CLASSES]);
+        for c in self.chromagram_buf.iter_mut() {
+            *c = [0.0; crate::dsp::chromagram::NUM_PITCH_CLASSES];
+        }
+        self.harmonic_groups.resize_with(num_channels,
+            || crate::dsp::harmonic_groups::HarmonicGroupBuf::new());
         crate::dsp::midi::clear_midi_state(&mut self.held_notes, &mut self.held_pitch_classes);
         // History Buffer: rebuild if the depth changed; otherwise reset in place.
         let new_capacity = {
@@ -802,13 +827,22 @@ impl Pipeline {
 
         // Phase 6.1: scan active slot types for IF demand. Uses the slot_types_snap
         // already captured at the top of process() — no extra lock, no allocation.
-        let any_needs_if = slot_types_snap.iter()
+        let mut any_needs_if = slot_types_snap.iter()
             .any(|&ty| crate::dsp::modules::module_spec(ty).needs_instantaneous_freq);
 
         // Phase 6.4: same lazy-gate pattern as 6.1 IF — only run the extra
         // inverse-FFT when at least one active slot's spec opts in.
         let any_needs_cepstrum = slot_types_snap.iter()
             .any(|&ty| crate::dsp::modules::module_spec(ty).needs_cepstrum);
+
+        // Phase 6.2: chromagram + harmonic-group gates. Harmonic-group detection
+        // requires IF (it uses the IF buffer), so force IF compute on if any slot
+        // needs groups. Cost when no slot opts in: two bool checks per block.
+        let any_needs_chromagram = slot_types_snap.iter()
+            .any(|&ty| crate::dsp::modules::module_spec(ty).needs_chromagram);
+        let any_needs_groups = slot_types_snap.iter()
+            .any(|&ty| crate::dsp::modules::module_spec(ty).needs_harmonic_groups);
+        if any_needs_groups { any_needs_if = true; }
 
         // Reborrow fields as locals so the closure can capture them without
         // conflicting with the &mut self.stft borrow inside process_overlap_add.
@@ -836,6 +870,8 @@ impl Pipeline {
         let if_buffer_ref            = &mut self.if_buffer;
         let if_prev_phase_ref        = &mut self.if_prev_phase;
         let cepstrum_buf_ref         = &mut self.cepstrum_buf;
+        let chromagram_buf_ref       = &mut self.chromagram_buf;
+        let harmonic_groups_ref      = &mut self.harmonic_groups;
         let sample_rate              = self.sample_rate;
         let pending_hop_frames       = &mut self.pending_hop_frames;
         let mut pending_hops: usize  = 0;
@@ -984,6 +1020,32 @@ impl Pipeline {
             if any_needs_cepstrum {
                 cepstrum_buf_ref[ch].compute_from_bins(&complex_buf[..num_bins]);
                 hop_ctx.cepstrum_buf = Some(cepstrum_buf_ref[ch].quefrency());
+            }
+
+            // Phase 6.2: per-hop chromagram + harmonic-group populate. Chromagram
+            // optionally uses IF for sub-bin pitch refinement. Harmonic-group
+            // detection requires the IF buffer (always available here because
+            // any_needs_groups force-enables any_needs_if above). Both are skipped
+            // entirely when no active module needs them.
+            if any_needs_chromagram {
+                let if_opt = if any_needs_if { Some(&if_buffer_ref[ch][..num_bins]) } else { None };
+                crate::dsp::chromagram::compute_chromagram(
+                    &complex_buf[..num_bins],
+                    if_opt,
+                    sample_rate,
+                    fft_size,
+                    &mut chromagram_buf_ref[ch],
+                );
+                hop_ctx.chromagram = Some(&chromagram_buf_ref[ch]);
+            }
+            if any_needs_groups {
+                harmonic_groups_ref[ch].detect(
+                    &complex_buf[..num_bins],
+                    &if_buffer_ref[ch][..num_bins],
+                    sample_rate,
+                    fft_size,
+                );
+                hop_ctx.harmonic_groups = Some(harmonic_groups_ref[ch].groups());
             }
 
             // Run all modules through the fx_matrix slot chain.
