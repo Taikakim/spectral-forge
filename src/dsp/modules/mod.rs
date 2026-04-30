@@ -426,6 +426,11 @@ pub struct ModuleSpec {
     /// harmonic-groups kernel. Pipeline only runs that kernel when at least
     /// one active slot declares this. Phase 6.2 lazy gate.
     pub needs_harmonic_groups:    bool,
+
+    /// Set true when the module reads `ctx.midi_notes` or `ctx.held_pitch_classes`.
+    /// MIDI is always-on (Phase 6.3.3 `MidiConfig::Basic`), so this flag is
+    /// declarative/documentation only — no Pipeline gating needed. Phase 6.6.
+    pub needs_midi:               bool,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -445,6 +450,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -460,6 +466,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -475,6 +482,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -490,6 +498,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -505,6 +514,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -520,6 +530,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -535,6 +546,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -550,6 +562,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -565,6 +578,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static PUNCH: ModuleSpec = ModuleSpec {
         display_name: "Punch",
@@ -582,6 +596,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static RHY: ModuleSpec = ModuleSpec {
         display_name: "Rhythm",
@@ -597,6 +612,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        // Arpeggiator NoteIn trigger reads ctx.midi_notes (Phase 6.6 Task 6).
+        needs_midi: true,
     };
     static GEO: ModuleSpec = ModuleSpec {
         display_name: "Geometry",
@@ -612,6 +629,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static MODULATE: ModuleSpec = ModuleSpec {
         display_name: "Modulate",
@@ -627,6 +645,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
@@ -644,6 +663,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static LIFE: ModuleSpec = ModuleSpec {
         display_name: "LIFE",
@@ -659,6 +679,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static PAST: ModuleSpec = ModuleSpec {
         display_name: "PAST",
@@ -674,6 +695,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static KIN: ModuleSpec = ModuleSpec {
         display_name: "KINETICS",
@@ -689,6 +711,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static HARM2: ModuleSpec = ModuleSpec {
         display_name: "Harmony",
@@ -709,6 +732,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: true,
         // Companding reads ctx.harmonic_groups (Phase 6.5 Task 11).
         needs_harmonic_groups: true,
+        needs_midi: false,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -724,6 +748,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -739,6 +764,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,
+        needs_midi: false,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,

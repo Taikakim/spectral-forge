@@ -361,6 +361,17 @@ fn phase_reset_preserves_dc_and_nyquist_real() {
     }
 }
 
+// ── Task 7 (Phase 6.6) tests ──────────────────────────────────────────────────
+
+#[test]
+fn rhythm_module_spec_declares_needs_midi() {
+    let spec = spectral_forge::dsp::modules::module_spec(
+        spectral_forge::dsp::modules::ModuleType::Rhythm
+    );
+    assert!(spec.needs_midi,
+        "Rhythm ModuleSpec must declare needs_midi = true (Arpeggiator NoteIn reads ctx.midi_notes)");
+}
+
 // ── Task 6 (Phase 6.6) tests ──────────────────────────────────────────────────
 
 #[test]

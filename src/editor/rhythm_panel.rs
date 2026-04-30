@@ -13,7 +13,7 @@
 use nih_plug_egui::egui::{self, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::dsp::modules::{module_spec, ModuleType};
-use crate::dsp::modules::rhythm::ArpGrid;
+use crate::dsp::modules::rhythm::{ArpGrid, ArpTriggerSource, RhythmMode};
 use crate::editor::theme as th;
 use crate::params::SpectralForgeParams;
 
@@ -33,6 +33,42 @@ pub fn render(ui: &mut Ui, params: &SpectralForgeParams, slot: usize) {
     // Snapshot mode label without holding the mutex across the rest of the frame.
     let mode = params.slot_rhythm_mode.lock()[slot];
     ui.label(format!("Mode: {}", mode.label()));
+
+    // ── Trigger-source picker (Arpeggiator mode only) ─────────────────────────
+    // When mode == Arpeggiator, show a compact BPM | NoteIn toggle row so the
+    // user can choose whether step advance is driven by the host tempo or by
+    // MIDI note-on rising edges (Phase 6.6 Task 7).
+    if mode == RhythmMode::Arpeggiator {
+        let src = params.slot_arp_trigger_source.lock()[slot];
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Trigger:")
+                    .size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                    .color(th::LABEL_DIM),
+            );
+            for (label, variant) in [
+                ("BPM",    ArpTriggerSource::Bpm),
+                ("NoteIn", ArpTriggerSource::NoteIn),
+            ] {
+                let is_active = src == variant;
+                let fill     = if is_active { th::BORDER } else { th::BG };
+                let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                let btn = egui::Button::new(
+                    egui::RichText::new(label)
+                        .size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                        .color(text_col),
+                )
+                .fill(fill)
+                .stroke(egui::Stroke::new(
+                    th::scaled_stroke(th::STROKE_BORDER, scale),
+                    th::BORDER,
+                ));
+                if ui.add(btn).clicked() {
+                    params.slot_arp_trigger_source.lock()[slot] = variant;
+                }
+            }
+        });
+    }
 
     // Snapshot the grid so we don't hold the lock across egui interaction calls.
     let mut grid: ArpGrid = params.slot_arp_grid.lock()[slot];

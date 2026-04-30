@@ -1,6 +1,6 @@
 # Phase 6 — Pitch / Harmony Layer (Umbrella)
 
-> **STATUS:** IMPLEMENTED (gating sub-plan 6.5 merged; 6.6 + 6.7 still PLANNED). Authoritative status: `docs/superpowers/STATUS.md`.
+> **STATUS:** IMPLEMENTED (6.1 IF, 6.2 chromagram+groups, 6.3 MIDI, 6.4 cepstrum, 6.5 Harmony, 6.6 FM Network/Arp NoteIn all merged; 6.7 Modulation Ring UI still PLANNED). Authoritative status: `docs/superpowers/STATUS.md`.
 
 > **For agentic workers:** This is an **index document**, not an implementable plan.
 > Each sub-plan listed below is a self-contained TDD plan. Pick one, follow
@@ -52,7 +52,7 @@ inline.
 | 6.3 ✅ IMPLEMENTED | `2026-04-27-phase-6.3-midi-input.md` | nih-plug MIDI port wiring; `held_notes: [bool; 128]`, `pitch_classes: [bool; 12]`, `note_events: &[NoteEvent]` in `SharedState`; populate `ctx.midi_notes` / `ctx.held_pitch_classes`. Landed 2026-04-30 on `feature/next-gen-modules-plans`. | Phase 1 |
 | 6.4 ✅ IMPLEMENTED | `2026-04-27-phase-6.4-cepstrum.md` | Lazy cepstrum (extra real-FFT pair) gated by `needs_cepstrum`, exposed via `ctx.cepstrum_buf`. Landed 2026-04-30 on `feature/next-gen-modules-plans`. | Phase 1 |
 | 6.5 ✅ IMPLEMENTED | `2026-04-27-phase-6.5-harmony-module.md` | `HarmonyModule` with 8 v1 sub-effects: Chordification, Undertone, Companding, Formant Rotation, Lifter, Inharmonic (Stiffness/Bessel/Prime), Harmonic Generator, Shuffler. Defers FM Replicator + Persistent Homology to Phase 7. | 6.1, 6.2, 6.3, 6.4, Phase 3 |
-| 6.6 | `2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md` | Modulate FM Network mode wired via 6.1's IF; Rhythm Arpeggiator `NoteIn` trigger source wired via 6.3's MIDI. | 6.1, 6.3 |
+| 6.6 ✅ IMPLEMENTED | `2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md` | Modulate FM Network mode wired via 6.1's IF; Rhythm Arpeggiator `NoteIn` trigger source wired via 6.3's MIDI; `needs_midi` spec field added. Landed 2026-04-30 on `feature/next-gen-modules-plans`. | 6.1, 6.3 |
 | 6.7 | `2026-04-27-phase-6.7-modulation-ring-ui.md` | Modulation Ring UI activation (S/H, Sync 1/16, Legato) for the parameter categories Phase 1 scaffolded; uses `ctx.bpm` and `ctx.midi_notes`. | 6.3, Phase 5b BPM sync |
 
 ### Dependency order
