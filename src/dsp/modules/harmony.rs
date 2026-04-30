@@ -431,6 +431,89 @@ impl HarmonyModule {
     }
 }
 
+impl HarmonyModule {
+    /// Formant Rotation mode: cepstrum-domain envelope preservation + harmonic shift.
+    ///
+    /// Extracts the spectral envelope from the low-quefrency portion of the cepstrum,
+    /// computes the residual (log_mag - envelope), shifts the residual by COEFFICIENT
+    /// ratio (clamped [0.5, 2.0]), then recombines shifted-residual + original envelope.
+    /// This preserves formants while shifting harmonics.
+    ///
+    /// RT-safe: reuses `fwd_input`, `fwd_output`, `fwd_scratch` pre-allocated in Task 8.
+    /// `Arc::clone` on `fwd_fft` only increments a refcount — no heap.
+    fn process_formant_rotation(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        let n = self.num_bins;
+        let cepstrum = match ctx.cepstrum_buf {
+            Some(c) if c.len() == self.fft_size => c,
+            _ => return, // Phase 6.4 not active or wrong size; passthrough.
+        };
+
+        let amount      = curves.get(0).copied().unwrap_or(&[]);
+        let coefficient = curves.get(4).copied().unwrap_or(&[]);
+        let mix         = curves.get(5).copied().unwrap_or(&[]);
+
+        let amt_centre = amount.get(n / 2).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        if amt_centre < 1e-9 { return; }
+
+        // COEFFICIENT curve: 1.0 = identity (no rotation). Clamp to [0.5, 2.0].
+        let ratio = coefficient.get(n / 2).copied().unwrap_or(1.0).clamp(0.5, 2.0);
+        if (ratio - 1.0).abs() < 1e-3 {
+            // Identity rotation; nothing to do.
+            return;
+        }
+
+        // Step 1: extract envelope from cepstrum (low-quefrency window only).
+        // Fold index qf is symmetric for real signals.
+        let env_cutoff = self.fft_size / 8;
+        for q in 0..self.fft_size {
+            let qf = if q <= self.fft_size / 2 { q } else { self.fft_size - q };
+            self.fwd_input[q] = if qf < env_cutoff { cepstrum[q] } else { 0.0 };
+        }
+
+        // Forward real-FFT → complex log-magnitude. Arc::clone = refcount bump only.
+        let fft = match self.fwd_fft.as_ref() { Some(f) => f.clone(), None => return };
+        let _ = fft.process_with_scratch(
+            &mut self.fwd_input,
+            &mut self.fwd_output,
+            &mut self.fwd_scratch,
+        );
+        // realfft inverse FFT (used by CepstrumBuf) does NOT normalize — it scales by
+        // fft_size. The forward FFT here undoes that, so divide by fft_size to recover
+        // the original log-magnitude values. (Mirrors Lifter mode normalization.)
+        let inv_n = 1.0 / self.fft_size as f32;
+        for k in 0..n {
+            self.log_mag_edited[k] = self.fwd_output[k].re * inv_n;
+        }
+
+        // Step 2: residual[k] = log|bins[k]| - log_envelope[k].
+        // Step 3: shift residual: residual'[k] = residual[round(k / ratio)].
+        // Step 4: log_mag_target[k] = log_envelope[k] + residual'[k].
+        let mix_centre = mix.get(n / 2).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+        let blend = (amt_centre * mix_centre).clamp(0.0, 1.0);
+        for k in 0..n {
+            let env = self.log_mag_edited[k];
+            let src_k = ((k as f32) / ratio).round() as usize;
+            let src_full = if src_k < n {
+                bins[src_k].norm().max(1e-10).ln()
+            } else {
+                env // no source → use envelope only (residual = 0)
+            };
+            let src_env = if src_k < n { self.log_mag_edited[src_k] } else { env };
+            let residual = src_full - src_env;
+            let log_target = env + residual;
+            let target_mag = log_target.exp();
+            let phase = bins[k].arg();
+            let edited = Complex::from_polar(target_mag, phase);
+            bins[k] = edited * blend + bins[k] * (1.0 - blend);
+        }
+    }
+}
+
 impl SpectralModule for HarmonyModule {
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         self.rng_state   = 0xC0FFEE_u32;
@@ -477,7 +560,7 @@ impl SpectralModule for HarmonyModule {
             HarmonyMode::Chordification    => { /* TODO Task 11 */ }
             HarmonyMode::Undertone         => self.process_undertone(bins, curves, ctx),
             HarmonyMode::Companding        => { /* TODO Task 12 */ }
-            HarmonyMode::FormantRotation   => { /* TODO Task 9 */ }
+            HarmonyMode::FormantRotation   => self.process_formant_rotation(bins, curves, ctx),
             HarmonyMode::Lifter            => self.process_lifter(bins, curves, ctx),
             HarmonyMode::Inharmonic        => self.process_inharmonic(bins, curves, ctx),
             HarmonyMode::HarmonicGenerator => self.process_harmonic_generator(bins, curves, ctx),

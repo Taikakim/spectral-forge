@@ -333,3 +333,45 @@ fn lifter_mode_unity_when_curves_neutral() {
     }
     assert!(max_err < 0.10, "neutral lifter must preserve magnitude, max relative error {}", max_err);
 }
+
+#[test]
+fn formant_rotation_passthrough_when_coefficient_one() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::FormantRotation);
+
+    let n = 1025;
+    let mut bins: Vec<Complex<f32>> = (0..n)
+        .map(|k| Complex::from_polar(0.5 + 0.5 * (k as f32 * 0.05).sin().abs(), 0.0))
+        .collect();
+    let snapshot = bins.clone();
+
+    let mut cep_buf = CepstrumBuf::new(2048);
+    cep_buf.compute_from_bins(&bins);
+    let cep_owned: Vec<f32> = cep_buf.quefrency().to_vec();
+    let mut ctx = ctx_default();
+    ctx.cepstrum_buf = Some(&cep_owned);
+
+    let amount = vec![1.0_f32; n];
+    let threshold = vec![0.0_f32; n];
+    let stability = vec![0.0_f32; n];
+    let spread = vec![0.0_f32; n];
+    let coefficient = vec![1.0_f32; n]; // ratio = 1.0 = no rotation
+    let mix = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    let mut max_err = 0.0_f32;
+    for k in 1..n - 1 {
+        let err = (bins[k].norm() - snapshot[k].norm()).abs() / snapshot[k].norm().max(1e-6);
+        if err > max_err { max_err = err; }
+    }
+    assert!(max_err < 0.15, "ratio=1 must approximately passthrough, max err {}", max_err);
+}
