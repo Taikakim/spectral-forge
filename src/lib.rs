@@ -238,6 +238,16 @@ impl Plugin for SpectralForge {
     ) -> ProcessStatus {
         dsp::guard::flush_denormals();
         if let (Some(pipeline), Some(shared)) = (&mut self.pipeline, &mut self.shared) {
+            // Drain MIDI events before audio processing — the held-notes state used
+            // by the closure must reflect the start-of-block keyboard state.
+            // Sample-accurate per-hop note timing is deferred to v2 (see Phase 6 umbrella).
+            while let Some(event) = ctx.next_event() {
+                match event {
+                    NoteEvent::NoteOn { note, .. }  => pipeline.note_on(note),
+                    NoteEvent::NoteOff { note, .. } => pipeline.note_off(note),
+                    _ => {}
+                }
+            }
             pipeline.process(buffer, aux, shared, &self.params, ctx.transport());
         }
         ProcessStatus::Normal
