@@ -865,6 +865,7 @@ pub fn create_editor(
                                         ("Ground Loop",  ModulateMode::GroundLoop),
                                         ("Gravity",      ModulateMode::GravityPhaser),
                                         ("PLL Tear",     ModulateMode::PllTear),
+                                        ("FM Network",   ModulateMode::FmNetwork),
                                     ] {
                                         let is_active = cur_mode == mode;
                                         let fill     = if is_active { th::BORDER } else { th::BG };

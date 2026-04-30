@@ -684,3 +684,52 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
         }
     }
 }
+
+// ── Phase 6.6 Task 1 ───────────────────────────────────────────────────────
+
+#[test]
+fn fm_network_mode_passthrough_when_amount_zero() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut module = ModulateModule::new();
+    module.reset(48_000.0, 2048);
+    module.set_mode(ModulateMode::FmNetwork);
+
+    let num_bins = 1025;
+    let mut bins: Vec<Complex<f32>> =
+        (0..num_bins).map(|k| Complex::new((k as f32 * 0.07).sin(), (k as f32 * 0.07).cos())).collect();
+    let snapshot = bins.clone();
+
+    // AMOUNT=0 → stub must passthrough regardless of other curve values.
+    let zeros   = vec![0.0_f32; num_bins];
+    let neutral = vec![1.0_f32; num_bins];
+    let mix     = vec![2.0_f32; num_bins];
+    // curves: [AMOUNT, REACH, RATE, THRESH, AMPGATE, MIX]
+    let curves: Vec<&[f32]> = vec![&zeros, &neutral, &neutral, &neutral, &zeros, &mix];
+
+    let mut suppression = vec![0.0_f32; num_bins];
+    // ctx_default matches the helper used across other modulate tests.
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 0.5, false, false);
+
+    module.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut suppression, None, &ctx,
+    );
+
+    for k in 0..num_bins {
+        assert!(
+            (bins[k] - snapshot[k]).norm() < 1e-6,
+            "FmNetwork AMOUNT=0: bin {} drifted by {}",
+            k,
+            (bins[k] - snapshot[k]).norm()
+        );
+    }
+
+    // suppression must be finite and non-negative.
+    for s in &suppression {
+        assert!(s.is_finite() && *s >= 0.0, "suppression not finite/non-negative: {}", s);
+    }
+}

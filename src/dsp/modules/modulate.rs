@@ -552,11 +552,35 @@ fn unwrap_phase_local(unwrap_local: &mut [f32], prev_phase: &mut [f32], cur_phas
     prev_phase.copy_from_slice(cur_phase);
 }
 
+// ── FM Network kernel (Phase 6.6) ──────────────────────────────────────────
+
+/// FM Network stub — early-returns (passthrough) when AMOUNT curve is zero or
+/// when instantaneous-frequency data is unavailable.
+///
+/// Full implementation lands in Phase 6.6 Tasks 2–3. This stub satisfies the
+/// exhaustive match and the Task-1 passthrough contract test.
+///
+/// # Allocation contract
+/// No heap allocation. Early-return path touches no state.
+#[inline]
+fn process_fm_network(
+    _bins: &mut [num_complex::Complex<f32>],
+    curves: &[&[f32]],
+    instantaneous_freq: Option<&[f32]>,
+) {
+    // Guard 1: no IF data → passthrough (Pipeline hasn't enabled needs_instantaneous_freq yet).
+    if instantaneous_freq.is_none() { return; }
+    // Guard 2: AMOUNT=0 → no modulation → passthrough.
+    let amount = curves[0].first().copied().unwrap_or(0.0);
+    if amount == 0.0 { return; }
+    // TODO Phase 6.6 Tasks 2–3: partial detection + AM/sideband synthesis.
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
-/// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear.
-const MOD_HEAVY: [bool; 7] = [false, false, false, false, false, false, true /* [6] PllTear */];
+/// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear, FmNetwork.
+const MOD_HEAVY: [bool; 8] = [false, false, false, false, false, false, true /* [6] PllTear */, false /* [7] FmNetwork */];
 
 // ── PLL Tear constants ─────────────────────────────────────────────────────
 
@@ -578,6 +602,7 @@ pub enum ModulateMode {
     GroundLoop,
     GravityPhaser,
     PllTear,
+    FmNetwork,
 }
 
 impl Default for ModulateMode {
@@ -807,6 +832,9 @@ impl SpectralModule for ModulateModule {
                         "GravityPhaser requires Some(physics) — FxMatrix must supply it for writes_bin_physics modules");
                 }
             }
+            ModulateMode::FmNetwork => {
+                process_fm_network(bins, curves, ctx.instantaneous_freq);
+            }
             ModulateMode::PllTear => {
                 let num_bins = bins.len();
                 self.refresh_smoothed(channel, curves, num_bins);
@@ -885,6 +913,7 @@ impl SpectralModule for ModulateModule {
                     snap.mod_gp_repel         = Some(self.repel);
                     snap.mod_gp_sc_positioned = Some(self.sc_positioned);
                 }
+                ModulateMode::FmNetwork => {}
                 ModulateMode::PllTear => {
                     // Cap the iteration at the active `bins.len()` so the probe is
                     // resilient if pll_torn was pre-sized for a larger FFT and a
