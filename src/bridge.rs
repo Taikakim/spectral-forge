@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize}};
 use triple_buffer::{TripleBuffer, Input as TbInput, Output as TbOutput};
+use crate::dsp::modulation_ring::RingStateBank;
 
 pub const NUM_CURVES: usize = 7;
 pub const CURVE_THRESHOLD: usize = 0;
@@ -42,6 +43,10 @@ pub struct SharedState {
     pub sc_envelope_rx:   Arc<Mutex<TbOutput<Vec<f32>>>>,
 
     pub sample_rate: Arc<AtomicF32>,
+
+    /// Per-node modulation ring state. GUI writes on click; audio thread may
+    /// clone for RT-safe read (378-byte copy, no heap).
+    pub ring_states: Arc<Mutex<RingStateBank>>,
 }
 
 /// Wait-free f32 atomic using bit-casting.
@@ -101,6 +106,7 @@ impl SharedState {
             sc_envelope_tx,
             sc_envelope_rx: Arc::new(Mutex::new(sc_envelope_rx)),
             sample_rate: Arc::new(AtomicF32::new(sample_rate)),
+            ring_states: Arc::new(Mutex::new(RingStateBank::default())),
         }
     }
 }

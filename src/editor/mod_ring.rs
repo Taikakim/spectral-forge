@@ -14,7 +14,7 @@ pub enum ModRingToggle {
 }
 
 impl ModRingToggle {
-    fn bit(self) -> u8 {
+    pub fn bit(self) -> u8 {
         match self {
             ModRingToggle::SampleHold => 0b001,
             ModRingToggle::Sync16     => 0b010,
@@ -31,6 +31,9 @@ pub struct ModRingState {
 impl ModRingState {
     pub fn is_set(&self, t: ModRingToggle) -> bool { (self.flags & t.bit()) != 0 }
     pub fn toggle(&mut self, t: ModRingToggle)   { self.flags ^= t.bit(); }
+    pub fn set(&mut self, t: ModRingToggle)      { self.flags |= t.bit(); }
+    pub fn clear(&mut self, t: ModRingToggle)    { self.flags &= !t.bit(); }
+    pub fn is_empty(&self) -> bool               { self.flags == 0 }
     /// Phase 4 will replace the constant `false` with a runtime check
     /// (e.g. `bpm_available && plpv_phase_ready`).
     pub fn toggles_enabled(&self) -> bool { false }

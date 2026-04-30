@@ -1,4 +1,5 @@
 pub mod amp_modes;
+pub mod modulation_ring;
 pub mod chromagram;
 pub mod harmonic_groups;
 pub mod bin_physics;

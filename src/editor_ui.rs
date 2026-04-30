@@ -2,11 +2,11 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui};
 use parking_lot::Mutex;
 use triple_buffer::Input as TbInput;
-use std::collections::HashMap;
 use std::sync::{Arc, atomic::Ordering};
 use crate::params::SpectralForgeParams;
 use crate::editor::{curve as crv, spectrum_display as sd, theme as th};
-use crate::editor::mod_ring::{ModRingState, mod_ring_overlay};
+use crate::editor::mod_ring::{mod_ring_overlay};
+use crate::dsp::modulation_ring::{RingKey, RingStateBank};
 
 
 pub fn create_editor(
@@ -19,6 +19,7 @@ pub fn create_editor(
     sc_envelope_rx: Option<Arc<parking_lot::Mutex<triple_buffer::Output<Vec<f32>>>>>,
     sidechain_active: Option<Arc<std::sync::atomic::AtomicBool>>,
     reset_requested: Option<Arc<std::sync::atomic::AtomicBool>>,
+    ring_states: Option<Arc<Mutex<RingStateBank>>>,
     plugin_alive: std::sync::Weak<()>,
 ) -> Option<Box<dyn Editor>> {
     create_egui_editor(
@@ -565,16 +566,25 @@ pub fn create_editor(
                                 let anchor: Option<(egui::Pos2, usize, usize, usize)> =
                                     ui.ctx().data(|d| d.get_temp(egui::Id::new("mod_ring_anchor"))).flatten();
                                 if let Some((anchor_pos, ring_slot, ring_curve, ring_node)) = anchor {
-                                    let key = (ring_slot, ring_curve, ring_node);
-                                    let mut states: HashMap<(usize, usize, usize), ModRingState> =
-                                        ui.ctx().data(|d| d.get_temp(egui::Id::new("mod_ring_states"))).unwrap_or_default();
-                                    let mut state = *states.get(&key).unwrap_or(&ModRingState::default());
+                                    let ring_key = RingKey {
+                                        slot:  ring_slot  as u8,
+                                        curve: ring_curve as u8,
+                                        node:  ring_node  as u8,
+                                    };
+                                    // Read state from shared bank (lock scope: read only).
+                                    let state = if let Some(ref bank_arc) = ring_states {
+                                        bank_arc.lock().get(ring_key)
+                                    } else {
+                                        Default::default()
+                                    };
                                     let toggle_clicked = mod_ring_overlay(ui, anchor_pos, &state);
+                                    // Write on click (lock scope: write only, minimal duration).
                                     if let Some(t) = toggle_clicked {
-                                        state.toggle(t);
+                                        if let Some(ref bank_arc) = ring_states {
+                                            let was_set = state.is_set(t);
+                                            bank_arc.lock().set_toggle(ring_key, t, !was_set);
+                                        }
                                     }
-                                    states.insert(key, state);
-                                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("mod_ring_states"), states));
                                     // Close the ring when a click lands outside the overlay dots.
                                     // Note: egui's pointer.any_click() is NOT drained by per-widget
                                     // interact() calls — both a dot's clicked() and any_click() can
