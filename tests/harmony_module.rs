@@ -205,3 +205,38 @@ fn shuffler_mode_passes_through_when_amount_zero() {
         assert!((bins[k] - snapshot[k]).norm() < 1e-6);
     }
 }
+
+#[test]
+fn undertone_generator_adds_partials_below_loud_peak() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Undertone);
+
+    let n = 1025;
+    // Loud peak at bin 200 (≈ 4.7 kHz at 48k/2048).
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
+    bins[200] = Complex::new(1.0, 0.0);
+    let if_buf: Vec<f32> = (0..n).map(|k| (k as f32) * 48_000.0 / 2048.0).collect();
+    let ctx = ctx_with_if(&if_buf);
+
+    let amount = vec![1.0_f32; n];
+    let threshold = vec![0.5_f32; n];
+    let stability = vec![0.0_f32; n];
+    let spread = vec![1.0_f32; n];
+    let coefficient = vec![0.0_f32; n]; // hum disabled
+    let mix = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+    // Sub-octave at bin 100, sub-third at bin ~67, sub-fourth at bin 50.
+    assert!(bins[100].norm() > 0.05, "f/2 undertone missing at bin 100");
+    assert!(bins[67].norm() > 0.02 || bins[66].norm() > 0.02,
+            "f/3 undertone missing near bin 67");
+    assert!(bins[50].norm() > 0.01, "f/4 undertone missing at bin 50");
+}

@@ -115,6 +115,79 @@ impl HarmonyModule {
 }
 
 impl HarmonyModule {
+    fn process_undertone(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        use crate::dsp::modules::harmony_helpers::find_top_k_peaks;
+
+        let n = self.num_bins;
+        let amount      = curves.get(0).copied().unwrap_or(&[]);
+        let threshold   = curves.get(1).copied().unwrap_or(&[]);
+        let spread      = curves.get(3).copied().unwrap_or(&[]);
+        let coefficient = curves.get(4).copied().unwrap_or(&[]);
+        let mix         = curves.get(5).copied().unwrap_or(&[]);
+
+        for k in 0..n { self.scratch_mag[k] = bins[k].norm(); }
+        let thr_centre = threshold.get(n / 2).copied().unwrap_or(0.1);
+        let n_peaks = find_top_k_peaks(&self.scratch_mag[..n], thr_centre, &mut self.peaks_buf);
+
+        let bin_freq = ctx.sample_rate / ctx.fft_size as f32;
+        let nyquist  = ctx.sample_rate * 0.5;
+
+        // COEFFICIENT ∈ [0,2] → hum freq selector:
+        //   0.0–0.5 = off, 0.5–1.0 = 50Hz, 1.0–1.5 = 60Hz, 1.5–2.0 = 120Hz.
+        // The hum modulates the undertone amplitudes per partial.
+        let hum_centre = coefficient.get(n / 2).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+        let hum_hz = if      hum_centre < 0.5 { 0.0   }
+                     else if hum_centre < 1.0 { 50.0  }
+                     else if hum_centre < 1.5 { 60.0  }
+                     else                     { 120.0 };
+
+        for p in 0..n_peaks {
+            let pk = self.peaks_buf[p];
+            let f0 = match ctx.instantaneous_freq {
+                Some(if_buf) => if_buf.get(pk.bin).copied().unwrap_or(0.0),
+                None => (pk.bin as f32) * bin_freq,
+            };
+            if f0 <= 0.0 { continue; }
+
+            let amt = amount.get(pk.bin).copied().unwrap_or(0.0).clamp(0.0, 4.0);
+            if amt < 1e-9 { continue; }
+            let mix_v = mix.get(pk.bin).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            let s = spread.get(pk.bin).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+            let decay = 0.95 - 0.275 * s; // same shape as Harmonic Generator.
+            let phase = bins[pk.bin].arg();
+
+            // Hum amplitude weight: closer to a hum-multiple → higher weight.
+            // For the ground-loop hum, undertones near hum_hz get +30% boost.
+            let hum_weight = |freq: f32| -> f32 {
+                if hum_hz <= 0.0 || freq <= 0.0 { 1.0 }
+                else {
+                    let octaves_off = ((freq / hum_hz).log2()).abs().min(2.0);
+                    1.0 + 0.3 * (1.0 - octaves_off * 0.5).max(0.0)
+                }
+            };
+
+            let mut amp = pk.mag;
+            for div in 2..=8 {
+                amp *= decay;
+                let f_under = f0 / div as f32;
+                if f_under < 20.0 { break; }
+                if f_under >= nyquist { continue; }
+                let target_bin = (f_under / bin_freq + 0.5) as usize;
+                if target_bin == 0 || target_bin >= n - 1 { break; }
+                let w = hum_weight(f_under);
+                let added = Complex::from_polar(amp * amt * mix_v * w, phase);
+                bins[target_bin] += added;
+            }
+        }
+    }
+}
+
+impl HarmonyModule {
     fn process_harmonic_generator(
         &mut self,
         bins: &mut [Complex<f32>],
@@ -208,7 +281,7 @@ impl SpectralModule for HarmonyModule {
 
         match self.mode {
             HarmonyMode::Chordification    => { /* TODO Task 11 */ }
-            HarmonyMode::Undertone         => { /* TODO Task 6 */ }
+            HarmonyMode::Undertone         => self.process_undertone(bins, curves, ctx),
             HarmonyMode::Companding        => { /* TODO Task 12 */ }
             HarmonyMode::FormantRotation   => { /* TODO Task 9 */ }
             HarmonyMode::Lifter            => { /* TODO Task 10 */ }
