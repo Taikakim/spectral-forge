@@ -69,3 +69,15 @@ fn cepstrum_buf_reusable_across_calls_no_alloc() {
         assert!(cb.quefrency()[0].is_finite());
     }
 }
+
+use spectral_forge::dsp::pipeline::{Pipeline, FFT_SIZE};
+
+#[test]
+fn pipeline_does_not_panic_on_silent_input_with_no_cepstrum_consumer() {
+    let sr  = 48000.0_f32;
+    let fft = FFT_SIZE;
+    let mut slot_types = [ModuleType::Empty; 9];
+    slot_types[0] = ModuleType::Dynamics;
+    slot_types[8] = ModuleType::Master;
+    let _p = Pipeline::new(sr, 2, fft, &slot_types, 1.0);
+}
