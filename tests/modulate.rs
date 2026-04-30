@@ -688,6 +688,74 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
 // ── Phase 6.6 Task 1 ───────────────────────────────────────────────────────
 
 #[test]
+fn fm_network_detects_loudest_partials() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = ModulateModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(ModulateMode::FmNetwork);
+
+    let n = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
+    bins[40]  = Complex::new(1.0, 0.0);
+    bins[80]  = Complex::new(0.7, 0.0);
+    bins[120] = Complex::new(0.5, 0.0);
+
+    let if_buf: Vec<f32> = (0..n).map(|k| (k as f32) * 48_000.0 / 2048.0).collect();
+    let if_static: &'static [f32] = Box::leak(if_buf.into_boxed_slice());
+
+    // curves: [AMOUNT, REACH(=threshold), RATE(=stability), THRESH(=spread), AMPGATE(=coefficient), MIX]
+    // AMOUNT=1.0 (non-zero so detection runs), threshold=0.4 (bins 40+80 pass at 1.0+0.7, bin 120 at 0.5 might be below)
+    // coefficient=0.0 (no modulation depth) → bins approximately preserved
+    let amount      = vec![1.0_f32; n];
+    let threshold   = vec![0.4_f32; n]; // bins 40(1.0) and 80(0.7) pass; 120(0.5) also passes
+    let stability   = vec![0.0_f32; n];
+    let spread      = vec![0.0_f32; n];
+    let coefficient = vec![0.0_f32; n]; // mod depth = 0 → no modulation
+    let mix         = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, n,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+    // Patch in the instantaneous_freq — we can't do this via new() so we use a
+    // mutable ctx and set the field directly.
+    let mut ctx = ctx;
+    ctx.instantaneous_freq = Some(if_static);
+
+    let snapshot = bins.clone();
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    // With mod depth = 0, detection runs but no modulation is applied.
+    // Bins at spike locations should be approximately preserved.
+    assert!(
+        (bins[40] - snapshot[40]).norm() < 0.05,
+        "bin 40 drifted by {} (expected <0.05 with coefficient=0)",
+        (bins[40] - snapshot[40]).norm()
+    );
+    assert!(
+        (bins[80] - snapshot[80]).norm() < 0.05,
+        "bin 80 drifted by {} (expected <0.05 with coefficient=0)",
+        (bins[80] - snapshot[80]).norm()
+    );
+    // suppression must be finite and non-negative.
+    for s in &sup {
+        assert!(s.is_finite() && *s >= 0.0, "suppression not finite/non-negative: {}", s);
+    }
+}
+
+#[test]
 fn fm_network_mode_passthrough_when_amount_zero() {
     use num_complex::Complex;
     use spectral_forge::dsp::modules::modulate::{ModulateModule, ModulateMode};

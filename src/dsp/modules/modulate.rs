@@ -552,30 +552,6 @@ fn unwrap_phase_local(unwrap_local: &mut [f32], prev_phase: &mut [f32], cur_phas
     prev_phase.copy_from_slice(cur_phase);
 }
 
-// ── FM Network kernel (Phase 6.6) ──────────────────────────────────────────
-
-/// FM Network stub — early-returns (passthrough) when AMOUNT curve is zero or
-/// when instantaneous-frequency data is unavailable.
-///
-/// Full implementation lands in Phase 6.6 Tasks 2–3. This stub satisfies the
-/// exhaustive match and the Task-1 passthrough contract test.
-///
-/// # Allocation contract
-/// No heap allocation. Early-return path touches no state.
-#[inline]
-fn process_fm_network(
-    _bins: &mut [num_complex::Complex<f32>],
-    curves: &[&[f32]],
-    instantaneous_freq: Option<&[f32]>,
-) {
-    // Guard 1: no IF data → passthrough (Pipeline hasn't enabled needs_instantaneous_freq yet).
-    if instantaneous_freq.is_none() { return; }
-    // Guard 2: AMOUNT=0 → no modulation → passthrough.
-    let amount = curves[0].first().copied().unwrap_or(0.0);
-    if amount == 0.0 { return; }
-    // TODO Phase 6.6 Tasks 2–3: partial detection + AM/sideband synthesis.
-}
-
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
@@ -656,6 +632,16 @@ pub struct ModulateModule {
     unwrap_local: [Vec<f32>; 2],
     /// Per-channel xorshift32 RNG state for chaotic-noise emission on torn bins.
     tear_rng: [u32; 2],
+    // ── FM Network state (Phase 6.6) ──────────────────────────────────────
+    /// Scratch buffer for per-bin magnitudes — pre-allocated, sized to num_bins.
+    /// Reused each hop by `process_fm_network`; no allocation in the hot path.
+    scratch_mag: Vec<f32>,
+    /// Top-K peak records from the most recent FM Network detection pass.
+    fm_partials: [crate::dsp::modules::harmony_helpers::PeakRecord; 16],
+    /// Per-partial instantaneous frequency (Hz) cached from ctx.instantaneous_freq.
+    fm_partial_freq: [f32; 16],
+    /// Number of valid entries in `fm_partials` / `fm_partial_freq` after last detection.
+    fm_partial_count: usize,
     sample_rate: f32,
     fft_size: usize,
     #[cfg(any(test, feature = "probe"))]
@@ -687,6 +673,10 @@ impl ModulateModule {
             prev_phase_scratch: [Vec::new(), Vec::new()],
             unwrap_local:     [Vec::new(), Vec::new()],
             tear_rng:         [0xC0FFEE_u32, 0xBEEF_u32],
+            scratch_mag:      Vec::new(),
+            fm_partials:      [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 16],
+            fm_partial_freq:  [0.0; 16],
+            fm_partial_count: 0,
             sample_rate:  48_000.0,
             fft_size:     2048,
             #[cfg(any(test, feature = "probe"))]
@@ -749,6 +739,73 @@ impl ModulateModule {
             }
         }
         self.smoothed_primed[channel] = true;
+    }
+
+    // ── FM Network kernel (Phase 6.6) ──────────────────────────────────────
+
+    /// FM Network — stable-partial detection pass (Phase 6.6 Task 2).
+    ///
+    /// Finds up to 16 loudest spectral peaks above the REACH curve threshold,
+    /// caches their instantaneous frequencies, and stores detection results in
+    /// `self.fm_partial_*` for consumption by the Task-3 modulation pass.
+    ///
+    /// With AMPGATE (coefficient) = 0 the detection runs but no modulation is
+    /// applied, so bins pass through unmodified. This satisfies both the Task-1
+    /// passthrough contract and the Task-2 regression guard.
+    ///
+    /// # Allocation contract
+    /// No heap allocation. `self.scratch_mag` is pre-sized to at least `num_bins`
+    /// by `reset()`; the `resize` call below is a no-op if already at that size.
+    #[inline]
+    fn process_fm_network(
+        &mut self,
+        bins: &mut [num_complex::Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext<'_>,
+    ) {
+        use crate::dsp::modules::harmony_helpers::{find_top_k_peaks, PeakRecord};
+
+        let n = bins.len();
+
+        // Guard 1: AMOUNT=0 → passthrough (no detection, no modulation).
+        let amount = curves[0].first().copied().unwrap_or(0.0);
+        if amount < 1e-9 { return; }
+
+        // Guard 2: no IF data → passthrough (Pipeline hasn't enabled needs_instantaneous_freq yet).
+        let if_buf = match ctx.instantaneous_freq {
+            Some(b) if b.len() >= n => b,
+            _ => return,
+        };
+
+        // REACH curve (index 1) carries the magnitude threshold for partial detection.
+        let thr_centre = curves.get(1)
+            .and_then(|c| c.get(n / 2))
+            .copied()
+            .unwrap_or(0.1);
+
+        // Fill magnitude scratch — no allocation (Vec is pre-sized in reset()).
+        self.scratch_mag.resize(n, 0.0);
+        for k in 0..n {
+            self.scratch_mag[k] = bins[k].norm();
+        }
+
+        // Detect top-16 loudest peaks above threshold.
+        self.fm_partials.fill(PeakRecord::default());
+        let n_partials = find_top_k_peaks(
+            &self.scratch_mag[..n],
+            thr_centre,
+            &mut self.fm_partials,
+        );
+        self.fm_partial_count = n_partials;
+
+        // Cache per-partial instantaneous frequency from the IF buffer.
+        for p in 0..n_partials {
+            let bin = self.fm_partials[p].bin;
+            self.fm_partial_freq[p] = if_buf.get(bin).copied().unwrap_or(0.0);
+        }
+
+        // Task 3 wires the modulation pass here.
+        let _ = bins;
     }
 }
 
@@ -833,7 +890,7 @@ impl SpectralModule for ModulateModule {
                 }
             }
             ModulateMode::FmNetwork => {
-                process_fm_network(bins, curves, ctx.instantaneous_freq);
+                self.process_fm_network(bins, curves, ctx);
             }
             ModulateMode::PllTear => {
                 let num_bins = bins.len();
@@ -971,6 +1028,11 @@ impl SpectralModule for ModulateModule {
             self.tear_rng[ch] = 0xC0FFEE_u32 ^ (ch as u32 + 1).wrapping_mul(0xDEAD_BEEF_u32);
         }
         self.hop_count = [0; 2];
+        // FM Network scratch — resized once per reset; no-op if already at num_bins.
+        self.scratch_mag.resize(num_bins, 0.0);
+        self.fm_partials      = [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 16];
+        self.fm_partial_freq  = [0.0; 16];
+        self.fm_partial_count = 0;
         // self.mode is preserved across reset (user choice survives FFT-size change).
     }
 
