@@ -805,6 +805,11 @@ impl Pipeline {
         let any_needs_if = slot_types_snap.iter()
             .any(|&ty| crate::dsp::modules::module_spec(ty).needs_instantaneous_freq);
 
+        // Phase 6.4: same lazy-gate pattern as 6.1 IF — only run the extra
+        // inverse-FFT when at least one active slot's spec opts in.
+        let any_needs_cepstrum = slot_types_snap.iter()
+            .any(|&ty| crate::dsp::modules::module_spec(ty).needs_cepstrum);
+
         // Reborrow fields as locals so the closure can capture them without
         // conflicting with the &mut self.stft borrow inside process_overlap_add.
         let fft_plan  = self.fft_plan.clone();
@@ -830,6 +835,7 @@ impl Pipeline {
         let total_hops_ref           = &mut self.total_hops_per_ch;
         let if_buffer_ref            = &mut self.if_buffer;
         let if_prev_phase_ref        = &mut self.if_prev_phase;
+        let cepstrum_buf_ref         = &mut self.cepstrum_buf;
         let sample_rate              = self.sample_rate;
         let pending_hop_frames       = &mut self.pending_hop_frames;
         let mut pending_hops: usize  = 0;
@@ -969,6 +975,15 @@ impl Pipeline {
                 if_prev_phase_ref[ch][..num_bins]
                     .copy_from_slice(&scratch_curr_phase_ref[..num_bins]);
                 hop_ctx.instantaneous_freq = Some(&if_buffer_ref[ch][..num_bins]);
+            }
+
+            // Phase 6.4: per-hop cepstrum populate. Reads the FFT half-spectrum
+            // already in complex_buf, runs an inverse-real-FFT into per-channel
+            // cepstrum_buf, exposes the result via ctx.cepstrum_buf. Skipped
+            // entirely when no active module needs it.
+            if any_needs_cepstrum {
+                cepstrum_buf_ref[ch].compute_from_bins(&complex_buf[..num_bins]);
+                hop_ctx.cepstrum_buf = Some(cepstrum_buf_ref[ch].quefrency());
             }
 
             // Run all modules through the fx_matrix slot chain.
