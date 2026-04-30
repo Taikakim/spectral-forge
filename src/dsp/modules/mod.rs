@@ -692,7 +692,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: true,
-        needs_cepstrum: false,
+        // Lifter mode reads ctx.cepstrum_buf (Phase 6.5 Task 8). Flip to true so
+        // Pipeline lazy-computes cepstrum whenever a Harmony slot is active.
+        needs_cepstrum: true,
         needs_chromagram: false,
         needs_harmonic_groups: false,
     };

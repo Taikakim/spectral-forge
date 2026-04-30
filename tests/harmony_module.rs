@@ -5,6 +5,7 @@ use spectral_forge::dsp::modules::{
 };
 use spectral_forge::dsp::modules::harmony_helpers::{find_top_k_peaks, PeakRecord};
 use spectral_forge::dsp::modules::harmony::HarmonyInharmonicSubmode;
+use spectral_forge::dsp::cepstrum::CepstrumBuf;
 use spectral_forge::params::{FxChannelTarget, StereoLink};
 
 fn ctx_default<'a>() -> ModuleContext<'a> {
@@ -284,4 +285,51 @@ fn inharmonic_stiffness_shifts_high_partials_upward() {
         "original 5th-harmonic peak must be attenuated, got {} vs {}",
         bins[250].norm(), snapshot[250].norm(),
     );
+}
+
+#[test]
+fn lifter_mode_unity_when_curves_neutral() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Lifter);
+
+    let n = 1025;
+    // Construct a magnitude-rich spectrum to lift.
+    let mut bins: Vec<Complex<f32>> = (0..n)
+        .map(|k| Complex::from_polar(1.0 + 0.5 * (k as f32 * 0.1).sin().abs(), 0.0))
+        .collect();
+    let snapshot = bins.clone();
+
+    // Pre-compute cepstrum from the input. In production Pipeline does this; the test
+    // does it manually to exercise Lifter in isolation.
+    let mut cep_buf = CepstrumBuf::new(2048);
+    cep_buf.compute_from_bins(&bins);
+    let cep_owned: Vec<f32> = cep_buf.quefrency().to_vec();
+    let mut ctx = ctx_default();
+    ctx.cepstrum_buf = Some(&cep_owned);
+
+    // Curves: AMOUNT=1, all others neutral (1.0).
+    let amount      = vec![1.0_f32; n];
+    let threshold   = vec![0.0_f32; n];
+    let stability   = vec![0.0_f32; n];
+    let spread      = vec![1.0_f32; n];      // envelope curve at unity
+    let coefficient = vec![1.0_f32; n];      // pitch curve at unity
+    let mix         = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    // Round-trip cepstrum → spectrum should preserve magnitudes within ~10%.
+    let mut max_err = 0.0_f32;
+    for k in 1..n - 1 {
+        let err = (bins[k].norm() - snapshot[k].norm()).abs() / snapshot[k].norm().max(1e-6);
+        if err > max_err { max_err = err; }
+    }
+    assert!(max_err < 0.10, "neutral lifter must preserve magnitude, max relative error {}", max_err);
 }

@@ -1,5 +1,6 @@
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use crate::params::{FxChannelTarget, StereoLink};
 use super::{ModuleContext, ModuleType, SpectralModule};
 
@@ -38,6 +39,20 @@ pub struct HarmonyModule {
     rng_state:          u32,
     /// Pre-allocated peak buffer for HarmonicGenerator mode (K=5).
     peaks_buf:          [crate::dsp::modules::harmony_helpers::PeakRecord; 5],
+
+    // ── Lifter mode — cepstrum-domain envelope/pitch shaping (Phase 6.5 Task 8) ──
+    /// Forward real-FFT used by Lifter to round-trip edited cepstrum → log-magnitude.
+    /// `None` until `reset()` is called; Arc::clone is ref-count only (RT-safe).
+    fwd_fft:        Option<Arc<dyn realfft::RealToComplex<f32>>>,
+    /// Real-valued input buffer for the forward FFT (length = fft_size).
+    /// Written in-place with the edited cepstrum; realfft reads+scratches it.
+    fwd_input:      Vec<f32>,
+    /// Complex output of the forward FFT (length = num_bins).
+    fwd_output:     Vec<Complex<f32>>,
+    /// realfft internal scratch area (length = get_scratch_len()).
+    fwd_scratch:    Vec<Complex<f32>>,
+    /// Extracted .re values from fwd_output (length = num_bins): the edited log-magnitude.
+    log_mag_edited: Vec<f32>,
 }
 
 impl HarmonyModule {
@@ -52,6 +67,12 @@ impl HarmonyModule {
             scratch_out: Vec::new(),
             rng_state: 0xC0FFEE_u32,
             peaks_buf: [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5],
+            // Lifter fields — allocated in reset().
+            fwd_fft:        None,
+            fwd_input:      Vec::new(),
+            fwd_output:     Vec::new(),
+            fwd_scratch:    Vec::new(),
+            log_mag_edited: Vec::new(),
         }
     }
 
@@ -336,6 +357,80 @@ impl HarmonyModule {
     }
 }
 
+impl HarmonyModule {
+    /// Lifter mode: cepstrum-domain envelope/pitch shaping.
+    ///
+    /// Reads `ctx.cepstrum_buf` (Phase 6.4 lazy infra). Edits the cepstrum
+    /// by gating low-quefrency samples with SPREAD (envelope shaping) and
+    /// high-quefrency samples with COEFFICIENT (pitch shaping). Forward-FFTs
+    /// the edited cepstrum back to log-magnitude, exponentiates, and re-applies
+    /// with the original phase. Wet/dry blend by AMOUNT × MIX.
+    ///
+    /// RT-safe: uses pre-allocated `fwd_input`, `fwd_output`, `fwd_scratch`
+    /// buffers. `Arc::clone` on `fwd_fft` only increments a refcount — no heap.
+    fn process_lifter(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        let n = self.num_bins;
+        let cepstrum = match ctx.cepstrum_buf {
+            Some(c) if c.len() == self.fft_size => c,
+            _ => return, // Phase 6.4 not active or wrong size; passthrough.
+        };
+
+        let amount  = curves.get(0).copied().unwrap_or(&[]);
+        let spread  = curves.get(3).copied().unwrap_or(&[]); // envelope-quefrency gain
+        let coef    = curves.get(4).copied().unwrap_or(&[]); // pitch-quefrency gain
+        let mix     = curves.get(5).copied().unwrap_or(&[]);
+
+        let amt_centre = amount.get(n / 2).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        if amt_centre < 1e-9 { return; }
+
+        // Quefrency boundary: low-quefrency = first fft_size/8 samples (envelope),
+        // the rest (mirrored) = pitch. This is a coarse v1 split; future tasks can
+        // expose env_cutoff as a curve.
+        let env_cutoff = self.fft_size / 8;
+        // SPREAD and COEFFICIENT sampled at spectrum centre — scalar gains for v1.
+        let env_gain   = spread.get(n / 2).copied().unwrap_or(1.0).clamp(0.0, 4.0);
+        let pitch_gain = coef.get(n / 2).copied().unwrap_or(1.0).clamp(0.0, 4.0);
+
+        // Edit cepstrum into fwd_input directly — no clone of the Vec.
+        // qf is the folded quefrency index (symmetric for real signals).
+        for q in 0..self.fft_size {
+            let qf = if q <= self.fft_size / 2 { q } else { self.fft_size - q };
+            let g = if qf < env_cutoff { env_gain } else { pitch_gain };
+            self.fwd_input[q] = cepstrum[q] * g;
+        }
+
+        // Forward real-FFT → complex log-magnitude. Arc::clone = refcount bump only.
+        let fft = match self.fwd_fft.as_ref() { Some(f) => f.clone(), None => return };
+        let _ = fft.process_with_scratch(
+            &mut self.fwd_input,
+            &mut self.fwd_output,
+            &mut self.fwd_scratch,
+        );
+        // realfft inverse FFT (used by CepstrumBuf) does NOT normalize — it scales
+        // by fft_size. The forward FFT here undoes that, so we divide by fft_size to
+        // recover the original log-magnitude values.
+        let inv_n = 1.0 / self.fft_size as f32;
+        for k in 0..n {
+            self.log_mag_edited[k] = self.fwd_output[k].re * inv_n;
+        }
+
+        // Re-apply: target_mag = exp(log_mag_edited[k]); preserve original phase.
+        let mix_centre = mix.get(n / 2).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+        let blend = (amt_centre * mix_centre).clamp(0.0, 1.0);
+        for k in 0..n {
+            let target_mag = self.log_mag_edited[k].exp();
+            let phase = bins[k].arg();
+            let edited = Complex::from_polar(target_mag, phase);
+            bins[k] = edited * blend + bins[k] * (1.0 - blend);
+        }
+    }
+}
+
 impl SpectralModule for HarmonyModule {
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         self.rng_state   = 0xC0FFEE_u32;
@@ -345,6 +440,16 @@ impl SpectralModule for HarmonyModule {
         self.scratch_mag.resize(self.num_bins, 0.0);
         self.scratch_out.resize(self.num_bins, Complex::new(0.0, 0.0));
         self.peaks_buf   = [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5];
+
+        // Lifter: allocate forward real-FFT + scratch buffers (off the audio thread).
+        let mut planner = realfft::RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(fft_size);
+        let scratch_len = fwd.get_scratch_len();
+        self.fwd_input.resize(fft_size, 0.0);
+        self.fwd_output.resize(self.num_bins, Complex::new(0.0, 0.0));
+        self.fwd_scratch.resize(scratch_len, Complex::new(0.0, 0.0));
+        self.log_mag_edited.resize(self.num_bins, 0.0);
+        self.fwd_fft = Some(fwd);
     }
 
     fn process(
@@ -373,7 +478,7 @@ impl SpectralModule for HarmonyModule {
             HarmonyMode::Undertone         => self.process_undertone(bins, curves, ctx),
             HarmonyMode::Companding        => { /* TODO Task 12 */ }
             HarmonyMode::FormantRotation   => { /* TODO Task 9 */ }
-            HarmonyMode::Lifter            => { /* TODO Task 10 */ }
+            HarmonyMode::Lifter            => self.process_lifter(bins, curves, ctx),
             HarmonyMode::Inharmonic        => self.process_inharmonic(bins, curves, ctx),
             HarmonyMode::HarmonicGenerator => self.process_harmonic_generator(bins, curves, ctx),
             HarmonyMode::Shuffler          => self.process_shuffler(bins, curves),
