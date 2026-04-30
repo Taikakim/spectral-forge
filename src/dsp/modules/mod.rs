@@ -892,3 +892,4 @@ pub mod past;
 pub mod kinetics;
 pub mod harmony;
 pub use harmony::{HarmonyMode, HarmonyInharmonicSubmode, HarmonyModule};
+pub mod harmony_helpers;
