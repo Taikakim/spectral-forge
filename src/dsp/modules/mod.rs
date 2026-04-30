@@ -620,7 +620,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         wants_sidechain: true,
         panel_widget: None,
         writes_bin_physics: true,
-        needs_instantaneous_freq: false,
+        needs_instantaneous_freq: true,
         needs_cepstrum: false,
         needs_chromagram: false,
         needs_harmonic_groups: false,

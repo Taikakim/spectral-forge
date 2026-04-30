@@ -802,6 +802,18 @@ fn fm_network_mode_passthrough_when_amount_zero() {
     }
 }
 
+// ── Phase 6.6 Task 4 ───────────────────────────────────────────────────────
+
+#[test]
+fn modulate_module_spec_declares_needs_instantaneous_freq() {
+    use spectral_forge::dsp::modules::{ModuleType, module_spec};
+    let spec = module_spec(ModuleType::Modulate);
+    assert!(
+        spec.needs_instantaneous_freq,
+        "Modulate must opt into IF compute for FmNetwork mode (Phase 6.6)",
+    );
+}
+
 // ── Phase 6.6 Task 3 ───────────────────────────────────────────────────────
 
 #[test]

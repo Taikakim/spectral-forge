@@ -113,7 +113,7 @@ fn only_approved_modules_declare_needs_if() {
             | Geometry | Modulate | Circuit | Life | Past | Kinetics | Harmony | Master => (),
         };
         let spec = module_spec(ty);
-        let approved_for_if = matches!(ty, Harmony);
+        let approved_for_if = matches!(ty, Harmony | Modulate);
         if approved_for_if {
             assert!(spec.needs_instantaneous_freq,
                 "{:?} is approved for IF but spec has needs_instantaneous_freq=false", ty);
