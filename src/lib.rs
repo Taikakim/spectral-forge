@@ -74,6 +74,7 @@ impl Plugin for SpectralForge {
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
         // Layout 0: stereo with 1 aux stereo sidechain input
         AudioIOLayout {
