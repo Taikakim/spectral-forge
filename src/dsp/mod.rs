@@ -1,5 +1,6 @@
 pub mod amp_modes;
 pub mod bin_physics;
+pub mod cepstrum;
 pub mod guard;
 pub mod history_buffer;
 pub mod instantaneous_freq;
