@@ -39,6 +39,9 @@ pub struct HarmonyModule {
     rng_state:          u32,
     /// Pre-allocated peak buffer for HarmonicGenerator mode (K=5).
     peaks_buf:          [crate::dsp::modules::harmony_helpers::PeakRecord; 5],
+    /// Per-bin classification scratch for Companding mode (Phase 6.5 Task 11).
+    /// 0 = inharmonic, 1 = fundamental, 2 = harmonic overtone.
+    class_buf:          Vec<u8>,
 
     // ── Lifter mode — cepstrum-domain envelope/pitch shaping (Phase 6.5 Task 8) ──
     /// Forward real-FFT used by Lifter to round-trip edited cepstrum → log-magnitude.
@@ -67,6 +70,7 @@ impl HarmonyModule {
             scratch_out: Vec::new(),
             rng_state: 0xC0FFEE_u32,
             peaks_buf: [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5],
+            class_buf:      Vec::new(),
             // Lifter fields — allocated in reset().
             fwd_fft:        None,
             fwd_input:      Vec::new(),
@@ -583,6 +587,67 @@ impl HarmonyModule {
     }
 }
 
+impl HarmonyModule {
+    /// Companding mode: classify bins as fundamental / harmonic overtone / inharmonic via
+    /// ctx.harmonic_groups, then attenuate harmonic-class bins by COEFFICIENT.
+    ///
+    /// RT-safe: uses pre-allocated `class_buf` scratch (sized in reset()). Iterates the
+    /// `groups` slice borrow — no allocation.
+    fn process_companding(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+        ctx: &ModuleContext,
+    ) {
+        let n = self.num_bins;
+        let groups = match ctx.harmonic_groups {
+            Some(g) => g,
+            None => return,
+        };
+
+        // Clear classification scratch.
+        for c in self.class_buf.iter_mut() { *c = 0; }
+
+        // Classify bins from harmonic-group detector output.
+        // class 1 = fundamental bin, class 2 = harmonic overtone bin.
+        for g in groups {
+            if g.harmonic_count == 0 { continue; }
+            let f_bin = g.harmonic_bins[0] as usize;
+            if f_bin < n { self.class_buf[f_bin] = 1; }
+            for hi in 1..(g.harmonic_count as usize).min(g.harmonic_bins.len()) {
+                let hb = g.harmonic_bins[hi] as usize;
+                if hb < n && self.class_buf[hb] == 0 {
+                    self.class_buf[hb] = 2;
+                }
+            }
+        }
+
+        let amount      = curves.get(0).copied().unwrap_or(&[]);
+        let coefficient = curves.get(4).copied().unwrap_or(&[]);
+        let mix         = curves.get(5).copied().unwrap_or(&[]);
+
+        // COEFFICIENT sampled at centre bin in [0,2].
+        // Max 25% attenuation for harmonics, 10% for fundamentals.
+        let coef_centre = coefficient.get(n / 2).copied().unwrap_or(0.0).clamp(0.0, 2.0);
+        let harm_attn = 0.25 * coef_centre;
+        let fund_attn = 0.10 * coef_centre;
+
+        for k in 0..n {
+            let amt = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            if amt < 1e-9 { continue; }
+            let attn = match self.class_buf[k] {
+                1 => fund_attn,
+                2 => harm_attn,
+                _ => 0.0,
+            };
+            if attn < 1e-9 { continue; }
+            let mix_v = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            let factor = 1.0 - attn * amt * mix_v;
+            bins[k] = bins[k] * factor;
+        }
+    }
+}
+
 impl SpectralModule for HarmonyModule {
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
         self.rng_state   = 0xC0FFEE_u32;
@@ -592,6 +657,8 @@ impl SpectralModule for HarmonyModule {
         self.scratch_mag.resize(self.num_bins, 0.0);
         self.scratch_out.resize(self.num_bins, Complex::new(0.0, 0.0));
         self.peaks_buf   = [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5];
+        // Companding (Phase 6.5 Task 11): pre-size per-bin classification scratch.
+        self.class_buf.resize(self.num_bins, 0);
 
         // Lifter: allocate forward real-FFT + scratch buffers (off the audio thread).
         let mut planner = realfft::RealFftPlanner::<f32>::new();
@@ -628,7 +695,7 @@ impl SpectralModule for HarmonyModule {
         match self.mode {
             HarmonyMode::Chordification    => self.process_chordification(bins, curves, ctx),
             HarmonyMode::Undertone         => self.process_undertone(bins, curves, ctx),
-            HarmonyMode::Companding        => { /* TODO Task 12 */ }
+            HarmonyMode::Companding        => self.process_companding(bins, curves, ctx),
             HarmonyMode::FormantRotation   => self.process_formant_rotation(bins, curves, ctx),
             HarmonyMode::Lifter            => self.process_lifter(bins, curves, ctx),
             HarmonyMode::Inharmonic        => self.process_inharmonic(bins, curves, ctx),

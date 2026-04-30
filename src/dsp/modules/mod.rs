@@ -698,7 +698,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // Chordification mode reads ctx.chromagram (Phase 6.5 Task 10). Flip to true so
         // Pipeline lazy-computes the chromagram whenever a Harmony slot is active.
         needs_chromagram: true,
-        needs_harmonic_groups: false,
+        // Companding reads ctx.harmonic_groups (Phase 6.5 Task 11).
+        needs_harmonic_groups: true,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",

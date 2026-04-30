@@ -3,6 +3,7 @@ use spectral_forge::dsp::modules::{
     create_module, ModuleContext, ModuleType, SpectralModule,
     HarmonyModule, HarmonyMode,
 };
+use spectral_forge::dsp::harmonic_groups::HarmonicGroup;
 use spectral_forge::dsp::modules::harmony_helpers::{find_top_k_peaks, PeakRecord, best_chord_template};
 use spectral_forge::dsp::modules::harmony::HarmonyInharmonicSubmode;
 use spectral_forge::dsp::cepstrum::CepstrumBuf;
@@ -437,4 +438,55 @@ fn chordification_snaps_off_chord_partial_toward_chord_tone() {
     // The original bin should be reduced; some bin in the C/E/G class above
     // it should be increased.
     assert!(bins[40].norm() < 0.99, "off-chord partial must be attenuated, got {}", bins[40].norm());
+}
+
+#[test]
+fn companding_attenuates_harmonic_class_when_coefficient_high() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Companding);
+
+    let n = 1025;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.01, 0.0); n];
+    bins[50]  = Complex::new(1.0, 0.0);
+    bins[100] = Complex::new(0.5, 0.0);
+    bins[333] = Complex::new(0.7, 0.0);
+
+    let snapshot = bins.clone();
+
+    let groups_arr: [HarmonicGroup; 1] = [HarmonicGroup {
+        fundamental_hz:  50.0 * 48_000.0 / 2048.0,
+        harmonic_count:  2,
+        harmonic_bins:   { let mut b = [0u16; 16]; b[0] = 50; b[1] = 100; b },
+        total_magnitude: 1.5,
+    }];
+    let mut ctx = ctx_default();
+    ctx.harmonic_groups = Some(&groups_arr);
+
+    let amount      = vec![1.0_f32; n];
+    let threshold   = vec![0.0_f32; n];
+    let stability   = vec![0.0_f32; n];
+    let spread      = vec![0.0_f32; n];
+    let coefficient = vec![2.0_f32; n];
+    let mix         = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    assert!(
+        bins[100].norm() < snapshot[100].norm() * 0.95,
+        "harmonic bin 100 must be attenuated, got {} vs {}",
+        bins[100].norm(), snapshot[100].norm(),
+    );
+    assert!(
+        (bins[333].norm() - snapshot[333].norm()).abs() < 1e-3,
+        "inharmonic bin 333 must be untouched, got {} vs {}",
+        bins[333].norm(), snapshot[333].norm(),
+    );
 }
