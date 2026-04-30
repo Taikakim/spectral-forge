@@ -801,3 +801,69 @@ fn fm_network_mode_passthrough_when_amount_zero() {
         assert!(s.is_finite() && *s >= 0.0, "suppression not finite/non-negative: {}", s);
     }
 }
+
+// ── Phase 6.6 Task 3 ───────────────────────────────────────────────────────
+
+#[test]
+fn fm_network_emits_sidebands_when_coefficient_nonzero() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = ModulateModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(ModulateMode::FmNetwork);
+
+    let n = 1025;
+    // Two partials: bin 100 (carrier, magnitude 1.0), bin 50 (modulator, magnitude 0.5).
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); n];
+    bins[100] = Complex::new(1.0, 0.0);
+    bins[50]  = Complex::new(0.5, 0.0);
+    let snapshot = bins.clone();
+
+    // IF buffer: bin k → frequency k * sample_rate / fft_size.
+    // bin 100 → 100 * 48000 / 2048 ≈ 2343.75 Hz
+    // bin 50  →  50 * 48000 / 2048 ≈ 1171.875 Hz
+    // upper sideband: (2343.75 + 1171.875) / (48000/2048) = 150.0 → bin 150
+    let if_buf: Vec<f32> = (0..n).map(|k| (k as f32) * 48_000.0 / 2048.0).collect();
+    let if_static: &'static [f32] = Box::leak(if_buf.into_boxed_slice());
+
+    // curves: [AMOUNT, REACH(=threshold), RATE(=stability), THRESH(=spread), AMPGATE(=coefficient), MIX]
+    let amount      = vec![1.0_f32; n];
+    let threshold   = vec![0.4_f32; n]; // both bins 50 (0.5) and 100 (1.0) pass
+    let stability   = vec![0.0_f32; n];
+    let spread      = vec![0.0_f32; n];
+    let coefficient = vec![1.0_f32; n]; // full modulation depth
+    let mix         = vec![1.0_f32; n];
+    let curves: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0_f32; n];
+
+    let ctx = ModuleContext::new(
+        48_000.0, 2048, n,
+        10.0, 100.0, 1.0,
+        0.5, false, false,
+    );
+    let mut ctx = ctx;
+    ctx.instantaneous_freq = Some(if_static);
+
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut sup, None, &ctx,
+    );
+
+    // Upper sideband at bin 150 (carrier_bin + modulator_bin = 100 + 50).
+    assert!(
+        bins[150].norm() > 0.05,
+        "upper sideband at bin 150 missing, got {}",
+        bins[150].norm(),
+    );
+    // Carrier at bin 100 must be modulated (changed from snapshot).
+    assert!(
+        (bins[100] - snapshot[100]).norm() > 0.01,
+        "carrier at bin 100 must be modulated, delta {}",
+        (bins[100] - snapshot[100]).norm(),
+    );
+}

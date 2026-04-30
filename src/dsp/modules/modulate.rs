@@ -804,8 +804,50 @@ impl ModulateModule {
             self.fm_partial_freq[p] = if_buf.get(bin).copied().unwrap_or(0.0);
         }
 
-        // Task 3 wires the modulation pass here.
-        let _ = bins;
+        // ── Task 3: partial-pair AM modulation + sideband emission ────────────
+
+        let coefficient = curves.get(4).copied().unwrap_or(&[]);
+        let mix_curve   = curves.get(5).copied().unwrap_or(&[]);
+        let bin_freq    = ctx.sample_rate / ctx.fft_size as f32;
+
+        if self.fm_partial_count < 2 { return; }
+
+        let count = self.fm_partial_count;
+        for i in 0..count {
+            let j = (i + 1) % count;
+            let carrier   = self.fm_partials[i];
+            let modulator = self.fm_partials[j];
+            if carrier.bin == modulator.bin { continue; }
+
+            let depth = coefficient.get(carrier.bin).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 0.5;
+            let mix_v = mix_curve.get(carrier.bin).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+
+            let mod_freq     = self.fm_partial_freq[j];
+            let carrier_freq = self.fm_partial_freq[i];
+            if carrier_freq <= 0.0 || mod_freq <= 0.0 { continue; }
+
+            let carrier_phase = bins[carrier.bin].arg();
+            let mod_phase     = bins[modulator.bin].arg();
+
+            // AM-modulate carrier amplitude using modulator's magnitude × depth.
+            let am_factor = 1.0 + depth * modulator.mag * mod_phase.cos();
+            let new_carrier_mag = carrier.mag * am_factor.max(0.0);
+            let new_carrier = Complex::from_polar(new_carrier_mag, carrier_phase);
+            bins[carrier.bin] = bins[carrier.bin] * (1.0 - mix_v) + new_carrier * mix_v;
+
+            // Emit sidebands at carrier ± modulator frequencies.
+            let upper_freq = carrier_freq + mod_freq;
+            let lower_freq = (carrier_freq - mod_freq).abs();
+            let upper_bin = (upper_freq / bin_freq + 0.5) as usize;
+            let lower_bin = (lower_freq / bin_freq + 0.5) as usize;
+            let sb_mag = depth * carrier.mag * modulator.mag * 0.5 * mix_v;
+            if upper_bin > 0 && upper_bin < bins.len() {
+                bins[upper_bin] += Complex::from_polar(sb_mag, carrier_phase);
+            }
+            if lower_bin > 0 && lower_bin < bins.len() && lower_bin != carrier.bin {
+                bins[lower_bin] += Complex::from_polar(sb_mag, carrier_phase);
+            }
+        }
     }
 }
 
