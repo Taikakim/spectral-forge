@@ -82,6 +82,24 @@ impl RingStateBank {
     }
 }
 
+// ─── Sync 1/16 tick math ─────────────────────────────────────────────────────
+
+/// Returns true if a tick boundary at `period` beats was crossed between
+/// `last_beat` (inclusive) and `current_beat` (exclusive).
+///
+/// Conventions:
+/// - `last_beat < 0.0` is the sentinel "never latched"; always returns true so
+///   the first block latches.
+/// - If `current_beat < last_beat`, the host transport looped — treat as a cross.
+#[inline]
+pub fn crossed_tick_at_beat(last_beat: f32, current_beat: f32, period: f32) -> bool {
+    if last_beat < 0.0          { return true; }
+    if current_beat < last_beat { return true; }
+    let last_tick    = (last_beat    / period).floor();
+    let current_tick = (current_beat / period).floor();
+    current_tick > last_tick
+}
+
 // ─── Audio-thread ring transform state ───────────────────────────────────────
 
 /// Per-key audio-thread state for the modulation ring transform.

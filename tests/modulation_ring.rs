@@ -1,4 +1,4 @@
-use spectral_forge::dsp::modulation_ring::{RingKey, RingStateBank, RingTransformState, RING_KEY_COUNT};
+use spectral_forge::dsp::modulation_ring::{crossed_tick_at_beat, RingKey, RingStateBank, RingTransformState, RING_KEY_COUNT};
 use spectral_forge::editor::mod_ring::ModRingToggle;
 
 /// The bank must start with all entries empty (all flags zero).
@@ -80,4 +80,32 @@ fn ring_transform_state_default_is_unlatched() {
     assert!(!s.is_latched());
     assert_eq!(s.latched_value(), 0.0);
     assert_eq!(s.last_latch_beat(), -1.0);
+}
+
+// ─── Sync 1/16 tick math ─────────────────────────────────────────────────────
+
+#[test]
+fn sync_16_tick_math_no_cross() {
+    // 16th-note period = 0.25 beats.
+    // last_beat = 1.0, current_beat = 1.20 → no boundary crossed.
+    assert!(!crossed_tick_at_beat(1.0, 1.20, 0.25));
+}
+
+#[test]
+fn sync_16_tick_math_cross_one() {
+    // last = 1.0, current = 1.30 → crossed 1.25.
+    assert!(crossed_tick_at_beat(1.0, 1.30, 0.25));
+}
+
+#[test]
+fn sync_16_tick_math_first_block_treats_as_cross() {
+    // last_beat = -1.0 (never latched) ⇒ first valid block always crosses.
+    assert!(crossed_tick_at_beat(-1.0, 0.5, 0.25));
+}
+
+#[test]
+fn sync_16_tick_math_handles_loop_wrap() {
+    // Bitwig loops: last_beat = 3.95 (end of bar), current_beat = 0.05 (next bar start).
+    // Treat any backward jump as a cross.
+    assert!(crossed_tick_at_beat(3.95, 0.05, 0.25));
 }
