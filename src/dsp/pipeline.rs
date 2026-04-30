@@ -125,6 +125,11 @@ pub struct Pipeline {
     /// Previous-frame wrapped phase used by `compute_instantaneous_freq`. Independent of
     /// PLPV's `prev_phase`. Sized at MAX_NUM_BINS. Zeroed by both `clear_state()` and `reset()`.
     if_prev_phase: Vec<Vec<f32>>,
+    /// Per-channel cepstrum scratch + output. Allocated at construction;
+    /// resized on `reset()` if the FFT size changed. Only `compute_from_bins`-d
+    /// inside the hop closure when at least one active slot declares
+    /// `needs_cepstrum`. Phase 6.4 lazy infra.
+    cepstrum_buf: Vec<crate::dsp::cepstrum::CepstrumBuf>,
     /// MIDI state mirrored from `lib.rs::process()`. Updated before each block,
     /// read inside the hop closure to populate ModuleContext.
     held_notes:         [bool; crate::dsp::midi::NUM_MIDI_NOTES],
@@ -203,6 +208,11 @@ impl Pipeline {
         let if_buffer:     Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
         let if_prev_phase: Vec<Vec<f32>> = (0..2).map(|_| vec![0.0f32; MAX_NUM_BINS]).collect();
 
+        let cepstrum_buf: Vec<crate::dsp::cepstrum::CepstrumBuf> =
+            (0..num_channels)
+                .map(|_| crate::dsp::cepstrum::CepstrumBuf::new(fft_size))
+                .collect();
+
         Self {
             stft: StftHelper::new(num_channels, fft_size, 0),
             fft_plan,
@@ -236,6 +246,7 @@ impl Pipeline {
             if_offset_buf,
             if_buffer,
             if_prev_phase,
+            cepstrum_buf,
             held_notes:         [false; crate::dsp::midi::NUM_MIDI_NOTES],
             held_pitch_classes: [false; crate::dsp::midi::NUM_PITCH_CLASSES],
             sample_rate,
@@ -341,6 +352,14 @@ impl Pipeline {
         for v in &mut self.if_offset_buf { *v = 0.0; }
         for v in &mut self.if_buffer     { v.fill(0.0); }
         for v in &mut self.if_prev_phase { v.fill(0.0); }
+        // FFT size or channel count may have changed — match num_channels and resize each.
+        self.cepstrum_buf.resize_with(
+            num_channels,
+            || crate::dsp::cepstrum::CepstrumBuf::new(self.fft_size),
+        );
+        for cb in self.cepstrum_buf.iter_mut() {
+            cb.resize(self.fft_size);
+        }
         crate::dsp::midi::clear_midi_state(&mut self.held_notes, &mut self.held_pitch_classes);
         // History Buffer: rebuild if the depth changed; otherwise reset in place.
         let new_capacity = {
