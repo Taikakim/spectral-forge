@@ -166,3 +166,45 @@ impl RingTransformState {
         if self.prev_out_value.is_nan() { 0.0 } else { self.prev_out_value }
     }
 }
+
+// ─── apply_ring: per-block ring transform kernel ──────────────────────────────
+
+/// Arguments for a single `apply_ring` call covering one audio block.
+#[derive(Clone, Copy)]
+pub struct RingApplyArgs {
+    /// The toggle flags for this (slot, curve, node) triple.
+    pub ring:          ModRingState,
+    /// The raw (pre-ring) parameter value for this block.
+    pub input_value:   f32,
+    /// The host transport position at the start of this block, in beats.
+    pub current_beat:  f32,
+    /// Number of samples in this block.
+    pub block_samples: usize,
+}
+
+/// Apply ring modulators to a single parameter for one audio block.
+///
+/// Mutates `state` in place; writes the per-sample output to `out[..args.block_samples]`.
+/// Allocation-free — safe to call from the audio thread.
+pub fn apply_ring(state: &mut RingTransformState, args: RingApplyArgs, out: &mut [f32]) {
+    let n    = args.block_samples.min(out.len());
+    let sh   = args.ring.is_set(ModRingToggle::SampleHold);
+    let sync = args.ring.is_set(ModRingToggle::Sync16);
+
+    let period = if sync { 0.25 } else { 1.0 };
+
+    let should_latch = if !sh {
+        true // pass-through: always re-latch the input
+    } else {
+        crossed_tick_at_beat(state.last_latch_beat(), args.current_beat, period)
+    };
+
+    if should_latch {
+        state.set_latched(args.input_value, args.current_beat);
+    }
+
+    let target = state.latched_value();
+    // Legato interpolation will land in Task 5 — for now, fill with held value.
+    for i in 0..n { out[i] = target; }
+    state.set_prev_out(target);
+}

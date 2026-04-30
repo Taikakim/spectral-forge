@@ -1,5 +1,8 @@
-use spectral_forge::dsp::modulation_ring::{crossed_tick_at_beat, RingKey, RingStateBank, RingTransformState, RING_KEY_COUNT};
-use spectral_forge::editor::mod_ring::ModRingToggle;
+use spectral_forge::dsp::modulation_ring::{
+    apply_ring, crossed_tick_at_beat, RingApplyArgs, RingKey, RingStateBank, RingTransformState,
+    RING_KEY_COUNT,
+};
+use spectral_forge::editor::mod_ring::{ModRingState, ModRingToggle};
 
 /// The bank must start with all entries empty (all flags zero).
 #[test]
@@ -80,6 +83,77 @@ fn ring_transform_state_default_is_unlatched() {
     assert!(!s.is_latched());
     assert_eq!(s.latched_value(), 0.0);
     assert_eq!(s.last_latch_beat(), -1.0);
+}
+
+// ─── apply_ring tests ─────────────────────────────────────────────────────────
+
+/// With S/H on and Sync16 off, the first block (unlatched state) latches the
+/// input value and holds it across all 64 samples. A second call whose beat
+/// does not cross a quarter-note boundary must not update the latched value.
+#[test]
+fn sample_hold_latches_first_value_holds_until_next_tick() {
+    let mut state = RingTransformState::default();
+
+    // Build a ring state with SampleHold set, Sync16 clear.
+    let mut ring = ModRingState::default();
+    ring.set(ModRingToggle::SampleHold);
+
+    // First block: beat 0.0, input 0.5.
+    let args0 = RingApplyArgs {
+        ring,
+        input_value:   0.5,
+        current_beat:  0.0,
+        block_samples: 64,
+    };
+    let mut out0 = [0.0_f32; 64];
+    apply_ring(&mut state, args0, &mut out0);
+    assert_eq!(out0[0],  0.5, "first sample should be the latched value");
+    assert_eq!(out0[63], 0.5, "last sample should also be the latched value");
+
+    // Second block: beat moves to 0.10 (period = 1.0 beat, no tick crossed).
+    // Input changes to 0.9, but the held value should remain 0.5.
+    let args1 = RingApplyArgs {
+        ring,
+        input_value:   0.9,
+        current_beat:  0.10,
+        block_samples: 64,
+    };
+    let mut out1 = [0.0_f32; 64];
+    apply_ring(&mut state, args1, &mut out1);
+    assert_eq!(out1[0],  0.5, "value must remain held (no tick crossed)");
+    assert_eq!(out1[63], 0.5, "value must remain held across all samples");
+}
+
+/// With no toggles set, `apply_ring` is a pure pass-through: every sample
+/// equals `input_value` and the state latches on every call.
+#[test]
+fn no_toggles_means_pure_passthrough() {
+    let mut state = RingTransformState::default();
+    let ring = ModRingState::default(); // all toggles off
+
+    // First call: input 0.3.
+    let args0 = RingApplyArgs {
+        ring,
+        input_value:   0.3,
+        current_beat:  0.0,
+        block_samples: 64,
+    };
+    let mut out0 = [0.0_f32; 64];
+    apply_ring(&mut state, args0, &mut out0);
+    assert_eq!(out0[0],  0.3);
+    assert_eq!(out0[63], 0.3);
+
+    // Second call: input changes to 0.7.  No S/H → value is immediately passed through.
+    let args1 = RingApplyArgs {
+        ring,
+        input_value:   0.7,
+        current_beat:  0.10,
+        block_samples: 64,
+    };
+    let mut out1 = [0.0_f32; 64];
+    apply_ring(&mut state, args1, &mut out1);
+    assert_eq!(out1[0],  0.7, "without S/H, new input must pass through immediately");
+    assert_eq!(out1[63], 0.7);
 }
 
 // ─── Sync 1/16 tick math ─────────────────────────────────────────────────────
