@@ -488,6 +488,60 @@ impl Pipeline {
             }
         }
 
+        // ── Apply modulation ring transforms to slot_curve_cache ──
+        // Snap the GUI-side ring state bank (a 378-byte memcpy — RT-safe).
+        // If the lock is contended this block, we skip gracefully (no transform applied).
+        let ring_snapshot = shared.ring_states
+            .try_lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+
+        // Only pay the per-key cost if any ring is active.
+        if ring_snapshot.entry_count() > 0 {
+            let current_beat = transport.pos_beats().unwrap_or(0.0) as f32;
+            let block_samples_usize = buffer.samples().max(1).min(256);
+            let mut ring_out = [0.0_f32; 256];
+
+            for (key, ring_state) in ring_snapshot.iter() {
+                let s = key.slot  as usize;
+                let c = key.curve as usize;
+                let n = key.node  as usize;
+                if s >= 9 || c >= 7 || n >= 6 { continue; }
+
+                // Read the live node Y from params. Skip gracefully if lock is contended.
+                let live_y = match params.slot_curve_nodes.try_lock() {
+                    Some(nodes) => nodes[s][c][n].y,
+                    None => continue,
+                };
+
+                // If live_y is near zero the ring has no meaningful scale effect — skip.
+                if live_y.abs() < 0.05 { continue; }
+
+                let tf_state = &mut self.ring_transforms[
+                    crate::dsp::modulation_ring::RingStateBank::key_index(key)
+                ];
+                crate::dsp::modulation_ring::apply_ring(
+                    tf_state,
+                    crate::dsp::modulation_ring::RingApplyArgs {
+                        ring:          ring_state,
+                        input_value:   live_y,
+                        current_beat,
+                        block_samples: block_samples_usize,
+                    },
+                    &mut ring_out[..block_samples_usize],
+                );
+
+                // Use the final sample as the "target" scaled Y for this block.
+                let latched_y = ring_out[block_samples_usize - 1];
+                let scale = (latched_y / live_y).clamp(0.1, 10.0);
+                if (scale - 1.0).abs() < 1e-6 { continue; }
+
+                for v in self.slot_curve_cache[s][c].iter_mut() {
+                    *v *= scale;
+                }
+            }
+        }
+
         // ── Process single stereo sidechain input ──
         let mut sc_active = false;
         {
