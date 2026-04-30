@@ -34,6 +34,7 @@ pub enum ModuleType {
     Life,
     Past,
     Kinetics,
+    Harmony,
     Master,
 }
 
@@ -680,6 +681,21 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
     };
+    static HARM2: ModuleSpec = ModuleSpec {
+        display_name: "Harmony",
+        color_lit: Color32::from_rgb(0xe0, 0xa0, 0x50),
+        color_dim: Color32::from_rgb(0x48, 0x34, 0x18),
+        num_curves: 6,
+        curve_labels: &["AMOUNT", "THRESHOLD", "STABILITY", "SPREAD", "COEFFICIENT", "MIX"],
+        supports_sidechain: false,
+        wants_sidechain: false,
+        panel_widget: None,
+        writes_bin_physics: false,
+        needs_instantaneous_freq: false,
+        needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
+    };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
         color_lit: Color32::from_rgb(0xcc, 0xcc, 0xcc),
@@ -728,6 +744,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         ModuleType::Life                   => &LIFE,
         ModuleType::Past                   => &PAST,
         ModuleType::Kinetics               => &KIN,
+        ModuleType::Harmony                => &HARM2,
         ModuleType::Master                 => &MASTER,
         ModuleType::Empty                  => &EMPTY,
     }
@@ -832,6 +849,7 @@ pub fn create_module(
         ModuleType::Life   => Box::new(life::LifeModule::new()),
         ModuleType::Past   => Box::new(past::PastModule::new(sample_rate, fft_size)),
         ModuleType::Kinetics => Box::new(kinetics::KineticsModule::new()),
+        ModuleType::Harmony  => Box::new(harmony::HarmonyModule::new()),
         ModuleType::Master => Box::new(master::MasterModule),
         ModuleType::Empty  => Box::new(master::EmptyModule),
     };
@@ -872,3 +890,4 @@ pub mod life;
 pub use life::LifeMode;
 pub mod past;
 pub mod kinetics;
+pub mod harmony;

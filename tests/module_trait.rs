@@ -2709,3 +2709,18 @@ fn modulate_pll_tear_writes_phase_momentum_on_glide() {
             "bin {} momentum runaway: {}", k, physics.phase_momentum[k]);
     }
 }
+
+#[test]
+fn harmony_module_type_exists_and_specs() {
+    use spectral_forge::dsp::modules::{ModuleType, module_spec, create_module};
+    let spec = module_spec(ModuleType::Harmony);
+    assert_eq!(spec.display_name, "Harmony");
+    assert_eq!(spec.num_curves, 6);
+    assert_eq!(
+        spec.curve_labels,
+        &["AMOUNT", "THRESHOLD", "STABILITY", "SPREAD", "COEFFICIENT", "MIX"]
+    );
+    let m = create_module(ModuleType::Harmony, 48_000.0, 2048);
+    assert_eq!(m.module_type(), ModuleType::Harmony);
+    assert_eq!(m.num_curves(), 6);
+}

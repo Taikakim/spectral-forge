@@ -103,13 +103,13 @@ fn no_existing_module_declares_needs_if() {
     let all: &[ModuleType] = &[
         Empty, Dynamics, Freeze, PhaseSmear, Contrast, Gain, MidSide,
         TransientSustainedSplit, Harmonic, Future, Punch, Rhythm, Geometry,
-        Modulate, Circuit, Life, Past, Kinetics, Master,
+        Modulate, Circuit, Life, Past, Kinetics, Harmony, Master,
     ];
     for &ty in all {
         let _exhaustive_guard: () = match ty {
             Empty | Dynamics | Freeze | PhaseSmear | Contrast | Gain | MidSide
             | TransientSustainedSplit | Harmonic | Future | Punch | Rhythm
-            | Geometry | Modulate | Circuit | Life | Past | Kinetics | Master => (),
+            | Geometry | Modulate | Circuit | Life | Past | Kinetics | Harmony | Master => (),
         };
         let spec = module_spec(ty);
         assert!(!spec.needs_instantaneous_freq,

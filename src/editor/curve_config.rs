@@ -62,6 +62,8 @@ pub fn curve_display_config(
         ModuleType::Past => default_config(),
         // TODO(5b3.5-5b3.12): replace with kinetics_config(curve_idx) when kernels land
         ModuleType::Kinetics => default_config(),
+        // TODO(6.5.*): replace with harmony_config(curve_idx) when kernels land
+        ModuleType::Harmony => default_config(),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
