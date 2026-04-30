@@ -165,6 +165,14 @@ impl RingTransformState {
     pub fn prev_out(&self) -> f32 {
         if self.prev_out_value.is_nan() { 0.0 } else { self.prev_out_value }
     }
+
+    /// Returns the raw `prev_out_value` field, which may be `f32::NAN` on the
+    /// very first block (before any output has been produced). Use this inside
+    /// `apply_ring` to distinguish "never set" from a legitimate 0.0.
+    #[inline]
+    pub fn raw_prev_out(&self) -> f32 {
+        self.prev_out_value
+    }
 }
 
 // ─── apply_ring: per-block ring transform kernel ──────────────────────────────
@@ -204,7 +212,17 @@ pub fn apply_ring(state: &mut RingTransformState, args: RingApplyArgs, out: &mut
     }
 
     let target = state.latched_value();
-    // Legato interpolation will land in Task 5 — for now, fill with held value.
-    for i in 0..n { out[i] = target; }
-    state.set_prev_out(target);
+    let legato = args.ring.is_set(ModRingToggle::Legato);
+    let start  = state.raw_prev_out(); // NaN = "first block, never produced output"
+    if legato && start.is_finite() && (target - start).abs() > 1e-9 {
+        let denom = (n.max(1)) as f32;
+        for i in 0..n {
+            let t = (i as f32 + 1.0) / denom; // ramp finishes at the last sample
+            out[i] = start + (target - start) * t;
+        }
+    } else {
+        for i in 0..n { out[i] = target; }
+    }
+    // Update prev_out to the final sample value of this block.
+    if n > 0 { state.set_prev_out(out[n - 1]); }
 }

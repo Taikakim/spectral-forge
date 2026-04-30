@@ -57,6 +57,81 @@ fn iter_yields_non_empty_entries_only() {
     }
 }
 
+// ─── Legato ramp tests ───────────────────────────────────────────────────────
+
+/// With Legato on and a previous output value stored, apply_ring must produce a
+/// linear ramp from `prev_out` → `target` across the block, with the final
+/// sample landing exactly on `target`.
+#[test]
+fn legato_ramps_between_latched_values() {
+    let mut state = RingTransformState::default();
+
+    // Build a ring state with SampleHold + Legato set; Sync16 off (period = 1 beat).
+    let mut ring = ModRingState::default();
+    ring.set(ModRingToggle::SampleHold);
+    ring.set(ModRingToggle::Legato);
+
+    // First block: input 0.0 → latches 0.0, no prev_out yet → step-fill (NaN guard).
+    let args0 = RingApplyArgs {
+        ring,
+        input_value:   0.0,
+        current_beat:  0.0,
+        block_samples: 4,
+    };
+    let mut out0 = [f32::NAN; 4];
+    apply_ring(&mut state, args0, &mut out0);
+    // prev_out was NaN → no ramp, step fill with 0.0
+    assert_eq!(out0, [0.0, 0.0, 0.0, 0.0], "first block: no prev → step fill");
+
+    // Second block: beat moves to 1.1 → tick at 1.0 crossed → re-latch to 1.0.
+    // prev_out = 0.0; target = 1.0; n = 4.
+    // Expected ramp: 0.25, 0.50, 0.75, 1.00
+    let args1 = RingApplyArgs {
+        ring,
+        input_value:   1.0,
+        current_beat:  1.1,
+        block_samples: 4,
+    };
+    let mut out1 = [f32::NAN; 4];
+    apply_ring(&mut state, args1, &mut out1);
+    let expected = [0.25_f32, 0.50, 0.75, 1.00];
+    for (i, (&got, &exp)) in out1.iter().zip(expected.iter()).enumerate() {
+        assert!((got - exp).abs() < 1e-6, "sample {i}: got {got}, expected {exp}");
+    }
+}
+
+/// With Legato OFF, a new latched value must appear as an immediate step change
+/// (all samples equal to the target) — same as the Task 4 behaviour.
+#[test]
+fn legato_off_means_step_change() {
+    let mut state = RingTransformState::default();
+
+    // SampleHold on, Legato OFF.
+    let mut ring = ModRingState::default();
+    ring.set(ModRingToggle::SampleHold);
+
+    // First block: latch 0.0.
+    let args0 = RingApplyArgs {
+        ring,
+        input_value:   0.0,
+        current_beat:  0.0,
+        block_samples: 4,
+    };
+    let mut out0 = [f32::NAN; 4];
+    apply_ring(&mut state, args0, &mut out0);
+
+    // Second block: cross tick → latch 1.0; Legato off → step fill.
+    let args1 = RingApplyArgs {
+        ring,
+        input_value:   1.0,
+        current_beat:  1.1,
+        block_samples: 4,
+    };
+    let mut out1 = [f32::NAN; 4];
+    apply_ring(&mut state, args1, &mut out1);
+    assert_eq!(out1, [1.0, 1.0, 1.0, 1.0], "without Legato, must be step fill");
+}
+
 /// Total number of addressable keys is 9 * 7 * 6 = 378.
 #[test]
 fn ring_key_count_is_correct() {
