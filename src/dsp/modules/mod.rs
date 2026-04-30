@@ -404,6 +404,16 @@ pub struct ModuleSpec {
     /// Pipeline only computes the extra inverse FFT when at least one active
     /// slot needs it. Phase 6.4 lazy gate.
     pub needs_cepstrum:           bool,
+
+    /// Set true when the module reads `ModuleContext::chromagram`.
+    /// Pipeline only computes the chroma vector when at least one active slot
+    /// declares this. Phase 6.2 lazy gate.
+    pub needs_chromagram:         bool,
+
+    /// Set true when the module reads harmonic-group bin lists from the
+    /// harmonic-groups kernel. Pipeline only runs that kernel when at least
+    /// one active slot declares this. Phase 6.2 lazy gate.
+    pub needs_harmonic_groups:    bool,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -421,6 +431,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -434,6 +446,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -447,6 +461,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -460,6 +476,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -473,6 +491,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -486,6 +506,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -499,6 +521,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -512,6 +536,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -525,6 +551,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static PUNCH: ModuleSpec = ModuleSpec {
         display_name: "Punch",
@@ -540,6 +568,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static RHY: ModuleSpec = ModuleSpec {
         display_name: "Rhythm",
@@ -553,6 +583,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static GEO: ModuleSpec = ModuleSpec {
         display_name: "Geometry",
@@ -566,6 +598,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static MODULATE: ModuleSpec = ModuleSpec {
         display_name: "Modulate",
@@ -579,6 +613,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
@@ -594,6 +630,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static LIFE: ModuleSpec = ModuleSpec {
         display_name: "LIFE",
@@ -607,6 +645,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static PAST: ModuleSpec = ModuleSpec {
         display_name: "PAST",
@@ -620,6 +660,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static KIN: ModuleSpec = ModuleSpec {
         display_name: "KINETICS",
@@ -633,6 +675,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -646,6 +690,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -659,6 +705,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
+        needs_chromagram: false,
+        needs_harmonic_groups: false,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,

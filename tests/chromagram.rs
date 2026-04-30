@@ -1,6 +1,7 @@
 // tests/chromagram.rs
 
 use spectral_forge::dsp::chromagram::{compute_chromagram, NUM_PITCH_CLASSES};
+use spectral_forge::dsp::modules::{module_spec, ModuleType};
 use num_complex::Complex;
 
 #[test]
@@ -68,4 +69,35 @@ fn chromagram_rejects_subsonic_bins() {
     let mut chroma = [0.0_f32; NUM_PITCH_CLASSES];
     compute_chromagram(&bins, None, sample_rate, fft_size, &mut chroma);
     assert!(chroma.iter().all(|&c| c == 0.0), "subsonic-only input must produce all-zero chromagram");
+}
+
+#[test]
+fn no_existing_module_declares_needs_chromagram_or_groups() {
+    for &ty in &[
+        ModuleType::Empty,
+        ModuleType::Dynamics,
+        ModuleType::Freeze,
+        ModuleType::PhaseSmear,
+        ModuleType::Contrast,
+        ModuleType::Gain,
+        ModuleType::MidSide,
+        ModuleType::TransientSustainedSplit,
+        ModuleType::Harmonic,
+        ModuleType::Future,
+        ModuleType::Punch,
+        ModuleType::Rhythm,
+        ModuleType::Geometry,
+        ModuleType::Modulate,
+        ModuleType::Circuit,
+        ModuleType::Life,
+        ModuleType::Past,
+        ModuleType::Kinetics,
+        ModuleType::Master,
+    ] {
+        let spec = module_spec(ty);
+        assert!(!spec.needs_chromagram,
+            "{:?} should not need chromagram in v1 (Harmony is the v1 consumer in Phase 6.5)", ty);
+        assert!(!spec.needs_harmonic_groups,
+            "{:?} should not need harmonic groups in v1 (Harmony is the v1 consumer in Phase 6.5)", ty);
+    }
 }
