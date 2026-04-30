@@ -369,6 +369,26 @@ impl FxMatrix {
         }
     }
 
+    /// Propagate per-slot HarmonyMode from params to HarmonyModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_harmony_modes(&mut self, modes: &[crate::dsp::modules::harmony::HarmonyMode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_harmony_mode(modes[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot HarmonyInharmonicSubmode from params to HarmonyModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_harmony_inharmonic_submodes(&mut self, subs: &[crate::dsp::modules::harmony::HarmonyInharmonicSubmode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_harmony_inharmonic_submode(subs[s]);
+            }
+        }
+    }
+
     /// Propagate per-slot RhythmMode + ArpGrid from params to RhythmModule instances.
     /// Called once per audio block (before process_hop).
     pub fn set_rhythm_modes_and_grids(

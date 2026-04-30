@@ -1906,3 +1906,60 @@ fn modulate_pll_tear_uses_provided_unwrapped_phase_when_available() {
         lock_b, lock_a,
     );
 }
+
+// ── Harmony — Phase 6.5 Task 12 calibration probe round-trip ─────────────────
+
+/// Verify that the probe snapshot correctly reflects AMOUNT and MIX at the centre bin
+/// for Harmony Shuffler mode. AMOUNT=0.75 (curve[0] = 0.75) and MIX=0.5 (curve[5] = 0.5).
+/// Shuffler skips bins where amt < 1e-9 (0.75 > threshold) and mix is read there, so the
+/// probe block always executes.
+#[cfg(feature = "probe")]
+#[test]
+fn harmony_shuffler_probe_amount_and_mix() {
+    use spectral_forge::dsp::modules::harmony::HarmonyMode;
+
+    const AMOUNT: f32 = 0.75;
+    const MIX:    f32 = 0.50;
+
+    let mut m = create_module(ModuleType::Harmony, SAMPLE_RATE, FFT_SIZE);
+    // Set Shuffler mode via the trait method.
+    m.set_harmony_mode(HarmonyMode::Shuffler);
+    m.reset(SAMPLE_RATE, FFT_SIZE);
+
+    // Build 6 curve slices: curve[0]=AMOUNT, curve[5]=MIX, rest=1.0.
+    let curves_storage: Vec<Vec<f32>> = (0..6)
+        .map(|c| match c {
+            0 => vec![AMOUNT; NUM_BINS],
+            5 => vec![MIX;    NUM_BINS],
+            _ => vec![1.0;    NUM_BINS],
+        })
+        .collect();
+    let curves_refs: Vec<&[f32]> = curves_storage.iter().map(|v| v.as_slice()).collect();
+
+    let mut bins: Vec<num_complex::Complex<f32>> = vec![num_complex::Complex::new(0.1, 0.0); NUM_BINS];
+    let mut suppression: Vec<f32> = vec![0.0; NUM_BINS];
+    let ctx = make_ctx();
+    m.process(
+        0,
+        StereoLink::Linked,
+        FxChannelTarget::All,
+        &mut bins,
+        None,
+        &curves_refs,
+        &mut suppression,
+        None,
+        &ctx,
+    );
+    let probe = m.last_probe();
+
+    assert_eq!(
+        probe.amount_pct,
+        Some(AMOUNT * 100.0),
+        "amount_pct should be {:.1}", AMOUNT * 100.0,
+    );
+    assert_eq!(
+        probe.mix_pct,
+        Some(MIX * 100.0),
+        "mix_pct should be {:.1}", MIX * 100.0,
+    );
+}

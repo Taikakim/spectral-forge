@@ -43,6 +43,10 @@ pub struct HarmonyModule {
     /// 0 = inharmonic, 1 = fundamental, 2 = harmonic overtone.
     class_buf:          Vec<u8>,
 
+    // ── Calibration probe (probe feature / test only) ─────────────────────────
+    #[cfg(any(test, feature = "probe"))]
+    last_probe: crate::dsp::modules::ProbeSnapshot,
+
     // ── Lifter mode — cepstrum-domain envelope/pitch shaping (Phase 6.5 Task 8) ──
     /// Forward real-FFT used by Lifter to round-trip edited cepstrum → log-magnitude.
     /// `None` until `reset()` is called; Arc::clone is ref-count only (RT-safe).
@@ -71,6 +75,8 @@ impl HarmonyModule {
             rng_state: 0xC0FFEE_u32,
             peaks_buf: [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 5],
             class_buf:      Vec::new(),
+            #[cfg(any(test, feature = "probe"))]
+            last_probe: crate::dsp::modules::ProbeSnapshot::default(),
             // Lifter fields — allocated in reset().
             fwd_fft:        None,
             fwd_input:      Vec::new(),
@@ -702,8 +708,30 @@ impl SpectralModule for HarmonyModule {
             HarmonyMode::HarmonicGenerator => self.process_harmonic_generator(bins, curves, ctx),
             HarmonyMode::Shuffler          => self.process_shuffler(bins, curves),
         }
+
+        #[cfg(any(test, feature = "probe"))]
+        {
+            let k = self.num_bins / 2;
+            let amt_pct = curves.get(0).and_then(|c| c.get(k)).map(|v| v.clamp(0.0, 1.0) * 100.0);
+            let mix_pct = curves.get(5).and_then(|c| c.get(k)).map(|v| v.clamp(0.0, 1.0) * 100.0);
+            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+                amount_pct: amt_pct,
+                mix_pct,
+                ..Default::default()
+            };
+        }
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::Harmony }
     fn num_curves(&self) -> usize { 6 }
+
+    fn set_harmony_mode(&mut self, m: crate::dsp::modules::harmony::HarmonyMode) {
+        self.set_mode(m);
+    }
+    fn set_harmony_inharmonic_submode(&mut self, m: crate::dsp::modules::harmony::HarmonyInharmonicSubmode) {
+        self.set_inharmonic_submode(m);
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }

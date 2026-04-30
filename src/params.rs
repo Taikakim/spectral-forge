@@ -231,6 +231,12 @@ pub struct SpectralForgeParams {
     /// Single mutex over the array so audio thread takes one lock per block.
     pub slot_kinetics_mass_source: Arc<Mutex<[crate::dsp::modules::kinetics::MassSource; 9]>>,
 
+    /// Per-slot HarmonyMode (only meaningful for Harmony module slots).
+    /// Single mutex over the array so audio thread takes one lock per block.
+    pub slot_harmony_mode: Arc<Mutex<[crate::dsp::modules::harmony::HarmonyMode; 9]>>,
+    /// Per-slot Stiffness/Bessel/Prime sub-mode for Harmony's Inharmonic mode.
+    pub slot_harmony_inharmonic_submode: Arc<Mutex<[crate::dsp::modules::harmony::HarmonyInharmonicSubmode; 9]>>,
+
     /// Per-slot 8-voice × 8-step grid for `RhythmModule`'s Arpeggiator mode. One mutex over the
     /// array; UI panel writes, audio thread reads each block.
     pub slot_arp_grid: Arc<Mutex<[ArpGrid; 9]>>,
@@ -429,6 +435,8 @@ impl Default for SpectralForgeParams {
             slot_kinetics_mode:        Arc::new(Mutex::new([crate::dsp::modules::kinetics::KineticsMode::default(); 9])),
             slot_kinetics_well_source: Arc::new(Mutex::new([crate::dsp::modules::kinetics::WellSource::default();   9])),
             slot_kinetics_mass_source: Arc::new(Mutex::new([crate::dsp::modules::kinetics::MassSource::default();   9])),
+            slot_harmony_mode:                Arc::new(Mutex::new([crate::dsp::modules::harmony::HarmonyMode::default(); 9])),
+            slot_harmony_inharmonic_submode:  Arc::new(Mutex::new([crate::dsp::modules::harmony::HarmonyInharmonicSubmode::default(); 9])),
             slot_arp_grid:    Arc::new(Mutex::new([ArpGrid::default();    9])),
             slot_sc_gain_db: Arc::new(Mutex::new([0.0f32; 9])),
             slot_sc_channel: Arc::new(Mutex::new([ScChannel::Follow; 9])),
@@ -928,6 +936,8 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_kinetics_mode",         slot_kinetics_mode);
         persist_out!("slot_kinetics_well_source",  slot_kinetics_well_source);
         persist_out!("slot_kinetics_mass_source",  slot_kinetics_mass_source);
+        persist_out!("slot_harmony_mode",                slot_harmony_mode);
+        persist_out!("slot_harmony_inharmonic_submode",  slot_harmony_inharmonic_submode);
         persist_out!("slot_arp_grid",      slot_arp_grid);
         persist_out!("slot_curve_nodes",   slot_curve_nodes);
         persist_out!("editing_curve",      editing_curve);
@@ -991,6 +1001,8 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_kinetics_mode"         => persist_in!("slot_kinetics_mode",         slot_kinetics_mode,         data),
                 "slot_kinetics_well_source"  => persist_in!("slot_kinetics_well_source",  slot_kinetics_well_source,  data),
                 "slot_kinetics_mass_source"  => persist_in!("slot_kinetics_mass_source",  slot_kinetics_mass_source,  data),
+                "slot_harmony_mode"                => persist_in!("slot_harmony_mode",                slot_harmony_mode,                data),
+                "slot_harmony_inharmonic_submode"  => persist_in!("slot_harmony_inharmonic_submode",  slot_harmony_inharmonic_submode,  data),
                 "slot_arp_grid"       => persist_in!("slot_arp_grid",       slot_arp_grid,       data),
                 "slot_curve_nodes"    => persist_in!("slot_curve_nodes",   slot_curve_nodes,   data),
                 "editing_curve"       => persist_in!("editing_curve",      editing_curve,      data),

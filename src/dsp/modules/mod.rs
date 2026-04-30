@@ -333,6 +333,12 @@ pub trait SpectralModule: Send {
     /// Update the MassSource for Kinetics-InertialMass mode. Default no-op for all other types.
     fn set_kinetics_mass_source(&mut self, _: crate::dsp::modules::kinetics::MassSource) {}
 
+    /// Update the operating mode for Harmony modules. Default no-op for all other types.
+    fn set_harmony_mode(&mut self, _: crate::dsp::modules::harmony::HarmonyMode) {}
+    /// Update the Inharmonic sub-mode (Stiffness/Bessel/Prime) for Harmony modules.
+    /// No-op for all other types.
+    fn set_harmony_inharmonic_submode(&mut self, _: crate::dsp::modules::harmony::HarmonyInharmonicSubmode) {}
+
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 

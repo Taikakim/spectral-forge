@@ -769,6 +769,14 @@ impl Pipeline {
             self.fx_matrix.set_kinetics_mass_sources(&*mass_srcs);
         }
 
+        // Propagate harmony modes + sub-modes each block (try_lock is non-blocking; skipped if GUI holds lock).
+        if let Some(modes) = params.slot_harmony_mode.try_lock() {
+            self.fx_matrix.set_harmony_modes(&*modes);
+        }
+        if let Some(subs) = params.slot_harmony_inharmonic_submode.try_lock() {
+            self.fx_matrix.set_harmony_inharmonic_submodes(&*subs);
+        }
+
         // Propagate rhythm modes + grids each block (try_lock is non-blocking; skipped if GUI holds lock).
         // The two locks are independent — if either is held by GUI, skip dispatch this block;
         // the next block will pick up the GUI-side write.

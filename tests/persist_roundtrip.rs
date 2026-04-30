@@ -50,6 +50,7 @@ fn persist_roundtrip_all_keys_present() {
         "slot_rhythm_mode", "slot_geometry_mode", "slot_modulate_mode", "slot_circuit_mode", "slot_life_mode",
         "slot_past_mode", "slot_past_sort_key",
         "slot_kinetics_mode", "slot_kinetics_well_source", "slot_kinetics_mass_source",
+        "slot_harmony_mode", "slot_harmony_inharmonic_submode",
         "slot_arp_grid", "slot_curve_nodes",
         "editing_curve", "route_matrix", "fx_module_names",
         "fx_module_targets", "fx_route_matrix", "graph_db_min", "graph_db_max",
