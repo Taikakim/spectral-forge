@@ -104,6 +104,10 @@ pub struct RhythmModule {
     arp_voice_env: [f32; 8],
     /// Trigger source for the Arpeggiator mode: BPM-clocked or MIDI NoteIn.
     arp_trigger_source: ArpTriggerSource,
+    /// NoteIn-driven step pointer (incremented by rising MIDI note edges per block).
+    arp_step: usize,
+    /// Previous block's held-notes bitmap for rising-edge detection.
+    arp_prev_held_notes: [bool; 128],
     #[cfg(any(test, feature = "probe"))]
     last_probe:  crate::dsp::modules::ProbeSnapshot,
 }
@@ -119,6 +123,8 @@ impl RhythmModule {
             arp_voice_peak_bin: [0; 8],
             arp_voice_env: [0.0; 8],
             arp_trigger_source: ArpTriggerSource::default(),
+            arp_step: 0,
+            arp_prev_held_notes: [false; 128],
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
@@ -127,6 +133,10 @@ impl RhythmModule {
     pub fn set_mode(&mut self, mode: RhythmMode) { self.mode = mode; }
     pub fn mode(&self) -> RhythmMode { self.mode }
     pub fn set_arp_trigger_source(&mut self, src: ArpTriggerSource) { self.arp_trigger_source = src; }
+
+    /// Returns the current NoteIn-driven arp step counter. Useful in tests to verify
+    /// that the step pointer advances on MIDI rising edges.
+    pub fn current_arp_step_for_test(&self) -> usize { self.arp_step }
 }
 
 impl Default for RhythmModule {
@@ -184,6 +194,10 @@ impl SpectralModule for RhythmModule {
         let step_idx_f = bar_pos * steps as f32;
         let step_idx   = (step_idx_f as i32) % (steps as i32);
 
+        // For most modes, last_step_idx tracks the BPM-derived step_idx.
+        // The Arpeggiator arm may override this with effective_step_idx.
+        let mut next_last_step_idx = step_idx;
+
         match self.mode {
             RhythmMode::Euclidean => {
                 let pulses_g = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
@@ -230,8 +244,30 @@ impl SpectralModule for RhythmModule {
                 }
             }
             RhythmMode::Arpeggiator => {
+                // Compute the effective step index based on trigger source.
+                let effective_step_idx: i32 = match self.arp_trigger_source {
+                    ArpTriggerSource::Bpm => {
+                        // BPM-clocked: use the transport-derived step index (already computed above).
+                        step_idx
+                    }
+                    ArpTriggerSource::NoteIn => {
+                        // Count rising edges in the held-notes bitmap since the last block.
+                        let mut new_count = 0_usize;
+                        if let Some(held) = ctx.midi_notes {
+                            for k in 0..128 {
+                                if held[k] && !self.arp_prev_held_notes[k] {
+                                    new_count += 1;
+                                }
+                            }
+                            self.arp_prev_held_notes.copy_from_slice(held);
+                        }
+                        self.arp_step = (self.arp_step + new_count) % steps;
+                        self.arp_step as i32
+                    }
+                };
+
                 // On step crossing, re-pick peak bins for active voices.
-                if step_idx != self.last_step_idx {
+                if effective_step_idx != self.last_step_idx {
                     // Find up to 8 peak bins by scanning the input magnitudes.
                     // Simple top-N peak picker (good enough for a step-rate event).
                     let mut top: [(f32, u32); 8] = [(0.0, 0); 8];
@@ -251,7 +287,7 @@ impl SpectralModule for RhythmModule {
                     for v in 0..8 {
                         self.arp_voice_peak_bin[v] = top[v].1;
                         // Reset envelope to 0 for voices that are gated on at this step.
-                        if self.arp_grid.voice_active_at(v, step_idx as usize) {
+                        if self.arp_grid.voice_active_at(v, effective_step_idx as usize) {
                             self.arp_voice_env[v] = 0.0;
                         }
                     }
@@ -269,7 +305,7 @@ impl SpectralModule for RhythmModule {
 
                 // Build voice-gain spectrum: zero everywhere, add +AMOUNT at each active voice's peak bin.
                 for v in 0..8 {
-                    if self.arp_grid.voice_active_at(v, step_idx as usize) {
+                    if self.arp_grid.voice_active_at(v, effective_step_idx as usize) {
                         self.arp_voice_env[v] = (self.arp_voice_env[v] + env_step).min(1.0);
                     } else {
                         self.arp_voice_env[v] = (self.arp_voice_env[v] - env_step).max(0.0);
@@ -307,6 +343,8 @@ impl SpectralModule for RhythmModule {
                 }
 
                 let _ = tphase_curve;
+                // For NoteIn source, last_step_idx must track effective_step_idx, not BPM step_idx.
+                next_last_step_idx = effective_step_idx;
             }
             RhythmMode::PhaseReset => {
                 let af_g     = af_curve.get(probe_k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
@@ -362,7 +400,7 @@ impl SpectralModule for RhythmModule {
             }
         }
 
-        self.last_step_idx = step_idx;
+        self.last_step_idx = next_last_step_idx;
 
         #[cfg(any(test, feature = "probe"))]
         {

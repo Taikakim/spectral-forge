@@ -360,3 +360,80 @@ fn phase_reset_preserves_dc_and_nyquist_real() {
             "interior bin {} im should be ~1 after π/2 rotation; got {}", k, bins[k].im);
     }
 }
+
+// ── Task 6 (Phase 6.6) tests ──────────────────────────────────────────────────
+
+#[test]
+fn arp_noteIn_advances_step_on_rising_edge() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = RhythmModule::new();
+    m.set_mode(RhythmMode::Arpeggiator);
+    m.set_arp_trigger_source(ArpTriggerSource::NoteIn);
+    m.reset(48000.0, 1024);
+
+    // Step starts at 0.
+    assert_eq!(m.current_arp_step_for_test(), 0,
+        "arp_step must start at 0");
+
+    let amount = vec![2.0f32; 513];
+    let div    = vec![1.0f32; 513]; // 8 steps
+    let af     = vec![0.0f32; 513];
+    let tphase = vec![1.0f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &div, &af, &tphase, &mix];
+
+    let mut bins = vec![Complex::new(1.0f32, 0.0); 513];
+    let mut supp = vec![0.0f32; 513];
+
+    // Build a held-notes bitmap: note 60 is ON (rising edge on first call).
+    let held1: &'static [bool; 128] = Box::leak(Box::new({
+        let mut b = [false; 128];
+        b[60] = true;
+        b
+    }));
+
+    let mut ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    ctx.bpm = 120.0;
+    ctx.beat_position = 0.0; // BPM step_idx doesn't drive NoteIn — just needs to be valid.
+    ctx.midi_notes = Some(held1);
+
+    // First process call with note 60 ON (was previously OFF → 1 rising edge).
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut supp, None, &ctx);
+
+    assert_eq!(m.current_arp_step_for_test(), 1,
+        "one rising edge (note 60) should advance arp_step to 1");
+
+    // Second process call with same notes held (no new rising edges).
+    let mut bins2 = vec![Complex::new(1.0f32, 0.0); 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins2, None, &curves, &mut supp, None, &ctx);
+
+    assert_eq!(m.current_arp_step_for_test(), 1,
+        "held note (no rising edge) must not advance arp_step");
+
+    // Third process call: add note 64 (a second new rising edge) while keeping note 60 held.
+    let held2: &'static [bool; 128] = Box::leak(Box::new({
+        let mut b = [false; 128];
+        b[60] = true; // still held, not a new edge
+        b[64] = true; // new press
+        b
+    }));
+    ctx.midi_notes = Some(held2);
+
+    let mut bins3 = vec![Complex::new(1.0f32, 0.0); 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins3, None, &curves, &mut supp, None, &ctx);
+
+    assert_eq!(m.current_arp_step_for_test(), 2,
+        "one new rising edge (note 64) should advance arp_step from 1 to 2");
+
+    // Verify all output bins are finite throughout.
+    for (idx, c) in bins.iter().chain(bins2.iter()).chain(bins3.iter()).enumerate() {
+        assert!(c.re.is_finite() && c.im.is_finite(),
+            "bin {} non-finite after NoteIn arp processing: {:?}", idx % 513, c);
+    }
+}
