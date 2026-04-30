@@ -124,6 +124,7 @@ pub struct ModuleContext<'block> {
     pub if_offset: Option<&'block [f32]>,
     pub chromagram:           Option<&'block [f32; 12]>,  // Phase 6.2
     pub midi_notes:           Option<&'block [bool; 128]>, // Phase 6.3
+    pub held_pitch_classes:   Option<&'block [bool; 12]>,  // Phase 6.3
     pub bpm:                  f32,                         // live from host transport (0.0 if unavailable)
     pub beat_position:        f64,                         // live from host transport (0.0 if unavailable)
     pub sidechain_derivative: Option<&'block [f32]>,      // Phase 5b/Modulate Slew Lag
@@ -149,6 +150,7 @@ impl<'block> ModuleContext<'block> {
             instantaneous_freq: None,
             chromagram: None,
             midi_notes: None,
+            held_pitch_classes: None,
             bpm: 0.0,
             beat_position: 0.0,
             sidechain_derivative: None,

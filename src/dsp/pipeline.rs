@@ -547,6 +547,10 @@ impl Pipeline {
         // The mutable write path (pending_hop_frames → history) happens after the
         // closure via the separate pending_hop_frames field.
         let history_ref: &crate::dsp::history_buffer::HistoryBuffer = &self.history;
+        // MIDI state borrows — captured before the closure to avoid overlapping
+        // &self / &mut self borrows inside the STFT closure (Phase 6.3 Task 5).
+        let held_notes_ref: &[bool; crate::dsp::midi::NUM_MIDI_NOTES] = &self.held_notes;
+        let held_pcs_ref:   &[bool; crate::dsp::midi::NUM_PITCH_CLASSES] = &self.held_pitch_classes;
 
         // Build ModuleContext
         let mut ctx = ModuleContext::new(
@@ -571,6 +575,8 @@ impl Pipeline {
         // see the prior-block snapshot. None == not yet wired (we always wire
         // it now that the cache exists).
         ctx.if_offset = Some(&self.if_offset_buf[..num_bins]);
+        ctx.midi_notes         = Some(held_notes_ref);
+        ctx.held_pitch_classes = Some(held_pcs_ref);
 
         // Snapshot of slot targets (needed for SC channel resolution in MidSide mode).
         let slot_targets_snap: [FxChannelTarget; 9] = params.slot_targets.try_lock()
