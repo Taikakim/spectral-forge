@@ -1,5 +1,6 @@
 pub mod amp_modes;
 pub mod chromagram;
+pub mod harmonic_groups;
 pub mod bin_physics;
 pub mod cepstrum;
 pub mod guard;
