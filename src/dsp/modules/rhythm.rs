@@ -47,6 +47,13 @@ pub fn division_to_steps(curve_gain: f32) -> usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ArpTriggerSource {
+    #[default]
+    Bpm,
+    NoteIn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RhythmMode {
     #[default]
     Euclidean,
@@ -95,6 +102,8 @@ pub struct RhythmModule {
     arp_voice_peak_bin: [u32; 8],
     /// Per-voice envelope state (0..1) for amp ramp-up at each gate-on.
     arp_voice_env: [f32; 8],
+    /// Trigger source for the Arpeggiator mode: BPM-clocked or MIDI NoteIn.
+    arp_trigger_source: ArpTriggerSource,
     #[cfg(any(test, feature = "probe"))]
     last_probe:  crate::dsp::modules::ProbeSnapshot,
 }
@@ -109,6 +118,7 @@ impl RhythmModule {
             arp_grid:    ArpGrid::default(),
             arp_voice_peak_bin: [0; 8],
             arp_voice_env: [0.0; 8],
+            arp_trigger_source: ArpTriggerSource::default(),
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
@@ -116,6 +126,7 @@ impl RhythmModule {
 
     pub fn set_mode(&mut self, mode: RhythmMode) { self.mode = mode; }
     pub fn mode(&self) -> RhythmMode { self.mode }
+    pub fn set_arp_trigger_source(&mut self, src: ArpTriggerSource) { self.arp_trigger_source = src; }
 }
 
 impl Default for RhythmModule {
@@ -368,6 +379,7 @@ impl SpectralModule for RhythmModule {
 
     fn set_rhythm_mode(&mut self, mode: RhythmMode) { self.set_mode(mode); }
     fn set_arp_grid(&mut self, g: ArpGrid) { self.arp_grid = g; }
+    fn set_arp_trigger_source(&mut self, src: ArpTriggerSource) { self.arp_trigger_source = src; }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }

@@ -342,6 +342,9 @@ pub trait SpectralModule: Send {
     /// Update the arpeggiator step grid for Rhythm modules. Default no-op for all other types.
     fn set_arp_grid(&mut self, _: crate::dsp::modules::rhythm::ArpGrid) {}
 
+    /// Update the ArpTriggerSource for Rhythm modules (Bpm vs NoteIn). Default no-op for all other types.
+    fn set_arp_trigger_source(&mut self, _: crate::dsp::modules::rhythm::ArpTriggerSource) {}
+
     /// Toggle the per-module PLPV peak-locked ducking path. Default no-op
     /// for everything except DynamicsModule. Mirrors the per-mode setter
     /// convention (`set_gain_mode`, `set_future_mode`, etc.) so each module

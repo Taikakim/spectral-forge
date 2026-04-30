@@ -8,7 +8,7 @@ use crate::dsp::modules::life::LifeMode;
 use crate::dsp::modules::geometry::GeometryMode;
 use crate::dsp::modules::modulate::ModulateMode;
 use crate::dsp::modules::punch::PunchMode;
-use crate::dsp::modules::rhythm::{RhythmMode, ArpGrid};
+use crate::dsp::modules::rhythm::{ArpTriggerSource, RhythmMode, ArpGrid};
 use crate::dsp::amp_modes::AmpNodeState;
 use crate::dsp::pipeline::MAX_NUM_BINS;
 use crate::params::{FxChannelTarget, StereoLink};
@@ -400,6 +400,16 @@ impl FxMatrix {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_rhythm_mode(modes[s]);
                 m.set_arp_grid(grids[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot ArpTriggerSource from params to RhythmModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_arp_trigger_sources(&mut self, sources: &[ArpTriggerSource; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_arp_trigger_source(sources[s]);
             }
         }
     }

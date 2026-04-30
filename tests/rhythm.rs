@@ -1,5 +1,5 @@
 use spectral_forge::dsp::modules::{ModuleType, module_spec};
-use spectral_forge::dsp::modules::rhythm::{RhythmModule, RhythmMode, ArpGrid};
+use spectral_forge::dsp::modules::rhythm::{ArpTriggerSource, RhythmModule, RhythmMode, ArpGrid};
 
 #[test]
 fn rhythm_module_spec_basic() {
@@ -297,6 +297,20 @@ fn phase_reset_overwrites_phase_at_step_crossing() {
         "Nyquist bin should pass through dry; got {:?}", bins[512]);
     // suppression_out must be zeroed (PhaseReset emits no gain reduction).
     assert!(supp.iter().all(|&x| x == 0.0), "suppression_out must be zeroed");
+}
+
+// ── Task 5 (Phase 6.6) tests ──────────────────────────────────────────────────
+
+#[test]
+fn arp_trigger_source_enum_default_is_bpm() {
+    assert_eq!(ArpTriggerSource::default(), ArpTriggerSource::Bpm,
+        "ArpTriggerSource default must be Bpm");
+    // Verify the setter round-trips.
+    let mut m = RhythmModule::new();
+    m.set_arp_trigger_source(ArpTriggerSource::NoteIn);
+    // No getter needed for scaffolding test — field assignment + compile suffices.
+    // Re-set to Bpm to confirm it's settable in both directions.
+    m.set_arp_trigger_source(ArpTriggerSource::Bpm);
 }
 
 #[test]

@@ -787,6 +787,11 @@ impl Pipeline {
             self.fx_matrix.set_rhythm_modes_and_grids(&*modes, &*grids);
         }
 
+        // Propagate arp trigger source each block (try_lock is non-blocking; skipped if GUI holds lock).
+        if let Some(sources) = params.slot_arp_trigger_source.try_lock() {
+            self.fx_matrix.set_arp_trigger_sources(&*sources);
+        }
+
         // Phase 4.3a — propagate the Dynamics-PLPV enable flag each block. Lock-free
         // BoolParam read above; this just walks the 9 slots and pokes the trait method
         // (no-op for everything except DynamicsModule).
