@@ -98,3 +98,62 @@ fn find_top_k_peaks_zeros_unused_slots() {
         assert_eq!(slot.mag, 0.0);
     }
 }
+
+#[test]
+fn shuffler_mode_swaps_some_bins_when_amount_high() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Shuffler);
+
+    let mut bins: Vec<Complex<f32>> = (0..1025)
+        .map(|k| Complex::new(k as f32 * 0.1 + 1.0, 0.0)) // unique mag per bin
+        .collect();
+    let snapshot = bins.clone();
+    let amount: Vec<f32> = vec![1.0; 1025]; // 100% swap probability
+    let threshold: Vec<f32> = vec![0.0; 1025]; // never skip
+    let stability: Vec<f32> = vec![0.0; 1025];
+    let spread: Vec<f32> = vec![0.5; 1025]; // -> offset = 1
+    let coefficient: Vec<f32> = vec![0.0; 1025];
+    let mix: Vec<f32> = vec![1.0; 1025];
+
+    let curve_refs: Vec<&[f32]> = vec![
+        &amount, &threshold, &stability, &spread, &coefficient, &mix,
+    ];
+    let mut sup = vec![0.0; 1025];
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curve_refs, &mut sup, None, &ctx_default(),
+    );
+
+    let changed = (0..1025).filter(|&k| (bins[k] - snapshot[k]).norm() > 1e-6).count();
+    assert!(
+        changed > 100,
+        "shuffler at AMOUNT=1 must change a substantial fraction of bins, got {}",
+        changed
+    );
+}
+
+#[test]
+fn shuffler_mode_passes_through_when_amount_zero() {
+    let mut m = HarmonyModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(HarmonyMode::Shuffler);
+
+    let mut bins: Vec<Complex<f32>> = (0..1025)
+        .map(|k| Complex::new(k as f32 * 0.1 + 1.0, 0.0))
+        .collect();
+    let snapshot = bins.clone();
+    let curves: Vec<f32> = vec![0.0; 1025];
+    let one: Vec<f32> = vec![1.0; 1025];
+    let curve_refs: Vec<&[f32]> = vec![
+        &curves, &one, &one, &one, &one, &one,
+    ];
+    let mut sup = vec![0.0; 1025];
+    m.process(
+        0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curve_refs, &mut sup, None, &ctx_default(),
+    );
+    for k in 0..1025 {
+        assert!((bins[k] - snapshot[k]).norm() < 1e-6);
+    }
+}

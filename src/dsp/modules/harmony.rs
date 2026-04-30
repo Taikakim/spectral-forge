@@ -34,6 +34,8 @@ pub struct HarmonyModule {
     scratch_mag:        Vec<f32>,
     /// Scratch buffer for output bins built additively (shared across modes).
     scratch_out:        Vec<Complex<f32>>,
+    /// xorshift32 RNG state for Shuffler mode; seeded deterministically.
+    rng_state:          u32,
 }
 
 impl HarmonyModule {
@@ -46,6 +48,7 @@ impl HarmonyModule {
             num_bins: 1025,
             scratch_mag: Vec::new(),
             scratch_out: Vec::new(),
+            rng_state: 0xC0FFEE_u32,
         }
     }
 
@@ -63,8 +66,54 @@ impl Default for HarmonyModule {
     fn default() -> Self { Self::new() }
 }
 
+impl HarmonyModule {
+    fn process_shuffler(
+        &mut self,
+        bins: &mut [Complex<f32>],
+        curves: &[&[f32]],
+    ) {
+        let n = self.num_bins;
+        let amount    = curves.get(0).copied().unwrap_or(&[]);
+        let threshold = curves.get(1).copied().unwrap_or(&[]);
+        let spread    = curves.get(3).copied().unwrap_or(&[]);
+        let mix       = curves.get(5).copied().unwrap_or(&[]);
+
+        // xorshift32 RNG state lives in self.rng_state.
+        let rng = &mut self.rng_state;
+
+        for k in 1..n - 1 {
+            let amt = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            if amt < 1e-9 { continue; }
+
+            let mag = bins[k].norm();
+            let thr = threshold.get(k).copied().unwrap_or(0.0);
+            if mag < thr { continue; }
+
+            // SPREAD curve in [0,2] → reach in [1, 16].
+            let s = spread.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
+            let reach = (1.0 + s * 7.5) as usize; // 1..=16
+            if k + reach >= n { continue; }
+
+            // xorshift32 rand in [0,1).
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 17;
+            *rng ^= *rng << 5;
+            let r = (*rng as f32 / u32::MAX as f32).clamp(0.0, 1.0);
+            if r >= amt { continue; }
+
+            let m = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            // Linear blend swap: out[k] = (1-m)*bins[k] + m*bins[k+reach];
+            let a = bins[k];
+            let b = bins[k + reach];
+            bins[k] = a * (1.0 - m) + b * m;
+            bins[k + reach] = b * (1.0 - m) + a * m;
+        }
+    }
+}
+
 impl SpectralModule for HarmonyModule {
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
+        self.rng_state   = 0xC0FFEE_u32;
         self.sample_rate = sample_rate;
         self.fft_size    = fft_size;
         self.num_bins    = fft_size / 2 + 1;
@@ -101,9 +150,8 @@ impl SpectralModule for HarmonyModule {
             HarmonyMode::Lifter            => { /* TODO Task 10 */ }
             HarmonyMode::Inharmonic        => { /* TODO Task 7 */ }
             HarmonyMode::HarmonicGenerator => { /* TODO Task 5 */ }
-            HarmonyMode::Shuffler          => { /* TODO Task 4 */ }
+            HarmonyMode::Shuffler          => self.process_shuffler(bins, curves),
         }
-        let _ = bins;
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::Harmony }
