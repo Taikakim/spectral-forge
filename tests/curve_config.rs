@@ -92,3 +92,15 @@ fn gain_to_display_index_13_returns_history_relative_seconds() {
     let v = gain_to_display(13, -1.0, 0.0, 0.0, 0.0, 0.0, 4.0);
     assert_eq!(v, 0.0);
 }
+
+#[test]
+fn display_curve_idx_routes_past_curves_to_specific_scales() {
+    use spectral_forge::editor::curve::display_curve_idx;
+    use spectral_forge::dsp::modules::{ModuleType, GainMode};
+    // Past has 5 curves; routing per spec §5.
+    assert_eq!(display_curve_idx(ModuleType::Past, 0, GainMode::Add),  6,  "AMOUNT → %");
+    assert_eq!(display_curve_idx(ModuleType::Past, 1, GainMode::Add),  13, "TIME → seconds-history");
+    assert_eq!(display_curve_idx(ModuleType::Past, 2, GainMode::Add),  9,  "THRESHOLD → dBFS");
+    assert_eq!(display_curve_idx(ModuleType::Past, 3, GainMode::Add),  6,  "SPREAD/Smear → %");
+    assert_eq!(display_curve_idx(ModuleType::Past, 4, GainMode::Add),  6,  "MIX → %");
+}

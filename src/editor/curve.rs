@@ -263,6 +263,17 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
             0 => 6,             // SENSITIVITY → 0–100 %
             _ => curve_idx,
         },
+        ModuleType::Past => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 %
+            // TIME → seconds-history. Until Task 14 re-plumbs paint_response_curve and
+            // the offset DragValue formatter to receive Pipeline's real total_history_seconds,
+            // both render with total=0.0 and produce flat-zero output. Tracked in Task 14.
+            1 => 13,
+            2 => 9,   // THRESHOLD → dBFS (mirrors Freeze threshold scale)
+            3 => 6,   // SPREAD / Smear → 0–100 %
+            4 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
         _ => curve_idx,
     }
 }
