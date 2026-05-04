@@ -1114,6 +1114,7 @@ pub fn create_editor(
                                                     off_disp_idx, g_off,
                                                     off_atk_ms, off_rel_ms,
                                                     off_db_min, off_db_max,
+                                                    0.0,
                                                 );
                                                 format!("{:.1} {}", phys, off_cfg.y_label)
                                             })

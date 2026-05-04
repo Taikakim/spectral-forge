@@ -577,20 +577,20 @@ mod display_mapping_contract {
     // ── Freeze Threshold (display_idx = 9) ────────────────────────────────────
     #[test]
     fn freeze_threshold_gain_1_maps_to_minus_20_dbfs() {
-        let v = gain_to_display(9, 1.0, 10.0, 100.0, -80.0, 0.0);
+        let v = gain_to_display(9, 1.0, 10.0, 100.0, -80.0, 0.0, 0.0);
         assert!((v - (-20.0)).abs() < 0.1, "gain=1.0 should be -20 dBFS, got {}", v);
     }
 
     #[test]
     fn freeze_threshold_gain_2_maps_to_0_dbfs() {
-        let v = gain_to_display(9, 2.0, 10.0, 100.0, -80.0, 0.0);
+        let v = gain_to_display(9, 2.0, 10.0, 100.0, -80.0, 0.0, 0.0);
         assert!((v - 0.0).abs() < 0.1, "gain=2.0 should be 0 dBFS, got {}", v);
     }
 
     #[test]
     fn freeze_threshold_gain_1p5_matches_linear_dsp() {
         // DSP formula: -40 + gain*20, so gain=1.5 → -10 dBFS.
-        let v = gain_to_display(9, 1.5, 10.0, 100.0, -80.0, 0.0);
+        let v = gain_to_display(9, 1.5, 10.0, 100.0, -80.0, 0.0, 0.0);
         assert!((v - (-10.0)).abs() < 0.5,
             "gain=1.5 should be ≈-10 dBFS (DSP linear formula), got {}", v);
     }

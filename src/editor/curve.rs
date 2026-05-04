@@ -421,6 +421,10 @@ pub fn apply_curve_adjustments(
 
 /// Convert a curve's linear gain to its physical display value (no freq scaling).
 /// Used for the coloured response line.
+///
+/// `total_history_seconds` is consumed only by display index 13 ("seconds,
+/// history-relative") used by Past's Age/Delay curves; legacy callers pass
+/// `0.0` and never hit index 13.
 pub fn gain_to_display(
     curve_idx: usize,
     gain: f32,
@@ -428,6 +432,7 @@ pub fn gain_to_display(
     global_release_ms: f32,
     db_min: f32,
     db_max: f32,
+    total_history_seconds: f32,
 ) -> f32 {
     // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
     match curve_idx {
@@ -452,6 +457,7 @@ pub fn gain_to_display(
         }
         10 => (gain * 200.0).clamp(0.0, 1000.0),            // Portamento/SC Smooth: 0-1000ms (neutral=200ms)
         11 => gain.clamp(0.0, 2.0),                          // Resistance: 0-2 (normalised excess)
+        13 => (gain * total_history_seconds).clamp(0.0, total_history_seconds),
         _ => gain,
     }
 }
@@ -637,7 +643,7 @@ pub fn paint_response_curve(
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
         let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature, offset_fn, max_hz);
-        let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max);
+        let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max, 0.0);
         let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
         Pos2::new(x, y)
     }).collect();

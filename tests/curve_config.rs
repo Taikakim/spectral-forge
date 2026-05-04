@@ -74,3 +74,21 @@ fn off_amount_norm_clamps_and_passes_zero() {
     assert_eq!(off_amount_norm(2.0,  0.5), 1.0);
     assert_eq!(off_amount_norm(-1.0, 0.0), 0.0);
 }
+
+#[test]
+fn gain_to_display_index_13_returns_history_relative_seconds() {
+    use spectral_forge::editor::curve::gain_to_display;
+    // gain * total_history_seconds, clamped to [0, total]
+    let v = gain_to_display(13, 0.5, 0.0, 0.0, 0.0, 0.0, /* total */ 4.0);
+    assert!((v - 2.0).abs() < 1e-6, "expected 2.0, got {v}");
+    let v = gain_to_display(13, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0);
+    assert_eq!(v, 0.0);
+    let v = gain_to_display(13, 1.0, 0.0, 0.0, 0.0, 0.0, 4.0);
+    assert!((v - 4.0).abs() < 1e-6);
+    // Clamp above total
+    let v = gain_to_display(13, 2.0, 0.0, 0.0, 0.0, 0.0, 4.0);
+    assert_eq!(v, 4.0);
+    // Clamp below zero
+    let v = gain_to_display(13, -1.0, 0.0, 0.0, 0.0, 0.0, 4.0);
+    assert_eq!(v, 0.0);
+}
