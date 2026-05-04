@@ -384,6 +384,32 @@ pub trait SpectralModule: Send {
 /// grids, mode pickers, etc.) — curves stay in their own canvas.
 pub type PanelWidgetFn = fn(&mut nih_plug_egui::egui::Ui, &crate::params::SpectralForgeParams, slot: usize);
 
+/// Per-mode descriptor for visible curves, label overrides, and help-box copy.
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §8.
+///
+/// Modules with internal sub-modes use `active_layout` on `ModuleSpec` to
+/// declare a function that, given the slot's current mode (as `u8`), returns
+/// a `CurveLayout`. The UI renders only the curves listed in `active`,
+/// applies any `label_overrides`, and feeds `help_for` / `mode_overview`
+/// into the help-box panel.
+pub struct CurveLayout {
+    /// Indices (into the module's full curve set) of curves visible for this mode.
+    /// Order is render order; e.g. `&[0, 2, 4]` hides curves 1 and 3 entirely.
+    pub active: &'static [u8],
+
+    /// Per-curve label overrides for this mode. Each tuple is `(curve_idx, override_label)`.
+    /// Curves not listed fall back to `ModuleSpec::curve_labels[curve_idx]`.
+    pub label_overrides: &'static [(u8, &'static str)],
+
+    /// Help-box copy keyed by curve_idx (full curve index, not position in `active`).
+    /// Returning an empty string means "use the module overview / static description."
+    pub help_for: fn(curve_idx: u8) -> &'static str,
+
+    /// Help-box overview shown when a slot is selected but no curve is in focus.
+    /// `None` ⇒ use the module's static description from outside the layout.
+    pub mode_overview: Option<&'static str>,
+}
+
 pub struct ModuleSpec {
     pub display_name:       &'static str,
     pub color_lit:          Color32,
@@ -431,6 +457,12 @@ pub struct ModuleSpec {
     /// MIDI is always-on (Phase 6.3.3 `MidiConfig::Basic`), so this flag is
     /// declarative/documentation only — no Pipeline gating needed. Phase 6.6.
     pub needs_midi:               bool,
+
+    /// If `Some`, the UI consults `active_layout(slot.mode as u8)` per frame to
+    /// decide which curve tabs to render and what help text to show. `None` ⇒
+    /// the UI renders all `curve_labels` as today (modules without modes).
+    /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §8.
+    pub active_layout: Option<fn(mode: u8) -> CurveLayout>,
 }
 
 pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
@@ -451,6 +483,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static FRZ: ModuleSpec = ModuleSpec {
         display_name: "Freeze",
@@ -467,6 +500,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static PSM: ModuleSpec = ModuleSpec {
         display_name: "Phase Smear",
@@ -483,6 +517,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static CON: ModuleSpec = ModuleSpec {
         display_name: "Contrast",
@@ -499,6 +534,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static GN: ModuleSpec = ModuleSpec {
         display_name: "Gain",
@@ -515,6 +551,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static MS: ModuleSpec = ModuleSpec {
         display_name: "Mid/Side",
@@ -531,6 +568,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static TS: ModuleSpec = ModuleSpec {
         display_name: "T/S Split",
@@ -547,6 +585,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static HARM: ModuleSpec = ModuleSpec {
         display_name: "Harmonic",
@@ -563,6 +602,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -579,6 +619,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static PUNCH: ModuleSpec = ModuleSpec {
         display_name: "Punch",
@@ -597,6 +638,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static RHY: ModuleSpec = ModuleSpec {
         display_name: "Rhythm",
@@ -614,6 +656,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_harmonic_groups: false,
         // Arpeggiator NoteIn trigger reads ctx.midi_notes (Phase 6.6 Task 6).
         needs_midi: true,
+        active_layout: None,
     };
     static GEO: ModuleSpec = ModuleSpec {
         display_name: "Geometry",
@@ -630,6 +673,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static MODULATE: ModuleSpec = ModuleSpec {
         display_name: "Modulate",
@@ -646,6 +690,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static CIR: ModuleSpec = ModuleSpec {
         display_name: "Circuit",
@@ -664,6 +709,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static LIFE: ModuleSpec = ModuleSpec {
         display_name: "LIFE",
@@ -680,6 +726,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static PAST: ModuleSpec = ModuleSpec {
         display_name: "PAST",
@@ -696,6 +743,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static KIN: ModuleSpec = ModuleSpec {
         display_name: "KINETICS",
@@ -712,6 +760,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static HARM2: ModuleSpec = ModuleSpec {
         display_name: "Harmony",
@@ -733,6 +782,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // Companding reads ctx.harmonic_groups (Phase 6.5 Task 11).
         needs_harmonic_groups: true,
         needs_midi: false,
+        active_layout: None,
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
@@ -749,6 +799,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     static EMPTY: ModuleSpec = ModuleSpec {
         display_name: "Empty",
@@ -765,6 +816,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         needs_chromagram: false,
         needs_harmonic_groups: false,
         needs_midi: false,
+        active_layout: None,
     };
     match ty {
         ModuleType::Dynamics               => &DYN,
