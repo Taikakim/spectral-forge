@@ -108,6 +108,48 @@ pub fn default_nodes_for_curve(curve_idx: usize) -> [CurveNode; 6] {
     }
 }
 
+/// Module-aware default nodes for a freshly-assigned slot. Lets per-module
+/// calibrations (e.g. Past's Age and Smear) start from a neutral midpoint so
+/// the offset slider has headroom in both directions, instead of starting at
+/// gain=1.0 (where positive offset clamps to a no-op).
+///
+/// Falls back to `default_nodes_for_curve(curve_idx)` for any (module, curve)
+/// combination that hasn't been calibrated yet — modules pick this up
+/// automatically when their UX overhaul lands.
+/// See spec docs/superpowers/specs/2026-05-04-past-module-ux-design.md §7.2.
+pub fn default_nodes_for_module_curve(
+    module_type: crate::dsp::modules::ModuleType,
+    curve_idx: usize,
+) -> [CurveNode; 6] {
+    use crate::dsp::modules::ModuleType;
+
+    // Build a flat node row at a given y value, preserving the standard
+    // x spacing used by `default_nodes()`.
+    fn flat_at_y(y: f32) -> [CurveNode; 6] {
+        [
+            CurveNode { x: 0.0, y, q: 0.3 },
+            CurveNode { x: 0.2, y, q: 0.5 },
+            CurveNode { x: 0.4, y, q: 0.5 },
+            CurveNode { x: 0.6, y, q: 0.5 },
+            CurveNode { x: 0.8, y, q: 0.5 },
+            CurveNode { x: 1.0, y, q: 0.3 },
+        ]
+    }
+
+    match (module_type, curve_idx) {
+        // Past Age / Delay (curve 1): default to gain ≈ 0.5 → display ≈ 50% of
+        // total history. y = log(0.5)*20/18 ≈ -0.334 → compute_curve_response
+        // produces gain = 10^(-0.334 * 18 / 20) = 0.5. Centring the default
+        // means the offset slider has equal headroom in both directions.
+        (ModuleType::Past, 1) => flat_at_y(-0.334),
+        // Past Smear (curve 3): default OFF (gain ≈ 0.126 < 0.5 toggle floor).
+        // Positive offset turns smear on per-bin; negative is a no-op.
+        // y = -1.0 → gain = 10^(-18/20) ≈ 0.126.
+        (ModuleType::Past, 3) => flat_at_y(-1.0),
+        _ => default_nodes_for_curve(curve_idx),
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum BandType { LowShelf, Bell, HighShelf }
 

@@ -119,11 +119,12 @@ fn past_config_returns_calibrated_display_per_curve() {
     // matching all probes uniquely identifies which helper was wired.
     //
     // Probe table (see helper definitions in src/editor/curve_config.rs):
-    //   helper          (0.5,-0.3)  (0.5,+0.3)  (2.0,+0.5)
-    //   off_mix          0.2         0.5         2.0
-    //   off_amount_norm  0.2         0.8         1.0   (clamped)
-    //   off_thresh      -0.1         0.8         2.5
-    //   off_identity     0.5         0.5         2.0
+    //   helper             (0.5,-0.3)  (0.5,+0.3)  (2.0,+0.5)
+    //   off_mix             0.2         0.5         2.0
+    //   off_amount_norm     0.2         0.8         1.0   (clamped)
+    //   off_thresh         -0.1         0.8         2.5    (-2× on neg, 1× on pos)
+    //   off_freeze_thresh  -0.7         0.8         2.5    (-4× on neg, 1× on pos)
+    //   off_identity        0.5         0.5         2.0
     let approx = |a: f32, b: f32| (a - b).abs() < 1e-5;
     let is_mix = |f: fn(f32, f32) -> f32| {
         approx(f(0.5, -0.3), 0.2) && approx(f(0.5, 0.3), 0.5) && approx(f(2.0, 0.5), 2.0)
@@ -131,8 +132,8 @@ fn past_config_returns_calibrated_display_per_curve() {
     let is_amount_norm = |f: fn(f32, f32) -> f32| {
         approx(f(0.5, -0.3), 0.2) && approx(f(0.5, 0.3), 0.8) && approx(f(2.0, 0.5), 1.0)
     };
-    let is_thresh = |f: fn(f32, f32) -> f32| {
-        approx(f(0.5, -0.3), -0.1) && approx(f(0.5, 0.3), 0.8) && approx(f(2.0, 0.5), 2.5)
+    let is_freeze_thresh = |f: fn(f32, f32) -> f32| {
+        approx(f(0.5, -0.3), -0.7) && approx(f(0.5, 0.3), 0.8) && approx(f(2.0, 0.5), 2.5)
     };
     let is_identity = |f: fn(f32, f32) -> f32| {
         approx(f(0.5, -0.3), 0.5) && approx(f(0.5, 0.3), 0.5) && approx(f(2.0, 0.5), 2.0)
@@ -155,13 +156,15 @@ fn past_config_returns_calibrated_display_per_curve() {
     // structural identity here.
     assert!(is_amount_norm(time.offset_fn), "TIME should route to off_amount_norm");
 
-    // THRESHOLD (curve 2) — dBFS, neutral -60, off_thresh
+    // THRESHOLD (curve 2) — dBFS -80..0, neutral -60, off_freeze_thresh so the
+    // offset slider can reach the full visible y range (off_thresh would only
+    // span -60..0 which leaves the bottom 20 dB unreachable).
     let thresh = curve_display_config(ModuleType::Past, 2, GainMode::Add);
     assert_eq!(thresh.y_label, "dBFS");
     assert_eq!(thresh.y_min, -80.0);
     assert_eq!(thresh.y_max, 0.0);
     assert!((thresh.y_natural - (-60.0)).abs() < 1e-6);
-    assert!(is_thresh(thresh.offset_fn), "THRESHOLD should route to off_thresh");
+    assert!(is_freeze_thresh(thresh.offset_fn), "THRESHOLD should route to off_freeze_thresh");
 
     // SPREAD (Smear in Granular) — % units
     let spread = curve_display_config(ModuleType::Past, 3, GainMode::Add);
@@ -176,4 +179,41 @@ fn past_config_returns_calibrated_display_per_curve() {
     // Out-of-range curve_idx falls back to default_config (off_identity)
     let oob = curve_display_config(ModuleType::Past, 99, GainMode::Add);
     assert!(is_identity(oob.offset_fn), "OOB should route to off_identity");
+}
+
+/// Past Age (curve 1) defaults user-drawn y to a midpoint so the offset slider
+/// has headroom in both directions. Past Smear (curve 3) defaults user-drawn y
+/// low so positive offset enables smear instead of being a clamped no-op.
+#[test]
+fn past_default_nodes_centre_age_and_floor_smear() {
+    use spectral_forge::editor::curve::default_nodes_for_module_curve;
+    use spectral_forge::dsp::modules::ModuleType;
+
+    // Age (curve 1): default y ≈ -0.334 → gain ≈ 0.5 (midpoint of [0, 1]).
+    let age = default_nodes_for_module_curve(ModuleType::Past, 1);
+    for n in &age {
+        assert!((n.y - (-0.334)).abs() < 1e-3, "Age default y should be ≈-0.334, got {}", n.y);
+    }
+
+    // Smear (curve 3): default y = -1.0 → gain ≈ 0.126 (below the >0.5 toggle).
+    let smear = default_nodes_for_module_curve(ModuleType::Past, 3);
+    for n in &smear {
+        assert!((n.y - (-1.0)).abs() < 1e-6, "Smear default y should be -1.0, got {}", n.y);
+    }
+
+    // AMOUNT (curve 0), THRESHOLD (curve 2), MIX (curve 4) keep the legacy
+    // y=0 default — they're at-y_max calibrations where bidirectional offset
+    // isn't expected (or, for THRESHOLD, off_freeze_thresh handles both sides).
+    for c in [0, 2, 4] {
+        let nodes = default_nodes_for_module_curve(ModuleType::Past, c);
+        for n in &nodes {
+            assert_eq!(n.y, 0.0, "Past curve {c} should keep y=0 default");
+        }
+    }
+
+    // Modules without per-module overrides fall through to the legacy curve-only
+    // defaults — Dynamics' curve 1 (Ratio) gets its high-shelf preset back.
+    let dyn_ratio = default_nodes_for_module_curve(ModuleType::Dynamics, 1);
+    assert!((dyn_ratio[5].y - 0.334).abs() < 1e-3,
+        "Dynamics Ratio should keep its high-shelf y=0.334 preset");
 }

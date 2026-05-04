@@ -153,7 +153,7 @@ fn assign_module(params: &SpectralForgeParams, slot: usize, ty: ModuleType) {
     }
     let mut nodes = params.slot_curve_nodes.lock();
     for c in 0..spec.num_curves.min(7) {
-        nodes[slot][c] = crate::editor::curve::default_nodes_for_curve(c);
+        nodes[slot][c] = crate::editor::curve::default_nodes_for_module_curve(ty, c);
     }
     // Reset tilt/offset/curvature FloatParam smoothers for this slot.
     // assign_module has no ParamSetter access so we reset the smoothers directly;
