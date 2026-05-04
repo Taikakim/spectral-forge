@@ -16,7 +16,7 @@ use smallvec::SmallVec;
 
 use crate::dsp::history_buffer::HistoryBuffer;
 use crate::dsp::modules::{
-    GainMode, ModuleContext, ModuleType, SpectralModule,
+    CurveLayout, GainMode, ModuleContext, ModuleType, SpectralModule,
 };
 use crate::dsp::phase::PhaseRotator;
 use crate::params::{FxChannelTarget, StereoLink};
@@ -29,6 +29,107 @@ pub enum PastMode {
     Convolution,
     Reverse,
     Stretch,
+}
+
+impl TryFrom<u8> for PastMode {
+    type Error = ();
+    fn try_from(b: u8) -> Result<Self, ()> {
+        match b {
+            0 => Ok(Self::Granular),
+            1 => Ok(Self::DecaySorter),
+            2 => Ok(Self::Convolution),
+            3 => Ok(Self::Reverse),
+            4 => Ok(Self::Stretch),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Per-mode `CurveLayout` for Past. See
+/// docs/superpowers/specs/2026-05-04-past-module-ux-design.md §1 + §4.
+///
+/// Wired via `active_layout: Some(past::active_layout)` on the Past
+/// `ModuleSpec` literal (Task 7).
+pub fn active_layout(mode: u8) -> CurveLayout {
+    match PastMode::try_from(mode).unwrap_or(PastMode::Granular) {
+        PastMode::Granular => CurveLayout {
+            active:          &[0, 1, 2, 3, 4],
+            label_overrides: &[(1, "Age"), (3, "Smear")],
+            help_for:        granular_help_for,
+            mode_overview:   None,
+        },
+        PastMode::DecaySorter => CurveLayout {
+            active:          &[0, 2, 4],
+            label_overrides: &[],
+            help_for:        decay_sorter_help_for,
+            mode_overview:   None,
+        },
+        PastMode::Convolution => CurveLayout {
+            active:          &[0, 1, 2, 4],
+            label_overrides: &[(1, "Delay")],
+            help_for:        convolution_help_for,
+            mode_overview:   None,
+        },
+        PastMode::Reverse => CurveLayout {
+            active:          &[0, 2, 4],
+            label_overrides: &[],
+            help_for:        reverse_help_for,
+            mode_overview:   None,
+        },
+        PastMode::Stretch => CurveLayout {
+            active:          &[0, 4],
+            label_overrides: &[],
+            help_for:        stretch_help_for,
+            mode_overview:   None,
+        },
+    }
+}
+
+fn granular_help_for(curve_idx: u8) -> &'static str {
+    match curve_idx {
+        0 => "How much of the historical bin replaces the current bin. 0 = current only, 1 = historical only. Adds with upstream BinPhysics `crystallization`.",
+        1 => "Per-bin lookback into history. 0 = now, 1 = oldest available frame.",
+        2 => "Per-bin gate. Bins whose current magnitude falls below the threshold pass through unchanged.",
+        3 => "Toggle (>0.5) per-bin 3-bin frequency smear of the historical read. Smooths bin-leakage across narrow partials.",
+        4 => "Per-bin wet/dry.",
+        _ => "",
+    }
+}
+
+fn decay_sorter_help_for(curve_idx: u8) -> &'static str {
+    match curve_idx {
+        0 => "Per-bin output gain on the rearranged signal.",
+        2 => "Per-bin floor — bins below this magnitude are excluded from sorting.",
+        4 => "Per-bin wet/dry of sorted output vs. original.",
+        _ => "",
+    }
+}
+
+fn convolution_help_for(curve_idx: u8) -> &'static str {
+    match curve_idx {
+        0 => "Per-bin convolution strength. Multiplied by upstream BinPhysics `flux` if present (gates by recent change).",
+        1 => "Per-bin delay into history. Low bins can sample old, high bins recent, or any other shape.",
+        2 => "Per-bin gate on the current frame's magnitude.",
+        4 => "Per-bin wet/dry.",
+        _ => "",
+    }
+}
+
+fn reverse_help_for(curve_idx: u8) -> &'static str {
+    match curve_idx {
+        0 => "Per-bin keep during the reverse read.",
+        2 => "Per-bin gate.",
+        4 => "Per-bin wet/dry.",
+        _ => "",
+    }
+}
+
+fn stretch_help_for(curve_idx: u8) -> &'static str {
+    match curve_idx {
+        0 => "Per-bin keep during the stretched read.",
+        4 => "Per-bin wet/dry.",
+        _ => "",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
