@@ -53,10 +53,10 @@ impl HarmonicGroupBuf {
     /// Caller invariant: both slices length ≥ fft_size/2 + 1; `ifreq` from Phase 6.1.
     pub fn detect(
         &mut self,
-        bins:        &[Complex<f32>],
-        ifreq:       &[f32],
-        sample_rate: f32,
-        fft_size:    usize,
+        bins:         &[Complex<f32>],
+        ifreq:        &[f32],
+        _sample_rate: f32,
+        fft_size:     usize,
     ) {
         let num_bins = fft_size / 2 + 1;
         debug_assert!(bins.len() >= num_bins);

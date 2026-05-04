@@ -29,6 +29,11 @@ smallvec = "1"
 # Zero cost in normal builds (neither debug nor release).
 probe = []
 
+# Builds a side-by-side "dev" copy of the plugin with a different display name,
+# CLAP ID, and VST3 class ID, so it can coexist in the host with the main build.
+# No behavioural difference — purely identity overrides in src/lib.rs.
+dev-build = []
+
 [[test]]
 name = "calibration_roundtrip"
 required-features = ["probe"]

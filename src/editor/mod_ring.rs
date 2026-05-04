@@ -43,7 +43,17 @@ impl ModRingState {
 
 /// Draw the modulation ring overlay around an anchor point. Returns the
 /// toggle that was clicked this frame, or None.
-pub fn mod_ring_overlay(ui: &mut Ui, center: Pos2, state: &ModRingState) -> Option<ModRingToggle> {
+///
+/// Interact IDs are derived from `key` (slot/curve/node) so the widget retains
+/// identity across window resize, anchor reposition, and DPI changes — pixel
+/// coordinates are not stable between frames and would invalidate egui's
+/// per-widget click state.
+pub fn mod_ring_overlay(
+    ui:     &mut Ui,
+    center: Pos2,
+    key:    crate::dsp::modulation_ring::RingKey,
+    state:  &ModRingState,
+) -> Option<ModRingToggle> {
     let radius = crate::editor::theme::MOD_RING_RADIUS;
     let dot_radius = crate::editor::theme::MOD_RING_DOT_RADIUS;
     let painter = ui.painter();
@@ -69,7 +79,7 @@ pub fn mod_ring_overlay(ui: &mut Ui, center: Pos2, state: &ModRingState) -> Opti
 
         let hit = ui.interact(
             egui::Rect::from_center_size(pos, egui::vec2(dot_radius * 2.0, dot_radius * 2.0)),
-            ui.id().with(("mod_ring", toggle as i32, center.x as i32, center.y as i32)),
+            ui.id().with(("mod_ring", key.slot, key.curve, key.node, toggle as u8)),
             egui::Sense::click(),
         );
         if hit.clicked() && enabled {

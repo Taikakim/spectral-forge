@@ -72,7 +72,10 @@ impl Default for SpectralForge {
 }
 
 impl Plugin for SpectralForge {
+    #[cfg(not(feature = "dev-build"))]
     const NAME: &'static str = "Spectral Forge";
+    #[cfg(feature = "dev-build")]
+    const NAME: &'static str = "Spectral Forge (Dev)";
     const VENDOR: &'static str = "Kim";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -259,7 +262,10 @@ impl Plugin for SpectralForge {
 }
 
 impl ClapPlugin for SpectralForge {
+    #[cfg(not(feature = "dev-build"))]
     const CLAP_ID: &'static str = "com.spectral-forge.spectral-forge";
+    #[cfg(feature = "dev-build")]
+    const CLAP_ID: &'static str = "com.spectral-forge.spectral-forge-dev";
     const CLAP_DESCRIPTION: Option<&'static str> = Some("Spectral compressor");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
@@ -271,7 +277,10 @@ impl ClapPlugin for SpectralForge {
 impl Vst3Plugin for SpectralForge {
     // Every VST3 plugin requires a globally unique 16-byte ID.
     // This is exactly 16 characters long.
+    #[cfg(not(feature = "dev-build"))]
     const VST3_CLASS_ID: [u8; 16] = *b"TaikakimSpcForge";
+    #[cfg(feature = "dev-build")]
+    const VST3_CLASS_ID: [u8; 16] = *b"TaikakimSpcForgD";
 
     // This tells the DAW what folder to put your plugin in.
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[

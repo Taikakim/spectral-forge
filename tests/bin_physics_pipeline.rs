@@ -145,6 +145,107 @@ fn writer_sets_mass_then_reader_observes_it() {
     );
 }
 
+// ── Regression test: writer at slot ≠ 0 must not corrupt upstream audio ──────
+//
+// Before the fix, FxMatrix promoted writer slots to the front of `phys_order`
+// while the audio assembly inner loop continued to read `slot_out[0..s]` in
+// numerical order. Placing a writer at slot N > 0 caused that writer to read
+// stale (previous-hop, zero on first hop) `slot_out[0..N]` instead of the
+// freshly produced upstream audio — silencing the chain on the first hop and
+// adding 1 hop of latency thereafter.
+//
+// This test pins the new contract: audio + physics flow strictly in numerical
+// slot order. With the writer at slot 3 receiving audio routed through slot 0,
+// the chain must deliver the input magnitude to Master on the very first hop,
+// and the downstream reader at slot 5 must observe the writer's mass write.
+
+static OBSERVED_MASS_BITS_2: AtomicU32 = AtomicU32::new(0);
+
+struct MockReader2;
+impl spectral_forge::dsp::modules::SpectralModule for MockReader2 {
+    fn process(
+        &mut self,
+        _channel: usize,
+        _stereo_link: StereoLink,
+        _target: FxChannelTarget,
+        _bins: &mut [Complex<f32>],
+        _sidechain: Option<&[f32]>,
+        _curves: &[&[f32]],
+        suppression_out: &mut [f32],
+        physics: Option<&mut BinPhysics>,
+        ctx: &ModuleContext<'_>,
+    ) {
+        debug_assert!(physics.is_none());
+        let bp = ctx.bin_physics.expect("reader receives ctx.bin_physics");
+        OBSERVED_MASS_BITS_2.store(bp.mass[PROBE_BIN].to_bits(), Ordering::SeqCst);
+        suppression_out.fill(0.0);
+    }
+    fn reset(&mut self, _sample_rate: f32, _fft_size: usize) {}
+    fn module_type(&self) -> ModuleType { ModuleType::Gain }
+    fn num_curves(&self) -> usize { 0 }
+}
+
+#[test]
+fn writer_at_nonzero_slot_preserves_upstream_audio() {
+    let n = 1025usize;
+    let fft_size = 2048usize;
+    let sample_rate = 48000.0_f32;
+
+    // Empty slots 0..7, Master at 8. Slot 0 stays Empty (acts as passthrough).
+    let mut types = [ModuleType::Empty; 9];
+    types[8] = ModuleType::Master;
+    let mut fm = FxMatrix::new(sample_rate, fft_size, &types);
+
+    // MockWriter at slot 3, MockReader2 at slot 5. Force slot 3 as writer.
+    fm.slots[3] = Some(Box::new(MockWriter));
+    fm.slots[5] = Some(Box::new(MockReader2));
+    fm.test_force_writer(3);
+
+    // Route: input → slot 0 (Empty passthrough) → slot 3 → slot 5 → Master.
+    let mut rm = RouteMatrix::default();
+    rm.send = [[0.0f32; MAX_SLOTS]; MAX_MATRIX_ROWS];
+    rm.send[0][3] = 1.0;
+    rm.send[3][5] = 1.0;
+    rm.send[5][8] = 1.0;
+
+    let curves: Vec<Vec<Vec<f32>>> = (0..9)
+        .map(|_| (0..7).map(|_| vec![1.0f32; MAX_NUM_BINS]).collect())
+        .collect();
+    let sc: [Option<&[f32]>; 9] = [None; 9];
+    let targets = [FxChannelTarget::All; 9];
+    let ctx = ModuleContext::new(
+        sample_rate, fft_size, n,
+        10.0, 100.0, 0.0, 0.0, false, false,
+    );
+    let mut supp = vec![0.0f32; n];
+
+    OBSERVED_MASS_BITS_2.store(0, Ordering::SeqCst);
+
+    let input_mag = 2.0_f32;
+    let mut bins: Vec<Complex<f32>> = vec![Complex::new(input_mag, 0.0); n];
+    fm.process_hop(
+        0, StereoLink::Linked, &mut bins, &sc, &targets,
+        &curves, &rm, &ctx, &mut supp, n,
+        true,
+    );
+
+    // Audio: with the fix, slot 0 processes first (passthrough), slot 3 reads
+    // its fresh output, slot 5 reads slot 3's output, Master sums slot 5. The
+    // input magnitude survives end-to-end on the first hop.
+    let out_mag = bins[PROBE_BIN].norm();
+    assert!(
+        (out_mag - input_mag).abs() < 1e-4,
+        "writer at slot 3 corrupted upstream audio: input={input_mag}, output={out_mag}"
+    );
+
+    // Physics: writer at slot 3 sets mass, reader at slot 5 observes it.
+    let observed = f32::from_bits(OBSERVED_MASS_BITS_2.load(Ordering::SeqCst));
+    assert!(
+        (observed - TEST_MASS).abs() < 1e-5,
+        "reader at slot 5 should observe mass={TEST_MASS} from writer at slot 3; got {observed}"
+    );
+}
+
 // ── phase_test_ctx helper ─────────────────────────────────────────────────────
 
 fn phase_test_ctx<'a>(

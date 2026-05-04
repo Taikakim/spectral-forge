@@ -577,7 +577,7 @@ pub fn create_editor(
                                     } else {
                                         Default::default()
                                     };
-                                    let toggle_clicked = mod_ring_overlay(ui, anchor_pos, &state);
+                                    let toggle_clicked = mod_ring_overlay(ui, anchor_pos, ring_key, &state);
                                     // Write on click (lock scope: write only, minimal duration).
                                     if let Some(t) = toggle_clicked {
                                         if let Some(ref bank_arc) = ring_states {
@@ -1101,17 +1101,21 @@ pub fn create_editor(
                                             .range(-1.0..=1.0)
                                             .speed(1.0 / 300.0)
                                             .custom_formatter(move |v, _range| {
+                                                // Modules without a calibrated offset_fn (default_config)
+                                                // have y_label="" and offset_fn=off_identity. Computing
+                                                // phys from a constant g_off would render a fixed string
+                                                // and the slider would appear stuck. Fall back to the
+                                                // raw normalised value so the drag is visible.
+                                                if off_cfg.y_label.is_empty() {
+                                                    return format!("{:+.2}", v as f32);
+                                                }
                                                 let g_off = (off_cfg.offset_fn)(1.0, v as f32);
                                                 let phys = crv::gain_to_display(
                                                     off_disp_idx, g_off,
                                                     off_atk_ms, off_rel_ms,
                                                     off_db_min, off_db_max,
                                                 );
-                                                if off_cfg.y_label.is_empty() {
-                                                    format!("{:.2}", phys)
-                                                } else {
-                                                    format!("{:.1} {}", phys, off_cfg.y_label)
-                                                }
+                                                format!("{:.1} {}", phys, off_cfg.y_label)
                                             })
                                     );
                                     if resp.drag_started() { setter.begin_set_parameter(off_p); }

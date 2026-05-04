@@ -40,12 +40,6 @@ pub struct FxMatrix {
     /// `prev_mags[slot * MAX_NUM_BINS + k]`. Zeroed at reset.
     prev_mags: Vec<f32>,
 
-    /// Slot iteration order for the main 0..8 loop: writers (writes_bin_physics=true)
-    /// first, then non-writers, both in numerical sub-order. Always size 8 (slots 0..7).
-    /// Recomputed only at sync_slot_types — never per block. When bin_physics_in_use is
-    /// false, equals (0..8).collect() (current numerical order, no semantic change).
-    phys_order: Vec<usize>,
-
     /// True if any slot in 0..8 (or Master) opts in via spec.writes_bin_physics. When
     /// false, the BinPhysics assembly + velocity loops are skipped entirely.
     bin_physics_in_use: bool,
@@ -53,6 +47,12 @@ pub struct FxMatrix {
     /// Per-slot writer flag, mirrors module_spec(ty).writes_bin_physics.
     /// Indexed 0..MAX_SLOTS (includes Master at index 8). Recomputed by
     /// recompute_phys_topology whenever a slot's module changes.
+    ///
+    /// Writers receive `physics: Some(&mut mix_phys)` and `ctx.bin_physics: None`.
+    /// Readers receive `physics: None` and `ctx.bin_physics: Some(&mix_phys)` (when
+    /// `bin_physics_in_use`). Audio and physics both flow strictly in numerical slot
+    /// order — to feed a reader from a writer's output, place the writer at a lower
+    /// slot index than the reader.
     writer_bits: [bool; MAX_SLOTS],
 }
 
@@ -81,7 +81,6 @@ impl FxMatrix {
             slot_phys:   (0..MAX_SLOTS).map(|_| crate::dsp::bin_physics::BinPhysics::new()).collect(),
             mix_phys:    crate::dsp::bin_physics::BinPhysics::new(),
             prev_mags:   vec![0.0; MAX_SLOTS * MAX_NUM_BINS],
-            phys_order:  { let mut v = Vec::with_capacity(8); v.extend(0..8usize); v },
             bin_physics_in_use: false,
             writer_bits: [false; MAX_SLOTS],
         };
@@ -186,46 +185,28 @@ impl FxMatrix {
             }
         }
         if any_changed {
-            nih_plug::util::permit_alloc(|| { self.recompute_phys_topology(); });
+            self.recompute_phys_topology();
         }
     }
 
-    /// Recompute phys_order (writers first, then non-writers) and bin_physics_in_use.
-    /// Called from sync_slot_types whenever a slot's module changes.
-    /// Alloc-free: uses stack-allocated [usize; 8] scratch arrays; phys_order.clear()
-    /// retains capacity 8 (allocated in new()), so push never reallocates.
+    /// Recompute `writer_bits` (mirrors `module_spec(ty).writes_bin_physics`) and
+    /// `bin_physics_in_use` (any slot opts in). Called from `sync_slot_types`
+    /// whenever a slot's module changes. Alloc-free; runs on the audio thread.
+    ///
+    /// Slot iteration order is purely numerical (0..MAX_SLOTS). Writers placed at
+    /// slot N produce physics that downstream slots (>N) consume via the existing
+    /// `slot_phys[0..s]` mix. This matches the audio routing invariant
+    /// (`route_matrix.send[src][dst]` is forward-only, src < dst).
     fn recompute_phys_topology(&mut self) {
         use crate::dsp::modules::module_spec;
-        let mut writers: [usize; 8] = [0; 8];
-        let mut readers: [usize; 8] = [0; 8];
-        let mut nw = 0usize;
-        let mut nr = 0usize;
         let mut any_writer = false;
-
-        for s in 0..8 {
+        for s in 0..MAX_SLOTS {
             let ty = self.slots[s].as_ref().map(|m| m.module_type())
                 .unwrap_or(ModuleType::Empty);
-            let spec = module_spec(ty);
-            self.writer_bits[s] = spec.writes_bin_physics;
-            if spec.writes_bin_physics {
-                writers[nw] = s; nw += 1;
-                any_writer = true;
-            } else {
-                readers[nr] = s; nr += 1;
-            }
+            let writes = module_spec(ty).writes_bin_physics;
+            self.writer_bits[s] = writes;
+            if writes { any_writer = true; }
         }
-
-        // Master (slot 8) is always last, never in phys_order — but if Master ever opts in
-        // it can still flip bin_physics_in_use:
-        let master_ty = self.slots[8].as_ref().map(|m| m.module_type())
-            .unwrap_or(ModuleType::Empty);
-        let master_spec = module_spec(master_ty);
-        self.writer_bits[8] = master_spec.writes_bin_physics;
-        if master_spec.writes_bin_physics { any_writer = true; }
-
-        self.phys_order.clear();
-        for i in 0..nw { self.phys_order.push(writers[i]); }
-        for i in 0..nr { self.phys_order.push(readers[i]); }
         self.bin_physics_in_use = any_writer;
     }
 
@@ -476,17 +457,6 @@ impl FxMatrix {
         enable_heavy_modules: bool,
     ) {
         debug_assert!(self.amp_scratch.len() >= num_bins);
-        // Guard against the stale-audio defect that arises when bin_physics_in_use=true
-        // and phys_order reorders slots: audio assembly (for src in 0..s) reads slot_out
-        // in numerical order, which would contain stale (previous-hop) data for any writer
-        // slot moved earlier in phys_order. Phase 5 must resolve topology before opting in
-        // via writes_bin_physics=true. Today this is inert (no module opts in).
-        debug_assert!(
-            !self.bin_physics_in_use
-                || self.phys_order.iter().enumerate().all(|(i, &s)| s == i),
-            "BinPhysics writer reordering is active but audio assembly still uses \
-             numerical order — would read stale slot_out. Phase 5 must resolve."
-        );
 
         // hop_dt: wall-clock time elapsed per hop in seconds.
         // OVERLAP=4, so hop = fft_size / 4 samples.
@@ -503,8 +473,13 @@ impl FxMatrix {
             self.virtual_out[v][..num_bins].fill(Complex::new(0.0, 0.0));
         }
 
-        for i in 0..self.phys_order.len() {  // writers first, then non-writers; Master (slot 8) is handled separately below
-            let s = self.phys_order[i];
+        // Iterate slots strictly in numerical order (Master at slot 8 is handled separately
+        // below). Audio and physics both flow forward — `route_matrix.send[src][dst]` only
+        // takes effect for `src < dst`. Writer modules (`writer_bits[s] == true`) get a
+        // mutable physics handle for their own slot; downstream slots consume the resulting
+        // `slot_phys[s]` via the same numerical-order mix-from loop below. To feed a reader
+        // from a writer, the user must place the writer at a lower slot index.
+        for s in 0..(MAX_SLOTS - 1) {
             // Build this slot's input from the route matrix.
             // Slot 0 always receives the plugin's main audio input.
             // All slots additionally receive weighted sums of previous-slot outputs.
@@ -757,49 +732,18 @@ impl FxMatrix {
     /// Test-only: force a slot to be treated as a BinPhysics writer.
     ///
     /// `recompute_phys_topology` derives `writer_bits` from
-    /// `module_spec(module_type).writes_bin_physics`, which is `false` for all
-    /// real module types today. Mock test modules can't easily declare
-    /// themselves writers via the spec, so this helper directly sets the
-    /// writer bit, flips `bin_physics_in_use`, and promotes the slot to the
-    /// front of `phys_order` (the writer-first iteration order).
+    /// `module_spec(module_type).writes_bin_physics`. Mock test modules can't
+    /// easily declare themselves writers via the spec, so this helper directly
+    /// sets the writer bit and flips `bin_physics_in_use`. Safe for any slot in
+    /// `0..MAX_SLOTS` — audio and physics assembly both follow numerical slot
+    /// order, so a writer at any slot reads upstream `slot_out`/`slot_phys` from
+    /// already-processed slots `0..slot` and feeds downstream `slot+1..` via the
+    /// standard mix path.
     ///
-    /// Slot 8 (Master) is also valid; it is not in `phys_order` (Master
-    /// always runs last) but its writer_bit still gates the dispatch split.
-    ///
-    /// **Not for production use.** Phase 5 will remove the need for this once
-    /// real writer modules ship and the spec-based path is exercised directly.
-    ///
-    /// # PANICS
-    ///
-    /// **Only `slot == 0` or `slot == 8` are safe today.**
-    ///
-    /// Calling this with `slot ∈ 1..=7` will:
-    /// 1. Promote that slot to the front of `phys_order` (writer-first ordering).
-    /// 2. Immediately trip the `debug_assert!` in `process_hop` (lines 327–332)
-    ///    that guards the stale-audio defect: audio assembly (`for src in 0..s`)
-    ///    reads `slot_out` in *numerical* order, so any writer slot moved earlier
-    ///    in `phys_order` would read previous-hop (stale) data.
-    ///
-    /// Phase 5 must teach the audio-assembly loop to follow `phys_order` (not
-    /// numerical order) before this restriction can be lifted. Until then,
-    /// **do not call `test_force_writer` with slot 1..=7 in any test**.
+    /// **Not for production use.**
     pub fn test_force_writer(&mut self, slot: usize) {
         debug_assert!(slot < MAX_SLOTS);
-        debug_assert!(
-            slot == 0 || slot == 8,
-            "test_force_writer: only slot 0 or 8 are safe today; \
-             slots 1..=7 trip the stale-audio guard in process_hop. \
-             Phase 5 will lift this."
-        );
         self.writer_bits[slot] = true;
         self.bin_physics_in_use = true;
-        if slot < 8 {
-            if let Some(pos) = self.phys_order.iter().position(|&s| s == slot) {
-                if pos != 0 {
-                    let s_val = self.phys_order.remove(pos);
-                    self.phys_order.insert(0, s_val);
-                }
-            }
-        }
     }
 }

@@ -497,47 +497,53 @@ impl Pipeline {
             .unwrap_or_default();
 
         // Only pay the per-key cost if any ring is active.
+        // Snap node Y values once per block (single 4536-byte memcpy — RT-safe).
+        // A per-key try_lock could succeed for some keys and fail for others within
+        // one block, scaling slot_curve_cache asymmetrically. One snapshot keeps
+        // every key consistent. If the lock contends, skip the ring entirely this
+        // block — the cache stays at its un-scaled values, audio continues normally.
         if ring_snapshot.entry_count() > 0 {
-            let current_beat = transport.pos_beats().unwrap_or(0.0) as f32;
-            let block_samples_usize = buffer.samples().max(1).min(256);
-            let mut ring_out = [0.0_f32; 256];
+            if let Some(nodes_guard) = params.slot_curve_nodes.try_lock() {
+                let nodes = *nodes_guard;
+                drop(nodes_guard);
 
-            for (key, ring_state) in ring_snapshot.iter() {
-                let s = key.slot  as usize;
-                let c = key.curve as usize;
-                let n = key.node  as usize;
-                if s >= 9 || c >= 7 || n >= 6 { continue; }
+                let current_beat = transport.pos_beats().unwrap_or(0.0) as f32;
+                let block_samples_usize = buffer.samples().max(1).min(256);
+                let mut ring_out = [0.0_f32; 256];
 
-                // Read the live node Y from params. Skip gracefully if lock is contended.
-                let live_y = match params.slot_curve_nodes.try_lock() {
-                    Some(nodes) => nodes[s][c][n].y,
-                    None => continue,
-                };
+                for (key, ring_state) in ring_snapshot.iter() {
+                    let s = key.slot  as usize;
+                    let c = key.curve as usize;
+                    let n = key.node  as usize;
+                    if s >= 9 || c >= 7 || n >= 6 { continue; }
 
-                // If live_y is near zero the ring has no meaningful scale effect — skip.
-                if live_y.abs() < 0.05 { continue; }
+                    let live_y = nodes[s][c][n].y;
 
-                let tf_state = &mut self.ring_transforms[
-                    crate::dsp::modulation_ring::RingStateBank::key_index(key)
-                ];
-                crate::dsp::modulation_ring::apply_ring(
-                    tf_state,
-                    crate::dsp::modulation_ring::RingApplyArgs {
-                        ring:          ring_state,
-                        input_value:   live_y,
-                        current_beat,
-                        block_samples: block_samples_usize,
-                    },
-                    &mut ring_out[..block_samples_usize],
-                );
+                    // If live_y is near zero the ring has no meaningful scale effect — skip.
+                    if live_y.abs() < 0.05 { continue; }
 
-                // Use the final sample as the "target" scaled Y for this block.
-                let latched_y = ring_out[block_samples_usize - 1];
-                let scale = (latched_y / live_y).clamp(0.1, 10.0);
-                if (scale - 1.0).abs() < 1e-6 { continue; }
+                    let tf_state = &mut self.ring_transforms[
+                        crate::dsp::modulation_ring::RingStateBank::key_index(key)
+                    ];
+                    crate::dsp::modulation_ring::apply_ring(
+                        tf_state,
+                        crate::dsp::modulation_ring::RingApplyArgs {
+                            ring:          ring_state,
+                            input_value:   live_y,
+                            current_beat,
+                            block_samples: block_samples_usize,
+                        },
+                        &mut ring_out[..block_samples_usize],
+                    );
 
-                for v in self.slot_curve_cache[s][c].iter_mut() {
-                    *v *= scale;
+                    // Use the final sample as the "target" scaled Y for this block.
+                    let latched_y = ring_out[block_samples_usize - 1];
+                    let scale = (latched_y / live_y).clamp(0.1, 10.0);
+                    if (scale - 1.0).abs() < 1e-6 { continue; }
+
+                    for v in self.slot_curve_cache[s][c].iter_mut() {
+                        *v *= scale;
+                    }
                 }
             }
         }
@@ -1156,6 +1162,13 @@ impl Pipeline {
                     complex_buf[k] = Complex::from_polar(m, p);
                 }
             }
+
+            // realfft requires Im(X[0]) == Im(X[Nyquist]) == 0 (Hermitian invariant
+            // for real IFFT output). Modules and PLPV's Complex::from_polar may have
+            // introduced a non-zero imag at these special bins; project back into the
+            // real-output subspace before IFFT to avoid an unwinding-panic abort.
+            complex_buf[0].im = 0.0;
+            complex_buf[num_bins - 1].im = 0.0;
 
             ifft_plan.process(complex_buf, block).unwrap();
 

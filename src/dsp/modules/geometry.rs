@@ -258,9 +258,9 @@ impl SpectralModule for GeometryModule {
         debug_assert!(curves.len() >= 5, "Geometry needs 5 curves: AMOUNT/MODE_CAP/DAMP_REL/THRESH/MIX");
 
         #[cfg(any(test, feature = "probe"))]
-        let mut probe_amount_pct = 0.0_f32;
+        let probe_amount_pct: f32;
         #[cfg(any(test, feature = "probe"))]
-        let mut probe_mix_pct = 0.0_f32;
+        let probe_mix_pct: f32;
 
         match self.mode {
             GeometryMode::Chladni => {
