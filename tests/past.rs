@@ -233,7 +233,7 @@ fn reverse_reads_backward_through_history() {
 #[test]
 fn stretch_at_unity_rate_returns_recent_history() {
     use spectral_forge::dsp::history_buffer::HistoryBuffer;
-    use spectral_forge::dsp::modules::past::{PastModule, PastMode};
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, PastScalars};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
 
@@ -247,10 +247,13 @@ fn stretch_at_unity_rate_returns_recent_history() {
 
     let mut m = PastModule::new(48000.0, 2048);
     m.set_mode(PastMode::Stretch);
+    // Scalar rate drives stretch now (Task 10). rate=1.0 is unity, matching the
+    // pre-Task-10 TIME=0.5 curve-averaging behaviour.
+    m.set_scalars(PastScalars { rate: 1.0, ..PastScalars::safe_default() });
 
     let mut bins = vec![Complex::new(0.0, 0.0); 256];
     let amount    = vec![1.0_f32; 256];
-    let time      = vec![0.5_f32; 256];   // unity rate
+    let time      = vec![0.5_f32; 256];
     let threshold = vec![0.0_f32; 256];
     let spread    = vec![0.0_f32; 256];
     let mix       = vec![1.0_f32; 256];
@@ -268,7 +271,7 @@ fn stretch_at_unity_rate_returns_recent_history() {
 #[test]
 fn stretch_at_half_rate_advances_read_phase_slowly() {
     use spectral_forge::dsp::history_buffer::HistoryBuffer;
-    use spectral_forge::dsp::modules::past::{PastModule, PastMode};
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, PastScalars};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
 
@@ -281,9 +284,12 @@ fn stretch_at_half_rate_advances_read_phase_slowly() {
     }
     let mut m = PastModule::new(48000.0, 2048);
     m.set_mode(PastMode::Stretch);
+    // Scalar rate drives stretch now (Task 10). rate=0.5 is half-speed, matching
+    // the pre-Task-10 TIME=0.25 curve-averaging behaviour (4^(2*0.25-1) = 0.5).
+    m.set_scalars(PastScalars { rate: 0.5, ..PastScalars::safe_default() });
 
     let amount    = vec![1.0_f32; 256];
-    let time      = vec![0.25_f32; 256];  // < 0.5 → < 1.0× rate (slower)
+    let time      = vec![0.25_f32; 256];
     let threshold = vec![0.0_f32; 256];
     let spread    = vec![0.0_f32; 256];
     let mix       = vec![1.0_f32; 256];

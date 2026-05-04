@@ -90,6 +90,17 @@ fn reverse_uses_scalar_window_not_curve_average() {
 }
 
 #[test]
+fn stretch_uses_scalar_rate_not_curve_average() {
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, PastScalars};
+
+    let mut m = PastModule::new(48000.0, 2048);
+    m.set_past_mode(PastMode::Stretch);
+    m.set_scalars(PastScalars { rate: 2.0, dither: 0.0, ..PastScalars::safe_default() });
+    assert!((m.scalars().rate - 2.0).abs() < 1e-6);
+    assert_eq!(m.scalars().dither, 0.0);
+}
+
+#[test]
 fn past_scalars_safe_default_is_musically_inert() {
     use spectral_forge::dsp::modules::past::PastScalars;
     let s = PastScalars::safe_default();

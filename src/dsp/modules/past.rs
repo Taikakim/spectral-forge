@@ -147,9 +147,20 @@ pub enum SortKey {
 const MAX_SORT_BINS: usize = 256;
 const MAX_NUM_BINS_LOCAL: usize = crate::dsp::pipeline::MAX_NUM_BINS;
 
+/// Stretch rate clamps. Keep the FloatParam range (build.rs) and this kernel
+/// clamp aligned. The 0.05 floor prevents the read-pointer from freezing;
+/// user-facing musical range is 0.25..4.0 (see spec §7.1).
+const STRETCH_RATE_MIN: f32 = 0.05;
+const STRETCH_RATE_MAX: f32 = 4.0;
+
 /// Mode-specific scalar controls for Past. Replaces the curve-averaging hacks
 /// in Reverse and Stretch with honest per-slot scalars; gates the soft-clip
 /// post-pass; carries the DecaySorter floor.
+///
+/// Note: `Default` returns all-zeros for `..Default::default()` partial-update
+/// syntax in tests. Production code (Pipeline wiring in Task 12) should use
+/// `safe_default()` as the base and apply param overrides on top, never `Default`.
+///
 /// See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PastScalars {
@@ -157,7 +168,8 @@ pub struct PastScalars {
     pub floor_bin:     usize,
     /// Reverse window length in **frames** (Pipeline converts seconds → frames each block).
     pub window_frames: u32,
-    /// Stretch read rate. 1.0 = unity, 0.05..4.0 musical range.
+    /// Stretch read rate. 1.0 = unity. Param range is 0.05..4.0 (the 0.05 floor
+    /// prevents pointer freeze; user-facing musical range is 0.25..4.0 — see spec §7.1).
     pub rate:          f32,
     /// Stretch dither amount (0..1, normalised — Pipeline divides %-param by 100).
     pub dither:        f32,
@@ -333,7 +345,7 @@ impl SpectralModule for PastModule {
             PastMode::DecaySorter=> self.apply_decay_sorter(ch, bins, history, amount, threshold, mix, ctx),
             PastMode::Convolution=> self.apply_convolution(ch, bins, history, amount, time, threshold, mix, ctx),
             PastMode::Reverse    => self.apply_reverse(ch, bins, history, amount, threshold, mix, ctx),
-            PastMode::Stretch    => self.apply_stretch(ch, bins, history, amount, time, spread, mix, ctx),
+            PastMode::Stretch    => self.apply_stretch(ch, bins, history, amount, mix, ctx),
         }
     }
 
@@ -502,6 +514,8 @@ impl PastModule {
         let st = &mut self.channels[ch];
         let age = (st.reverse_read_offset % window) as usize;
 
+        // Read first, advance only on success — keeps the offset frozen while the
+        // history ring fills (cold-start guard).
         let frame = match hist.read_frame(ch, age) { Some(f) => f, None => return };
         st.reverse_read_offset = (st.reverse_read_offset + 1) % window;
         for k in 0..n {
@@ -518,15 +532,12 @@ impl PastModule {
 
     fn apply_stretch(
         &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
-        amount: &[f32], time: &[f32], spread: &[f32], mix: &[f32], ctx: &ModuleContext<'_>,
+        amount: &[f32], mix: &[f32],
+        ctx: &ModuleContext<'_>,
     ) {
         let n = bins.len().min(ctx.num_bins);
-        // TIME maps [0..1] log-scale to [0.25×..4×] read rate.
-        // 0.0 → 0.25, 0.5 → 1.0, 1.0 → 4.0
-        let t_avg = if n == 0 { 0.0 } else {
-            time.iter().take(n).copied().sum::<f32>() / n as f32
-        };
-        let rate = 4.0_f32.powf(2.0 * t_avg.clamp(0.0, 1.0) - 1.0);
+        let rate = self.scalars.rate.clamp(STRETCH_RATE_MIN, STRETCH_RATE_MAX);
+        let dither_amt = self.scalars.dither.clamp(0.0, 1.0);
 
         // −2 because read_fractional reads frame[age_floor] AND frame[age_floor+1];
         // both must be in range (< frames_used). Using saturating_sub(1) would let
@@ -553,10 +564,6 @@ impl PastModule {
         let if_offset = ctx.if_offset.unwrap_or(&[]);
         // Need k for parallel indexing into bins / sort_scratch / if_offset; iterator
         // refactor would not improve readability here.
-        // TODO(v2): RNG state currently only advances on bins where SPREAD>0; if
-        // SPREAD is zero everywhere the per-channel state never updates. Move the
-        // single-step advance out of the per-bin branch when wiring v2 (Laroche-
-        // Dolson). Dither quality is fine for v1.
         #[allow(clippy::needless_range_loop)]
         for k in 0..n {
             let bin_amount = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
@@ -569,16 +576,17 @@ impl PastModule {
             let rot = if_off * (rate - 1.0);
             sample = self.rotator.rotate(sample, rot, 1.0);
 
-            // Per-bin hash dither based on SPREAD curve (xorshift32).
-            let spr = spread.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-            if spr > 1e-6 {
-                let s = self.channels[ch].stretch_rng;
-                let mut x = s ^ (k as u32).wrapping_mul(0x9E37_79B9);
-                x ^= x << 13;
-                x ^= x >> 17;
-                x ^= x << 5;
-                self.channels[ch].stretch_rng = x;
-                let dither_phase = ((x as f32 / u32::MAX as f32) - 0.5) * spr * 0.05;
+            // Always tick the RNG (xorshift32) per bin so the sequence stays
+            // consistent across dither enable/disable cycles. Apply the
+            // resulting phase rotation only when `dither_amt > 0`.
+            let s = self.channels[ch].stretch_rng;
+            let mut x = s ^ (k as u32).wrapping_mul(0x9E37_79B9);
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.channels[ch].stretch_rng = x;
+            if dither_amt > 0.0 {
+                let dither_phase = ((x as f32 / u32::MAX as f32) - 0.5) * dither_amt * 0.05;
                 sample = self.rotator.rotate(sample, dither_phase, 1.0);
             }
             let value = sample * bin_amount;
