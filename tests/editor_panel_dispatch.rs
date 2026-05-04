@@ -56,3 +56,13 @@ fn past_active_layout_shapes_visible_curves_per_mode() {
     // rendering all curve_labels.
     assert!(module_spec(ModuleType::Dynamics).active_layout.is_none());
 }
+
+#[test]
+fn past_module_spec_advertises_panel_widget() {
+    use spectral_forge::dsp::modules::{module_spec, ModuleType};
+    let spec = module_spec(ModuleType::Past);
+    assert!(
+        spec.panel_widget.is_some(),
+        "Past must declare a panel_widget for Soft Clip + scalars",
+    );
+}

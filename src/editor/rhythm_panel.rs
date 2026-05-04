@@ -25,7 +25,12 @@ const STEPS:     usize = 8;
 /// Render the per-slot Rhythm panel: a mode label and the 8×8 Arpeggiator step grid.
 ///
 /// Signature matches `crate::dsp::modules::PanelWidgetFn`.
-pub fn render(ui: &mut Ui, params: &SpectralForgeParams, slot: usize) {
+pub fn render(
+    ui: &mut Ui,
+    params: &SpectralForgeParams,
+    _setter: &nih_plug::prelude::ParamSetter<'_>,
+    slot: usize,
+) {
     if slot >= 9 { return; }
 
     let scale = *params.ui_scale.lock();

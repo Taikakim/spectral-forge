@@ -394,11 +394,18 @@ pub trait SpectralModule: Send {
 
 // ── ModuleSpec ─────────────────────────────────────────────────────────────
 
-/// Per-module panel callback. Receives the egui `Ui`, the param store, and a
-/// slot index so the panel can read/write that slot's parameters. Lives below
-/// the curve editor area in editor_ui.rs. Restricted to non-curve UI (step
-/// grids, mode pickers, etc.) — curves stay in their own canvas.
-pub type PanelWidgetFn = fn(&mut nih_plug_egui::egui::Ui, &crate::params::SpectralForgeParams, slot: usize);
+/// Per-module panel callback. Receives the egui `Ui`, the param store, a
+/// `ParamSetter` (so panels can drive automatable `FloatParam`/`BoolParam`
+/// updates with proper host-automation begin/set/end transactions), and the
+/// slot index. Lives below the curve editor area in editor_ui.rs. Restricted
+/// to non-curve UI (step grids, mode pickers, scalar fields, toggles, etc.)
+/// — curves stay in their own canvas.
+pub type PanelWidgetFn = fn(
+    &mut nih_plug_egui::egui::Ui,
+    &crate::params::SpectralForgeParams,
+    &nih_plug::prelude::ParamSetter<'_>,
+    slot: usize,
+);
 
 /// Per-mode descriptor for visible curves, label overrides, and help-box copy.
 /// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §8.
@@ -752,7 +759,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         curve_labels: &["AMOUNT", "TIME", "THRESHOLD", "SPREAD", "MIX"],
         supports_sidechain: false,
         wants_sidechain:    false,
-        panel_widget:       None,
+        panel_widget:       Some(crate::editor::past_panel::draw),
         writes_bin_physics: false,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
