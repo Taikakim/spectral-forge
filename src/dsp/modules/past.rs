@@ -145,6 +145,9 @@ pub enum SortKey {
 /// and not worth the cost — perceptually significant decay-time
 /// material lives in the lower bands.
 const MAX_SORT_BINS: usize = 256;
+/// Public alias of `MAX_SORT_BINS` so `Pipeline` can clamp `floor_bin` against it
+/// without reaching into the private const. Keep in sync with `MAX_SORT_BINS`.
+pub const MAX_SORT_BINS_PUB: usize = MAX_SORT_BINS;
 const MAX_NUM_BINS_LOCAL: usize = crate::dsp::pipeline::MAX_NUM_BINS;
 
 /// Stretch rate clamps. Keep the FloatParam range (build.rs) and this kernel
@@ -164,7 +167,9 @@ const STRETCH_RATE_MAX: f32 = 4.0;
 /// See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PastScalars {
-    /// DecaySorter `low_k` floor as bin index. 0 disables (default 230 Hz at fft 2048 / 48 kHz ≈ bin 10).
+    /// DecaySorter destination-bin floor (DecaySorter only). Pipeline clamps to
+    /// `[1, num_bins - MAX_SORT_BINS]` so DC stays untouched. Default 10 ≈ 230 Hz
+    /// at fft 2048 / 48 kHz, matching the legacy hardcoded value.
     pub floor_bin:     usize,
     /// Reverse window length in **frames** (Pipeline converts seconds → frames each block).
     pub window_frames: u32,
@@ -376,6 +381,14 @@ impl SpectralModule for PastModule {
     fn set_past_sort_key(&mut self, key: crate::dsp::modules::past::SortKey) {
         self.set_sort_key(key);
     }
+    fn set_past_scalars(&mut self, scalars: crate::dsp::modules::past::PastScalars) {
+        self.scalars = scalars;
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn test_past_scalars(&self) -> Option<crate::dsp::modules::past::PastScalars> {
+        Some(self.scalars)
+    }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
@@ -420,8 +433,9 @@ impl PastModule {
         amount: &[f32], threshold: &[f32], mix: &[f32], _ctx: &ModuleContext<'_>,
     ) {
         let n = bins.len();
-        // Bin 10 ≈ 230 Hz at fft 2048 / 48 kHz — first musically useful bin.
-        let low_k = 10usize.min(n.saturating_sub(1));
+        // Pipeline converts Hz → bin index (per-slot Floor param). Default ≈ 230 Hz
+        // at fft 2048 / 48 kHz → bin 10. Clamped to [1, num_bins - MAX_SORT_BINS] in Pipeline.
+        let low_k = self.scalars.floor_bin.min(n.saturating_sub(1));
         // Pick top MAX_SORT_BINS bins by current magnitude above THRESHOLD.
         // TODO(perf): linear min_by is O(n × MAX_SORT_BINS) — acceptable up to
         // fft=4096 (~330 K cmps/block); revisit before enabling fft=16384.

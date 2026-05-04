@@ -320,6 +320,30 @@ impl FxMatrix {
         }
     }
 
+    /// Propagate per-slot Past scalars (window/rate/dither/floor/soft_clip) from
+    /// params to PastModule instances. Called once per audio block (before process_hop).
+    /// See spec docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
+    pub fn set_past_scalars(
+        &mut self,
+        scalars: &[crate::dsp::modules::past::PastScalars; 9],
+    ) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_past_scalars(scalars[s]);
+            }
+        }
+    }
+
+    /// Test-only accessor: read back the scalars currently held by a Past slot.
+    /// Returns `None` for empty slots or non-Past modules.
+    #[cfg(any(test, feature = "probe"))]
+    pub fn test_past_scalars(
+        &self,
+        slot: usize,
+    ) -> Option<crate::dsp::modules::past::PastScalars> {
+        self.slots.get(slot)?.as_ref()?.test_past_scalars()
+    }
+
     /// Propagate per-slot KineticsMode from params to KineticsModule instances.
     /// Called once per audio block (before process_hop).
     pub fn set_kinetics_modes(&mut self, modes: &[crate::dsp::modules::kinetics::KineticsMode; 9]) {

@@ -325,6 +325,16 @@ pub trait SpectralModule: Send {
     fn set_past_mode(&mut self, _: crate::dsp::modules::past::PastMode) {}
     /// Update Past Decay-Sorter sort key. No-op for non-Past modules.
     fn set_past_sort_key(&mut self, _: crate::dsp::modules::past::SortKey) {}
+    /// Apply per-slot Past mode-specific scalars (window/rate/dither/floor/soft_clip).
+    /// Default no-op — only `PastModule` overrides this. See spec
+    /// docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
+    fn set_past_scalars(&mut self, _: crate::dsp::modules::past::PastScalars) {}
+
+    /// Test-only echo of currently-applied Past scalars. Default `None` —
+    /// `PastModule` overrides to return `Some(self.scalars())`. Used by
+    /// integration tests in `tests/past_pipeline.rs`.
+    #[cfg(any(test, feature = "probe"))]
+    fn test_past_scalars(&self) -> Option<crate::dsp::modules::past::PastScalars> { None }
 
     /// Update the operating mode for Kinetics modules. Default no-op for all other types.
     fn set_kinetics_mode(&mut self, _: crate::dsp::modules::kinetics::KineticsMode) {}

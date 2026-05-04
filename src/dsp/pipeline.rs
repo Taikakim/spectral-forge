@@ -826,6 +826,62 @@ impl Pipeline {
             self.fx_matrix.set_past_sort_keys(&*keys);
         }
 
+        // Snap per-slot Past scalar params and convert units (Hz → bin, s → frames,
+        // % → 0..1). See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
+        // Called per-block because params can be host-automated.
+        {
+            use crate::dsp::modules::past::{PastScalars, MAX_SORT_BINS_PUB};
+            let num_bins = self.fft_size / 2 + 1;
+            let hop_size_samples = (self.fft_size / OVERLAP).max(1) as f32;
+            let hop_seconds = hop_size_samples / self.sample_rate.max(1.0);
+            let capacity_frames = self.history.capacity_frames() as u32;
+
+            let mut past_scalars: [PastScalars; 9] =
+                std::array::from_fn(|_| PastScalars::safe_default());
+            for s in 0..9 {
+                let floor_hz = params
+                    .past_floor_param(s)
+                    .map(|p| p.smoothed.next())
+                    .unwrap_or(230.0);
+                let floor_bin =
+                    ((floor_hz / self.sample_rate.max(1.0)) * self.fft_size as f32).round() as usize;
+                let max_floor = num_bins.saturating_sub(MAX_SORT_BINS_PUB).max(1);
+                let floor_bin_clamped = floor_bin.clamp(1, max_floor);
+
+                let window_s = params
+                    .past_reverse_window_param(s)
+                    .map(|p| p.smoothed.next())
+                    .unwrap_or(1.0);
+                let window_frames =
+                    ((window_s / hop_seconds.max(1e-9)).round() as u32).max(1);
+                let window_frames_clamped = window_frames.min(capacity_frames.max(1)).max(1);
+
+                let rate = params
+                    .past_stretch_rate_param(s)
+                    .map(|p| p.smoothed.next())
+                    .unwrap_or(1.0);
+                // Dither param is stored as 0..100 with "%" unit; rescale to 0..1 for DSP.
+                let dither_pct = params
+                    .past_stretch_dither_param(s)
+                    .map(|p| p.smoothed.next())
+                    .unwrap_or(0.0);
+                let dither = dither_pct / 100.0;
+                let soft_clip = params
+                    .past_soft_clip_param(s)
+                    .map(|p| p.value())
+                    .unwrap_or(true);
+
+                past_scalars[s] = PastScalars {
+                    floor_bin:     floor_bin_clamped,
+                    window_frames: window_frames_clamped,
+                    rate,
+                    dither,
+                    soft_clip,
+                };
+            }
+            self.fx_matrix.set_past_scalars(&past_scalars);
+        }
+
         // Propagate kinetics modes + sources each block (try_lock is non-blocking; skipped if GUI holds lock).
         if let Some(modes) = params.slot_kinetics_mode.try_lock() {
             self.fx_matrix.set_kinetics_modes(&*modes);

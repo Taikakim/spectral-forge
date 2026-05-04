@@ -122,6 +122,44 @@ fn soft_clip_clamps_high_magnitude_when_on() {
     }
 }
 
+#[cfg(feature = "probe")]
+#[test]
+fn fx_matrix_set_past_scalars_dispatches_to_past_slots() {
+    use spectral_forge::dsp::fx_matrix::FxMatrix;
+    use spectral_forge::dsp::modules::ModuleType;
+    use spectral_forge::dsp::modules::past::PastScalars;
+
+    // Slot 0 = Past; everything else Empty.
+    let slot_types: [ModuleType; 9] = [
+        ModuleType::Past, ModuleType::Empty, ModuleType::Empty,
+        ModuleType::Empty, ModuleType::Empty, ModuleType::Empty,
+        ModuleType::Empty, ModuleType::Empty, ModuleType::Empty,
+    ];
+    let mut fxm = FxMatrix::new(48000.0, 2048, &slot_types);
+
+    // Custom scalars for slot 0; defaults elsewhere.
+    let mut want = [PastScalars::safe_default(); 9];
+    want[0] = PastScalars {
+        floor_bin: 42,
+        window_frames: 7,
+        rate: 1.5,
+        dither: 0.25,
+        soft_clip: false,
+    };
+    fxm.set_past_scalars(&want);
+
+    // Slot 0's PastModule must have received the scalars.
+    let s = fxm.test_past_scalars(0).expect("slot 0 must be Past");
+    assert_eq!(s.floor_bin, 42);
+    assert_eq!(s.window_frames, 7);
+    assert!((s.rate - 1.5).abs() < 1e-6);
+    assert!((s.dither - 0.25).abs() < 1e-6);
+    assert!(!s.soft_clip);
+
+    // Empty slot returns None.
+    assert!(fxm.test_past_scalars(1).is_none(), "Empty slot must yield None");
+}
+
 #[test]
 fn soft_clip_passes_low_magnitude_almost_unchanged() {
     use num_complex::Complex;
