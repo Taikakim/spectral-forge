@@ -58,8 +58,7 @@ pub fn curve_display_config(
         ModuleType::Circuit => default_config(),
         // TODO(5a.3-5a.12): replace with life_config(curve_idx) when kernels land
         ModuleType::Life => default_config(),
-        // TODO(5b2.5-5b2.9): replace with past_config(curve_idx) when kernels land
-        ModuleType::Past => default_config(),
+        ModuleType::Past => past_config(curve_idx, 0),
         // TODO(5b3.5-5b3.12): replace with kinetics_config(curve_idx) when kernels land
         ModuleType::Kinetics => default_config(),
         // TODO(6.5.*): replace with harmony_config(curve_idx) when kernels land
@@ -300,6 +299,53 @@ fn rhythm_config(_curve_idx: usize) -> CurveDisplayConfig {
 /// until physical-unit display ranges are decided.
 fn modulate_config(_curve_idx: usize) -> CurveDisplayConfig {
     default_config()
+}
+
+/// Per-curve display calibration for `ModuleType::Past`.
+///
+/// `mode` is currently unused at this level — the per-mode label overrides
+/// (Age vs Delay) live in `past::active_layout` (curve_layout::label_overrides).
+/// `past_config` produces axis units, ranges, grid lines, and offset_fn for the
+/// **physical** display layer; per-mode label changes happen above it.
+///
+/// See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §5.
+pub fn past_config(curve_idx: usize, _mode: u8) -> CurveDisplayConfig {
+    match curve_idx {
+        0 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        1 => CurveDisplayConfig {
+            // y_max placeholder; the painter substitutes `total_history_seconds`
+            // when rendering. The slider's custom_formatter passes the live
+            // value via gain_to_display(13, ...).
+            y_label: "s", y_min: 0.0, y_max: 1.0, y_log: false,
+            grid_lines: &[(0.25, "25%"), (0.5, "50%"), (0.75, "75%"), (1.0, "100%")],
+            y_natural: 0.0,
+            offset_fn: off_amount_norm,
+        },
+        2 => CurveDisplayConfig {
+            y_label: "dBFS", y_min: -80.0, y_max: 0.0, y_log: false,
+            grid_lines: &[(-60.0, "-60"), (-40.0, "-40"), (-20.0, "-20"), (-6.0, "-6")],
+            y_natural: -60.0,
+            offset_fn: off_thresh,
+        },
+        3 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        _ => default_config(),
+    }
 }
 
 fn default_config() -> CurveDisplayConfig {

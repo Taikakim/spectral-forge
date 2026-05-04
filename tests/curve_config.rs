@@ -104,3 +104,76 @@ fn display_curve_idx_routes_past_curves_to_specific_scales() {
     assert_eq!(display_curve_idx(ModuleType::Past, 3, GainMode::Add),  6,  "SPREAD/Smear → %");
     assert_eq!(display_curve_idx(ModuleType::Past, 4, GainMode::Add),  6,  "MIX → %");
 }
+
+#[test]
+fn past_config_returns_calibrated_display_per_curve() {
+    use spectral_forge::editor::curve_config::curve_display_config;
+    use spectral_forge::dsp::modules::{ModuleType, GainMode};
+
+    // The plan originally specified `std::ptr::eq(cfg.offset_fn as *const (),
+    // helper as *const ())`, but that comparison is unreliable for `#[inline]
+    // pub fn` helpers across crate boundaries — the test crate gets its own
+    // monomorphised copy with ThinLTO, so the pointer compare always fails
+    // even when routing is correct. We instead verify the routing by behaviour:
+    // each helper has a unique fingerprint over a few probe inputs, so
+    // matching all probes uniquely identifies which helper was wired.
+    //
+    // Probe table (see helper definitions in src/editor/curve_config.rs):
+    //   helper          (0.5,-0.3)  (0.5,+0.3)  (2.0,+0.5)
+    //   off_mix          0.2         0.5         2.0
+    //   off_amount_norm  0.2         0.8         1.0   (clamped)
+    //   off_thresh      -0.1         0.8         2.5
+    //   off_identity     0.5         0.5         2.0
+    let approx = |a: f32, b: f32| (a - b).abs() < 1e-5;
+    let is_mix = |f: fn(f32, f32) -> f32| {
+        approx(f(0.5, -0.3), 0.2) && approx(f(0.5, 0.3), 0.5) && approx(f(2.0, 0.5), 2.0)
+    };
+    let is_amount_norm = |f: fn(f32, f32) -> f32| {
+        approx(f(0.5, -0.3), 0.2) && approx(f(0.5, 0.3), 0.8) && approx(f(2.0, 0.5), 1.0)
+    };
+    let is_thresh = |f: fn(f32, f32) -> f32| {
+        approx(f(0.5, -0.3), -0.1) && approx(f(0.5, 0.3), 0.8) && approx(f(2.0, 0.5), 2.5)
+    };
+    let is_identity = |f: fn(f32, f32) -> f32| {
+        approx(f(0.5, -0.3), 0.5) && approx(f(0.5, 0.3), 0.5) && approx(f(2.0, 0.5), 2.0)
+    };
+
+    // AMOUNT (curve 0) — % units, neutral at 100, off_mix
+    let amount = curve_display_config(ModuleType::Past, 0, GainMode::Add);
+    assert_eq!(amount.y_label, "%");
+    assert_eq!(amount.y_min, 0.0);
+    assert_eq!(amount.y_max, 100.0);
+    assert!((amount.y_natural - 100.0).abs() < 1e-6);
+    assert!(is_mix(amount.offset_fn), "AMOUNT should route to off_mix");
+
+    // TIME (curve 1) — seconds, neutral at 0.0, off_amount_norm
+    let time = curve_display_config(ModuleType::Past, 1, GainMode::Add);
+    assert_eq!(time.y_label, "s");
+    assert_eq!(time.y_min, 0.0);
+    // y_max is set to a placeholder of 1.0 inside curve_display_config and rewritten
+    // at paint time using `total_history_seconds` from the live Pipeline. Test the
+    // structural identity here.
+    assert!(is_amount_norm(time.offset_fn), "TIME should route to off_amount_norm");
+
+    // THRESHOLD (curve 2) — dBFS, neutral -60, off_thresh
+    let thresh = curve_display_config(ModuleType::Past, 2, GainMode::Add);
+    assert_eq!(thresh.y_label, "dBFS");
+    assert_eq!(thresh.y_min, -80.0);
+    assert_eq!(thresh.y_max, 0.0);
+    assert!((thresh.y_natural - (-60.0)).abs() < 1e-6);
+    assert!(is_thresh(thresh.offset_fn), "THRESHOLD should route to off_thresh");
+
+    // SPREAD (Smear in Granular) — % units
+    let spread = curve_display_config(ModuleType::Past, 3, GainMode::Add);
+    assert_eq!(spread.y_label, "%");
+    assert!(is_mix(spread.offset_fn), "SPREAD should route to off_mix");
+
+    // MIX
+    let mix = curve_display_config(ModuleType::Past, 4, GainMode::Add);
+    assert_eq!(mix.y_label, "%");
+    assert!(is_mix(mix.offset_fn), "MIX should route to off_mix");
+
+    // Out-of-range curve_idx falls back to default_config (off_identity)
+    let oob = curve_display_config(ModuleType::Past, 99, GainMode::Add);
+    assert!(is_identity(oob.offset_fn), "OOB should route to off_identity");
+}
