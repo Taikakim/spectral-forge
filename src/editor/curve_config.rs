@@ -303,6 +303,14 @@ fn modulate_config(_curve_idx: usize) -> CurveDisplayConfig {
 }
 
 fn default_config() -> CurveDisplayConfig {
+    // off_identity: offset has no audible/visual effect for un-calibrated
+    // modules. Asymmetric alternatives (e.g. off_mix) introduce a "stops past
+    // 0" perception bug because positive offset is a no-op when y_natural is
+    // already at y_max. Per-module configs (past_config, geometry_config, …)
+    // override this with calibrated offset_fn / y_label / grid_lines per the
+    // UI parameter spec. The slider's custom_formatter detects y_label==""
+    // and falls back to showing the raw [-1, 1] value so the drag is still
+    // visible during a UI rebuild even though offset is inert here.
     CurveDisplayConfig {
         y_label: "", y_min: 0.0, y_max: 1.0, y_log: false,
         grid_lines: &[(0.25, ""), (0.5, ""), (0.75, ""), (1.0, "")],

@@ -1,4 +1,4 @@
-> **Status (2026-04-26): IMPLEMENTED and LIVE.** This is the authoritative source of truth for curve display, transforms, axis rendering, hover text, and UI scaling — it remains normative even though the matching plan is merged. Includes addenda §2.3 (calibration contract), §3.4 (curve/node rendering at limits), and §4.4 (control row consistency) merged from calibration-audit T10. See [../STATUS.md](../STATUS.md).
+> **Status (2026-05-04): IMPLEMENTED with addenda §7 and §8 PENDING IMPLEMENTATION.** This is the authoritative source of truth for curve display, transforms, axis rendering, hover text, and UI scaling. Existing addenda §2.3 (calibration contract), §3.4 (curve/node rendering at limits), and §4.4 (control row consistency) are LIVE in the codebase. New addenda §7 (internal parameter ranges) and §8 (per-mode CurveLayout + help-box) are normative for the next implementation pass — they are part of the per-module UX overhaul that begins with Past (see [`2026-05-04-past-module-ux-design.md`](2026-05-04-past-module-ux-design.md)). See [../STATUS.md](../STATUS.md).
 
 # Spectral Forge — UI Parameter Specification
 
@@ -236,3 +236,92 @@ When adding a new module type or curve:
 - [ ] Run `cargo test` — the display config table is covered by a test asserting all
       `ModuleType` variants return a valid config.
 - [ ] If the new curve has a unique unit, add its `y_label` string as a `const` in `curve_config.rs`.
+
+---
+
+## 7. Internal parameter ranges — -1..1 vs 0..1
+
+Some per-curve parameters use **signed** internal ranges that look like 0..1 but aren't. Code consuming these MUST accept the full signed range; clamping at 0 silently throws away half the parameter.
+
+| Parameter | Internal range | Notes |
+|---|---|---|
+| Curve node `y` (`s{s}c{c}n{n}_y`)         | -1.0 .. +1.0 | Maps via `compute_curve_response` to ~0.126× .. 7.94× linear gain (±18 dB). |
+| Curve node `x`, `q`                       | 0.0 .. 1.0   | x = log-frequency normalised, q = bandwidth normalised. |
+| Per-curve **tilt** (`s{s}c{c}_tilt`)      | -1.0 .. +1.0 | Multiplied by `TILT_MAX` for gain-space slope. |
+| Per-curve **offset** (`s{s}c{c}_offset`)  | -1.0 .. +1.0 | Passed to `CurveDisplayConfig::offset_fn`. |
+| Per-curve curvature (`s{s}c{c}_curv`)     | 0.0 .. 1.0   | S-curve blend: 0 = straight tilt, 1 = full smoothstep. |
+
+### Common pitfalls
+
+1. **Asymmetric `offset_fn`.** If the function only does something on one side of 0 (e.g. `off_mix` returns `g` unchanged for positive offset), the slider stops responding past 0 and the user perceives it as broken. Either use a symmetric `offset_fn` (`g + o`, `g * factor.powf(o)`, or a piecewise like `if o >= 0 { g + a*o } else { g + b*o }`) **or** explicitly state in the curve's spec why the asymmetry is intentional (e.g. y_natural is at y_max and there's no headroom to extend up).
+
+2. **Silent clamping at 0.** Code that does `param.value().clamp(0.0, 1.0)` on a -1..1 parameter throws away the negative half without warning. Use `.clamp(-1.0, 1.0)` or the parameter's declared bounds.
+
+3. **Default-as-mid assumption.** For -1..1 params the neutral value is **0.0**, not 0.5. Code computing "distance from default" must use 0.0 as the anchor.
+
+4. **Display formatter that ignores the offset value.** A `custom_formatter` that computes a constant phys reading (because it calls an `off_identity` `offset_fn` against gain=1.0) shows a frozen number on screen. The slider still mutates the param internally, but the user can't see the change. The fallback when `y_label` is empty is to show the raw normalised value (`{:+.2}`) so the drag is visible during a UI rebuild.
+
+### `default_config()` is intentionally inert
+
+`curve_config::default_config()` returns `offset_fn: off_identity`. Modules that fall through to it (no explicit per-module arm in `curve_display_config()`) get an offset slider that updates visually (raw `{:+.2}` value) but has no audible effect — by design, until the module ships its own calibrated config. Earlier we tried `off_mix` here as a "do *something*" fallback; that's an asymmetric offset_fn (pitfall 1) and produced exactly the "stops past 0" complaint. Don't use it.
+
+---
+
+## 8. Per-mode CurveLayout — active curves, label overrides, help text
+
+Modules with internal sub-modes (Past, Geometry, Circuit, Life, Kinetics, Harmony, Modulate, Rhythm) typically use only a *subset* of their declared `num_curves` per mode, sometimes with mode-specific labels (e.g. Past's curve 1 is "Age" in Granular but "Delay" in Convolution). The legacy approach of always rendering all `num_curves` tabs leaves dead controls visible and lets users draw curves the active mode silently ignores.
+
+### `CurveLayout` struct
+
+```rust
+/// Per-mode descriptor for visible curves, label overrides, and help-box copy.
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §8.
+pub struct CurveLayout {
+    /// Indices (into the module's full curve set) of curves visible for this mode.
+    /// Order is render order; e.g. `&[0, 2, 4]` hides curves 1 and 3 entirely.
+    pub active: &'static [u8],
+
+    /// Per-curve label overrides for this mode. Each tuple is (curve_idx, override_label).
+    /// Curves not listed fall back to `ModuleSpec::curve_labels[curve_idx]`.
+    pub label_overrides: &'static [(u8, &'static str)],
+
+    /// Help-box copy keyed by curve_idx (full curve index, not position in `active`).
+    /// Returning an empty string means "use the module's general help text."
+    pub help_for: fn(curve_idx: u8) -> &'static str,
+
+    /// Help-box module overview shown when a slot is selected but no curve is in focus.
+    /// `None` ⇒ use the module's static description.
+    pub mode_overview: Option<&'static str>,
+}
+```
+
+### `ModuleSpec` field
+
+```rust
+pub active_layout: Option<fn(mode: u8) -> CurveLayout>,
+```
+
+When `None` (modules without modes — Dynamics, Freeze, etc.), the UI renders all `curve_labels` as today. When `Some`, the UI looks up the layout for the slot's current mode and renders only the active curves with their (overridden) labels and help-box copy. Mode is encoded as `u8` because every module's mode enum already derives `as u8`.
+
+### Help-box infrastructure
+
+A help panel renders to the right of the FX matrix, occupying space currently empty. It shows:
+
+1. **Module overview** when a slot is selected but no curve is in focus — pulled from `mode_overview` if `Some`, else the module's general description.
+2. **Per-curve summary** when a curve is selected — pulled from `help_for(curve_idx)`.
+
+Help text is `&'static str` (no allocation, no per-frame formatting). Help-panel layout (font, padding, max width, scroll behaviour) is defined in `theme.rs` alongside the existing display constants. Width is fixed at design-time; height matches the matrix region.
+
+### Tab-strip behaviour with `CurveLayout`
+
+When a slot's mode changes (via the popup), the visible curve tabs re-shape to match the new layout's `active` list. The `editing_curve` cursor clamps to the first active curve if the previously-edited curve is no longer active. The Offset / Tilt / Curve DragValue row (per §4.4) renders only if the currently-focused curve is in `active`.
+
+### Extension checklist (adds to §6)
+
+When adding a new mode-bearing module:
+
+- [ ] Define `*_layout(mode: u8) -> CurveLayout` for every mode the module ships, returning the active curve set, label overrides, and per-curve help text.
+- [ ] Wire it as `active_layout: Some(my_module::active_layout)` on the `ModuleSpec` literal.
+- [ ] Write `mode_overview` text for every mode (or set `None` and use the module's static description).
+- [ ] Verify the active set matches what the DSP actually consumes — a curve listed as active but ignored by DSP, or read by DSP but not in `active`, is the *same kind* of bug the legacy "always show 5 tabs" approach produced. The whole point of `active` is that it tells the truth.
+- [ ] Add a `tests/<module>_layout.rs` regression assertion: every visible curve in every layout has non-empty `help_for(idx)`.
