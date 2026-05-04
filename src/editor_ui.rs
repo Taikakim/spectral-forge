@@ -1300,23 +1300,30 @@ pub fn create_editor(
 
                     // ScrollArea allows the matrix to scroll when the window is too short
                     // to display all rows (e.g. at large scale on a small screen).
-                    let interaction = {
-                        let mut route_guard = params.route_matrix.lock();
-                        let route_matrix_ref = &mut *route_guard;
-                        egui::ScrollArea::vertical()
-                            .id_salt("matrix_scroll")
-                            .show(ui, |ui| {
-                                crate::editor::fx_matrix_grid::paint_fx_matrix_grid(
-                                    ui,
-                                    &types_snap,
-                                    &names_snap,
-                                    route_matrix_ref,
-                                    edit_slot,
-                                    scale,
-                                )
-                            })
-                            .inner
-                    };
+                    // Lay out the matrix and the help-box side by side; help-box sits to
+                    // the right with a fixed width (`HELP_BOX_WIDTH`).
+                    let interaction = ui.horizontal_top(|ui| {
+                        let interaction = {
+                            let mut route_guard = params.route_matrix.lock();
+                            let route_matrix_ref = &mut *route_guard;
+                            egui::ScrollArea::vertical()
+                                .id_salt("matrix_scroll")
+                                .show(ui, |ui| {
+                                    crate::editor::fx_matrix_grid::paint_fx_matrix_grid(
+                                        ui,
+                                        &types_snap,
+                                        &names_snap,
+                                        route_matrix_ref,
+                                        edit_slot,
+                                        scale,
+                                    )
+                                })
+                                .inner
+                        };
+                        ui.add_space(8.0);
+                        crate::editor::help_box::draw(ui, &params, scale);
+                        interaction
+                    }).inner;
                     if let Some(new_slot) = interaction.left_click_slot {
                         *params.editing_slot.lock() = new_slot as u8;
                     }

@@ -17,6 +17,7 @@ pub mod mod_ring;
 pub use mod_ring::{ModRingState, ModRingToggle};
 pub mod rhythm_panel;
 pub mod past_panel;
+pub mod help_box;
 
 /// Show a tooltip for `response` only after the pointer has been stationary
 /// over it for 1 second. Resets the timer whenever the pointer moves.

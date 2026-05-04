@@ -203,3 +203,14 @@ pub const AMP_DOT_COLORS: [Color32; 5] = [
 ];
 
 pub const AMP_DOT_RADIUS: f32 = 2.5;
+
+// ─── Help-box panel (right of FX matrix) ─────────────────────────────────────
+
+pub const HELP_BOX_WIDTH:        f32     = 240.0;
+pub const HELP_BOX_PADDING:      f32     = 8.0;
+pub const FONT_SIZE_HELP_HEAD:   f32     = 12.0;
+pub const FONT_SIZE_HELP_BODY:   f32     = 10.0;
+pub const HELP_BOX_BG:           Color32 = Color32::from_rgb(20, 20, 24);
+pub const HELP_BOX_BORDER:       Color32 = Color32::from_rgb(60, 60, 68);
+pub const HELP_BOX_BODY:         Color32 = Color32::from_rgb(190, 190, 196);
+pub const HELP_BOX_HEAD:         Color32 = Color32::from_rgb(230, 230, 236);
