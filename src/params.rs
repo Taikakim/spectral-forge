@@ -696,6 +696,41 @@ impl SpectralForgeParams {
         Some(matrix_dispatch!(self, row, col))
     }
 
+    /// Per-slot Past Floor (Hz). See spec 2026-05-04-past-module-ux-design.md §2.
+    pub fn past_floor_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(past_floor_hz_dispatch!(self, slot))
+    }
+
+    /// Per-slot Past Reverse Window (s).
+    pub fn past_reverse_window_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(past_reverse_window_s_dispatch!(self, slot))
+    }
+
+    /// Per-slot Past Stretch Rate (x).
+    pub fn past_stretch_rate_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(past_stretch_rate_dispatch!(self, slot))
+    }
+
+    /// Per-slot Past Stretch Dither (0..1).
+    pub fn past_stretch_dither_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(past_stretch_dither_dispatch!(self, slot))
+    }
+
+    /// Per-slot Past Soft Clip toggle.
+    pub fn past_soft_clip_param(&self, slot: usize) -> Option<&BoolParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(past_soft_clip_dispatch!(self, slot))
+    }
+
     /// Reset every automatable Param to its nih-plug default via the ParamSetter.
     ///
     /// Iterates `param_map()` using the raw GuiContext API so host automation is properly

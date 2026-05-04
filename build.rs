@@ -58,6 +58,7 @@ fn main() {
     emit_tilt_offset_fields(&mut f);
     emit_curvature_fields(&mut f);
     emit_matrix_fields(&mut f);
+    emit_past_scalar_fields(&mut f);
     writeln!(f, "}}").unwrap();
     writeln!(f).unwrap();
 
@@ -69,6 +70,7 @@ fn main() {
     emit_tilt_offset_inits(&mut f);
     emit_curvature_inits(&mut f);
     emit_matrix_inits(&mut f);
+    emit_past_scalar_inits(&mut f);
     writeln!(f, "        }}").unwrap();
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
@@ -90,6 +92,7 @@ fn main() {
     emit_tilt_offset_map_entries(&mut f);
     emit_curvature_map_entries(&mut f);
     emit_matrix_map_entries(&mut f);
+    emit_past_scalar_map_entries(&mut f);
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -104,6 +107,8 @@ fn main() {
     emit_curvature_dispatch(&mut f);
     writeln!(f).unwrap();
     emit_matrix_dispatch(&mut f);
+    writeln!(f).unwrap();
+    emit_past_scalar_dispatch(&mut f);
 }
 
 // ── Field declarations (bare, no initializers) ──────────────────────────────
@@ -400,4 +405,99 @@ fn emit_curvature_dispatch(f: &mut File) {
     writeln!(f, "        }}").unwrap();
     writeln!(f, "    }};").unwrap();
     writeln!(f, "}}").unwrap();
+}
+
+// ── Past UX Overhaul: per-slot scalar params ────────────────────────────────
+//
+// Five new per-slot params for the Past module (5 × 9 = 45 fields):
+//   - past_floor_hz        Skewed 20..2000 Hz, default 230
+//   - past_reverse_window_s Linear 0.05..30 s, default 1.0
+//   - past_stretch_rate    Skewed 0.05..4.0 ×, default 1.0
+//   - past_stretch_dither  Linear 0..1, default 0.0
+//   - past_soft_clip       Bool, default true
+//
+// See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
+
+fn emit_past_scalar_fields(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        writeln!(f, "    pub s{s}_past_floor_hz:        FloatParam,").unwrap();
+        writeln!(f, "    pub s{s}_past_reverse_window_s: FloatParam,").unwrap();
+        writeln!(f, "    pub s{s}_past_stretch_rate:    FloatParam,").unwrap();
+        writeln!(f, "    pub s{s}_past_stretch_dither:  FloatParam,").unwrap();
+        writeln!(f, "    pub s{s}_past_soft_clip:       BoolParam,").unwrap();
+    }
+}
+
+fn emit_past_scalar_inits(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        writeln!(
+            f,
+            "            s{s}_past_floor_hz: FloatParam::new(\"s{s}past_floor_hz\", 230.0f32, \
+             FloatRange::Skewed {{ min: 20.0f32, max: 2000.0f32, factor: FloatRange::skew_factor(-2.0) }})\
+             .with_smoother(SmoothingStyle::Logarithmic(50.0))\
+             .with_unit(\" Hz\")\
+             .hide_in_generic_ui(),"
+        ).unwrap();
+        writeln!(
+            f,
+            "            s{s}_past_reverse_window_s: FloatParam::new(\"s{s}past_reverse_window_s\", 1.0f32, \
+             FloatRange::Linear {{ min: 0.05f32, max: 30.0f32 }})\
+             .with_smoother(SmoothingStyle::Linear(50.0))\
+             .with_unit(\" s\")\
+             .hide_in_generic_ui(),"
+        ).unwrap();
+        writeln!(
+            f,
+            "            s{s}_past_stretch_rate: FloatParam::new(\"s{s}past_stretch_rate\", 1.0f32, \
+             FloatRange::SymmetricalSkewed {{ min: 0.05f32, max: 4.0f32, \
+             factor: FloatRange::skew_factor(-1.0), center: 1.0f32 }})\
+             .with_smoother(SmoothingStyle::Logarithmic(50.0))\
+             .with_unit(\"\u{00d7}\")\
+             .hide_in_generic_ui(),"
+        ).unwrap();
+        // Dither: stored as 0..100 with unit \"%\" so the host's automation lane
+        // displays \"50 %\" rather than \"0.50 %\". DSP rescales /100 → [0, 1].
+        writeln!(
+            f,
+            "            s{s}_past_stretch_dither: FloatParam::new(\"s{s}past_stretch_dither\", 0.0f32, \
+             FloatRange::Linear {{ min: 0.0f32, max: 100.0f32 }})\
+             .with_smoother(SmoothingStyle::Linear(20.0))\
+             .with_unit(\" %\")\
+             .hide_in_generic_ui(),"
+        ).unwrap();
+        writeln!(
+            f,
+            "            s{s}_past_soft_clip: BoolParam::new(\"s{s}past_soft_clip\", true)\
+             .hide_in_generic_ui(),"
+        ).unwrap();
+    }
+}
+
+fn emit_past_scalar_map_entries(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for suffix in ["floor_hz", "reverse_window_s", "stretch_rate", "stretch_dither", "soft_clip"] {
+            let id = format!("s{s}past_{suffix}");
+            let rust_name = format!("s{s}_past_{suffix}");
+            writeln!(
+                f,
+                "        out.push(({id:?}.to_string(), self.{rust_name}.as_ptr(), String::new()));"
+            ).unwrap();
+        }
+    }
+}
+
+fn emit_past_scalar_dispatch(f: &mut File) {
+    for suffix in ["floor_hz", "reverse_window_s", "stretch_rate", "stretch_dither", "soft_clip"] {
+        writeln!(f, "macro_rules! past_{suffix}_dispatch {{").unwrap();
+        writeln!(f, "    ($self:expr, $s:expr) => {{").unwrap();
+        writeln!(f, "        match $s {{").unwrap();
+        for s in 0..NUM_SLOTS {
+            writeln!(f, "            {s} => &$self.generated.s{s}_past_{suffix},").unwrap();
+        }
+        writeln!(f, "            _ => unreachable!(),").unwrap();
+        writeln!(f, "        }}").unwrap();
+        writeln!(f, "    }};").unwrap();
+        writeln!(f, "}}").unwrap();
+        writeln!(f).unwrap();
+    }
 }
