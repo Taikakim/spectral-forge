@@ -52,3 +52,25 @@ fn gain_add_vs_pull_differ() {
     assert_eq!(add.y_label,  "dB");
     assert_eq!(pull.y_label, "%");
 }
+
+// Test for the new `off_amount_norm` helper introduced by the Past UX
+// overhaul. See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §5.
+
+#[test]
+fn off_amount_norm_clamps_and_passes_zero() {
+    use spectral_forge::editor::curve_config::off_amount_norm;
+    let approx = |a: f32, b: f32| (a - b).abs() < 1e-6;
+    // Identity at o=0
+    assert_eq!(off_amount_norm(0.5, 0.0),  0.5);
+    assert_eq!(off_amount_norm(0.0, 0.0),  0.0);
+    assert_eq!(off_amount_norm(1.0, 0.0),  1.0);
+    // Linear add (use approx — f32 addition isn't exact)
+    assert!(approx(off_amount_norm(0.3, 0.4),  0.7));
+    assert!(approx(off_amount_norm(0.5, -0.3), 0.2));
+    // Clamps at 0 and 1
+    assert_eq!(off_amount_norm(0.5,  0.7), 1.0);
+    assert_eq!(off_amount_norm(0.5, -0.7), 0.0);
+    // Beyond range still clamps
+    assert_eq!(off_amount_norm(2.0,  0.5), 1.0);
+    assert_eq!(off_amount_norm(-1.0, 0.0), 0.0);
+}

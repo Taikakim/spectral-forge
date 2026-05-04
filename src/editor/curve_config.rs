@@ -326,6 +326,15 @@ fn default_config() -> CurveDisplayConfig {
 //
 // See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §2.
 
+/// Linear add, clamped to [0, 1]. For curves whose gain is interpreted as a
+/// normalised fraction (e.g. Past's Age/Delay representing a fraction of the
+/// history buffer's `capacity_frames`).
+/// See docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §7 and
+/// docs/superpowers/specs/2026-05-04-past-module-ux-design.md §5.
+#[inline] pub fn off_amount_norm(g: f32, o: f32) -> f32 {
+    (g + o).clamp(0.0, 1.0)
+}
+
 /// Threshold dBFS: gain=1.0 → -20 dBFS.
 /// off=+1 → g=2.0 → 0 dBFS;  off=-1 → g=-1.0 → -60 dBFS (clamped by audio path).
 #[inline] pub fn off_thresh(g: f32, o: f32) -> f32 {
