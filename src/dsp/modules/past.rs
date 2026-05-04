@@ -332,16 +332,30 @@ impl SpectralModule for PastModule {
             // scaling to 0..100% to mirror the convention used by other modules.
             let hop_size = (ctx.fft_size as f32 / 4.0) / ctx.sample_rate;
             let total_seconds = history.capacity_frames() as f32 * hop_size;
-            let time_at_bin0 = time.first().copied().unwrap_or(0.0);
             let amount_at_bin0 = amount.first().copied().unwrap_or(0.0).clamp(0.0, 1.0);
-            self.last_probe = crate::dsp::modules::ProbeSnapshot {
+            let mut probe = crate::dsp::modules::ProbeSnapshot {
                 past_amount_pct:          Some(amount_at_bin0 * 100.0),
-                past_time_seconds:        Some(time_at_bin0 * total_seconds),
                 past_active_mode_idx:     Some(self.mode as u8),
                 past_history_frames_used: Some(history.frames_used() as u32),
                 past_sort_key_idx:        Some(self.sort_key as u8),
                 ..Default::default()
             };
+            match self.mode {
+                PastMode::Granular | PastMode::Convolution => {
+                    // TIME curve still meaningful per-bin; report bin0 reading.
+                    let time_at_bin0 = time.first().copied().unwrap_or(0.0);
+                    probe.past_time_seconds = Some(time_at_bin0 * total_seconds);
+                }
+                PastMode::Reverse => {
+                    probe.past_reverse_window_s = Some(self.scalars.window_frames as f32 * hop_size);
+                }
+                PastMode::Stretch => {
+                    probe.past_stretch_rate = Some(self.scalars.rate);
+                    probe.past_stretch_dither_pct = Some(self.scalars.dither * 100.0);
+                }
+                PastMode::DecaySorter => { /* no scalar probe */ }
+            }
+            self.last_probe = probe;
         }
 
         let ch = channel.min(1);

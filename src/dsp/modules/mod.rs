@@ -226,6 +226,12 @@ pub struct ProbeSnapshot {
     pub past_active_mode_idx:      Option<u8>,
     pub past_history_frames_used:  Option<u32>,
     pub past_sort_key_idx:         Option<u8>,
+    /// Reverse mode only: window length in seconds (frames × hop_seconds).
+    pub past_reverse_window_s:   Option<f32>,
+    /// Stretch mode only: read rate.
+    pub past_stretch_rate:       Option<f32>,
+    /// Stretch mode only: dither amount as percentage (0..100).
+    pub past_stretch_dither_pct: Option<f32>,
 
     // Kinetics module probes — populated by KineticsModule::process() under cfg(probe).
     pub kinetics_strength:        Option<f32>,

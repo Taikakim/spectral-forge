@@ -71,3 +71,75 @@ fn past_probe_reports_active_mode_after_dispatch() {
     assert!((snap.past_amount_pct.unwrap() - 70.0).abs() < 1e-3);
     assert_eq!(snap.past_history_frames_used, Some(8));
 }
+
+#[test]
+fn past_probe_window_populated_only_in_reverse() {
+    use spectral_forge::dsp::history_buffer::HistoryBuffer;
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, PastScalars};
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+    use num_complex::Complex;
+
+    fn drive_one_block(m: &mut PastModule, mode: PastMode) {
+        let mut h = HistoryBuffer::new(1, 32, 256);
+        for _ in 0..16 {
+            let frame = vec![Complex::new(0.0, 0.0); 256];
+            h.write_hop(0, &frame);
+            h.advance_after_all_channels_written();
+        }
+        m.set_mode(mode);
+        let mut bins = vec![Complex::new(0.5, 0.0); 256];
+        let amount    = vec![1.0_f32; 256];
+        let time      = vec![0.5_f32; 256];
+        let threshold = vec![0.0_f32; 256];
+        let spread    = vec![0.0_f32; 256];
+        let mix       = vec![1.0_f32; 256];
+        let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
+        let mut supp = vec![0.0_f32; 256];
+        let mut ctx = ModuleContext::new(48000.0, 2048, 256, 10.0, 100.0, 1.0, 0.5, false, false);
+        ctx.history = Some(&h);
+        m.process(0, StereoLink::Linked, FxChannelTarget::All,
+                  &mut bins, None, &curves, &mut supp, None, &ctx);
+    }
+
+    let mut m = PastModule::new(48000.0, 2048);
+
+    // Reverse: window populated, stretch fields not
+    m.set_scalars(PastScalars { window_frames: 200, ..PastScalars::safe_default() });
+    drive_one_block(&mut m, PastMode::Reverse);
+    let p = m.last_probe();
+    assert!(p.past_reverse_window_s.is_some(), "Reverse must populate window probe");
+    assert!(p.past_stretch_rate.is_none(),    "Reverse must NOT populate stretch_rate");
+    assert!(p.past_stretch_dither_pct.is_none(), "Reverse must NOT populate dither");
+
+    // Stretch: rate + dither populated, window not
+    m.set_scalars(PastScalars { rate: 2.0, dither: 0.5, ..PastScalars::safe_default() });
+    drive_one_block(&mut m, PastMode::Stretch);
+    let p = m.last_probe();
+    assert!(p.past_reverse_window_s.is_none(), "Stretch must NOT populate window");
+    assert!(p.past_stretch_rate.is_some());
+    assert!(p.past_stretch_dither_pct.is_some());
+    let rate = p.past_stretch_rate.unwrap();
+    assert!((rate - 2.0).abs() < 1e-6, "rate probe should match scalar (2.0), got {rate}");
+    let dither_pct = p.past_stretch_dither_pct.unwrap();
+    assert!((dither_pct - 50.0).abs() < 1e-3, "dither_pct should be 50.0, got {dither_pct}");
+
+    // Granular: time_seconds populated, mode-specific fields not
+    drive_one_block(&mut m, PastMode::Granular);
+    let p = m.last_probe();
+    assert!(p.past_time_seconds.is_some(), "Granular must populate time_seconds");
+    assert!(p.past_reverse_window_s.is_none());
+    assert!(p.past_stretch_rate.is_none());
+
+    // Convolution: time_seconds populated
+    drive_one_block(&mut m, PastMode::Convolution);
+    let p = m.last_probe();
+    assert!(p.past_time_seconds.is_some(), "Convolution must populate time_seconds");
+
+    // DecaySorter: no scalar probe
+    drive_one_block(&mut m, PastMode::DecaySorter);
+    let p = m.last_probe();
+    assert!(p.past_reverse_window_s.is_none());
+    assert!(p.past_stretch_rate.is_none());
+    assert!(p.past_stretch_dither_pct.is_none());
+}
