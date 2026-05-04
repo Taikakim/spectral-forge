@@ -20,6 +20,18 @@ fn curve_layout_has_expected_fields() {
     assert_eq!(layout.mode_overview, Some("test"));
 }
 
+/// Past opts into the `active_layout` infra (Task 7). The Granular layout
+/// covers all 5 curves; verify the wired function returns the expected shape.
+#[test]
+fn past_module_spec_has_active_layout_some() {
+    use spectral_forge::dsp::modules::past::PastMode;
+    let spec = module_spec(ModuleType::Past);
+    let layout_fn = spec.active_layout
+        .expect("Past must opt in to active_layout for the per-mode UI to work");
+    let granular = layout_fn(PastMode::Granular as u8);
+    assert_eq!(granular.active, &[0u8, 1, 2, 3, 4]);
+}
+
 /// Every existing ModuleSpec defaults `active_layout` to `None`.
 /// Modules without modes (Dynamics, Freeze, etc.) must keep the legacy "render
 /// all curve_labels" behaviour. Only modules that have explicitly opted in
