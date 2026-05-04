@@ -347,6 +347,10 @@ impl SpectralModule for PastModule {
             PastMode::Reverse    => self.apply_reverse(ch, bins, history, amount, threshold, mix, ctx),
             PastMode::Stretch    => self.apply_stretch(ch, bins, history, amount, mix, ctx),
         }
+
+        if self.scalars.soft_clip {
+            apply_soft_clip(bins, ctx.num_bins);
+        }
     }
 
     fn reset(&mut self, sample_rate: f32, fft_size: usize) {
@@ -592,6 +596,24 @@ impl PastModule {
             let value = sample * bin_amount;
             let m_val = mix.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
             bins[k] = bins[k] * (1.0 - m_val) + value * m_val;
+        }
+    }
+}
+
+/// Per-bin radial soft-clip toward magnitude `K = 4.0` (≈ +12 dBFS).
+/// `bins[k] *= K / (K + |bins[k]|)` shrinks magnitudes asymptotically toward
+/// `K` while leaving small magnitudes nearly unchanged.
+///
+/// Module-wide safety net for Past, primarily protecting Convolution's
+/// multiplicative output from exploding when fed loud audio × loud history.
+/// See spec §3 + §7.1.
+pub fn apply_soft_clip(bins: &mut [Complex<f32>], num_bins: usize) {
+    const K: f32 = 4.0;
+    for k in 0..num_bins.min(bins.len()) {
+        let mag = bins[k].norm();
+        if mag > 1e-9 {
+            let scale = K / (K + mag);
+            bins[k] *= scale;
         }
     }
 }

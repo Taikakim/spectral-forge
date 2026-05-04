@@ -109,3 +109,28 @@ fn past_scalars_safe_default_is_musically_inert() {
     assert_eq!(s.window_frames, 1, "window=1 frame is the smallest legal value");
     assert!(s.soft_clip, "soft_clip ON by default");
 }
+
+#[test]
+fn soft_clip_clamps_high_magnitude_when_on() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::past::apply_soft_clip;
+    let mut bins = [Complex::new(10.0_f32, 0.0); 32];
+    apply_soft_clip(&mut bins, 32);
+    for k in 0..32 {
+        assert!(bins[k].norm() < 4.0,
+            "soft-clip with K=4.0 must keep magnitude under 4.0; bin {k} got {}", bins[k].norm());
+    }
+}
+
+#[test]
+fn soft_clip_passes_low_magnitude_almost_unchanged() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::past::apply_soft_clip;
+    let mut bins = [Complex::new(0.1_f32, 0.0); 16];
+    let original = bins[0].norm();
+    apply_soft_clip(&mut bins, 16);
+    let attenuation = bins[0].norm() / original;
+    // |out|/|in| = K / (K + |in|) = 4.0 / 4.1 ≈ 0.976
+    assert!(attenuation > 0.95 && attenuation < 1.0,
+        "small bins should be barely attenuated; got {attenuation}");
+}
