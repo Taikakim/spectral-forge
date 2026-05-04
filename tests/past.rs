@@ -186,7 +186,7 @@ fn convolution_amplifies_when_history_aligns() {
 #[test]
 fn reverse_reads_backward_through_history() {
     use spectral_forge::dsp::history_buffer::HistoryBuffer;
-    use spectral_forge::dsp::modules::past::{PastModule, PastMode};
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, PastScalars};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
     use spectral_forge::params::{FxChannelTarget, StereoLink};
 
@@ -200,6 +200,10 @@ fn reverse_reads_backward_through_history() {
 
     let mut m = PastModule::new(48000.0, 2048);
     m.set_mode(PastMode::Reverse);
+    // Scalar window drives the reverse read length now (Task 9). Half of
+    // capacity_frames (32) = 16, matching the TIME=0.5 average from the
+    // pre-Task-9 curve-averaging behaviour.
+    m.set_scalars(PastScalars { window_frames: 16, ..PastScalars::safe_default() });
 
     let amount    = vec![1.0_f32; 256];
     let time      = vec![0.5_f32; 256];

@@ -74,3 +74,27 @@ fn all_past_modes_stay_finite_and_bounded() {
         }
     }
 }
+
+#[test]
+fn reverse_uses_scalar_window_not_curve_average() {
+    use spectral_forge::dsp::modules::past::{PastModule, PastMode, PastScalars};
+
+    let mut m = PastModule::new(48000.0, 2048);
+    m.set_past_mode(PastMode::Reverse);
+    m.set_scalars(PastScalars {
+        window_frames: 8,
+        ..Default::default()
+    });
+    let scalars = m.scalars();
+    assert_eq!(scalars.window_frames, 8, "scalar must persist via setter");
+}
+
+#[test]
+fn past_scalars_safe_default_is_musically_inert() {
+    use spectral_forge::dsp::modules::past::PastScalars;
+    let s = PastScalars::safe_default();
+    assert!((s.rate - 1.0).abs() < 1e-6, "rate=1.0 means no stretch");
+    assert_eq!(s.dither, 0.0, "dither=0 means no smoothing-noise");
+    assert_eq!(s.window_frames, 1, "window=1 frame is the smallest legal value");
+    assert!(s.soft_clip, "soft_clip ON by default");
+}

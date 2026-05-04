@@ -147,6 +147,38 @@ pub enum SortKey {
 const MAX_SORT_BINS: usize = 256;
 const MAX_NUM_BINS_LOCAL: usize = crate::dsp::pipeline::MAX_NUM_BINS;
 
+/// Mode-specific scalar controls for Past. Replaces the curve-averaging hacks
+/// in Reverse and Stretch with honest per-slot scalars; gates the soft-clip
+/// post-pass; carries the DecaySorter floor.
+/// See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PastScalars {
+    /// DecaySorter `low_k` floor as bin index. 0 disables (default 230 Hz at fft 2048 / 48 kHz ≈ bin 10).
+    pub floor_bin:     usize,
+    /// Reverse window length in **frames** (Pipeline converts seconds → frames each block).
+    pub window_frames: u32,
+    /// Stretch read rate. 1.0 = unity, 0.05..4.0 musical range.
+    pub rate:          f32,
+    /// Stretch dither amount (0..1, normalised — Pipeline divides %-param by 100).
+    pub dither:        f32,
+    /// Module-wide soft-clip toggle (default ON).
+    pub soft_clip:     bool,
+}
+
+impl PastScalars {
+    /// Conservative default that's musically inert (rate=1.0 means stretch is no-op,
+    /// window=1 frame is the smallest legal value, soft_clip ON).
+    pub fn safe_default() -> Self {
+        Self {
+            floor_bin:     10,
+            window_frames: 1,
+            rate:          1.0,
+            dither:        0.0,
+            soft_clip:     true,
+        }
+    }
+}
+
 pub struct PastModule {
     mode: PastMode,
     sort_key: SortKey,
@@ -158,6 +190,9 @@ pub struct PastModule {
     /// Current FFT size (used to derive bin-centre frequencies for Stretch).
     fft_size: usize,
     sample_rate: f32,
+
+    /// Mode-specific scalar controls. Set per-block from Pipeline.
+    scalars: PastScalars,
 
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
@@ -204,10 +239,19 @@ impl PastModule {
             channels: [PastChannelState::new(), PastChannelState::new()],
             fft_size,
             sample_rate,
+            scalars: PastScalars::safe_default(),
             #[cfg(any(test, feature = "probe"))]
             last_probe: crate::dsp::modules::ProbeSnapshot::default(),
         }
     }
+
+    /// Per-block setter for mode-specific scalars (window_frames, rate, dither,
+    /// floor_bin, soft_clip). Replaces the curve-averaging hacks documented in
+    /// docs/superpowers/specs/2026-05-04-past-module-ux-design.md §1.4.
+    pub fn set_scalars(&mut self, scalars: PastScalars) { self.scalars = scalars; }
+
+    /// Accessor for current scalars (used in tests and by GUI for echo).
+    pub fn scalars(&self) -> PastScalars { self.scalars }
 
     /// Per-block setter, called from FxMatrix::set_past_modes via the per-block
     /// snapshot in pipeline.rs. On a real change of mode we clear per-channel
@@ -288,7 +332,7 @@ impl SpectralModule for PastModule {
             PastMode::Granular   => self.apply_granular(ch, bins, history, amount, time, threshold, spread, mix, ctx),
             PastMode::DecaySorter=> self.apply_decay_sorter(ch, bins, history, amount, threshold, mix, ctx),
             PastMode::Convolution=> self.apply_convolution(ch, bins, history, amount, time, threshold, mix, ctx),
-            PastMode::Reverse    => self.apply_reverse(ch, bins, history, amount, time, threshold, mix, ctx),
+            PastMode::Reverse    => self.apply_reverse(ch, bins, history, amount, threshold, mix, ctx),
             PastMode::Stretch    => self.apply_stretch(ch, bins, history, amount, time, spread, mix, ctx),
         }
     }
@@ -449,24 +493,15 @@ impl PastModule {
 
     fn apply_reverse(
         &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
-        amount: &[f32], time: &[f32], threshold: &[f32], mix: &[f32], ctx: &ModuleContext<'_>,
+        amount: &[f32], threshold: &[f32], mix: &[f32],
+        ctx: &ModuleContext<'_>,
     ) {
         let n = bins.len().min(ctx.num_bins);
-        let max_age = hist.capacity_frames() as f32;
-        // Median TIME picks the window length — TIME is per-bin but the read
-        // pointer is per-channel. Picking the average avoids per-bin pointer drift.
-        let window = {
-            let t_avg = if n == 0 { 0.0 } else {
-                time.iter().take(n).copied().sum::<f32>() / n as f32
-            };
-            ((t_avg.clamp(0.0, 1.0) * max_age).round() as u32).max(1)
-        };
+        let window = self.scalars.window_frames.max(1);
+
         let st = &mut self.channels[ch];
         let age = (st.reverse_read_offset % window) as usize;
 
-        // Read first; only advance the offset if the read succeeded. Otherwise the
-        // offset would skip positions during cold-start while the ring fills up,
-        // producing a discontinuity once audio finally starts reading.
         let frame = match hist.read_frame(ch, age) { Some(f) => f, None => return };
         st.reverse_read_offset = (st.reverse_read_offset + 1) % window;
         for k in 0..n {
