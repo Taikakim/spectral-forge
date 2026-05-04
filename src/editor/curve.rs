@@ -643,6 +643,7 @@ pub fn paint_response_curve(
     offset: f32,
     curvature: f32,
     offset_fn: fn(f32, f32) -> f32,
+    total_history_seconds: f32,
 ) {
     if gains.len() < 2 { return; }
     let n = gains.len();
@@ -654,7 +655,7 @@ pub fn paint_response_curve(
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
         let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature, offset_fn, max_hz);
-        let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max, 0.0);
+        let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max, total_history_seconds);
         let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
         Pos2::new(x, y)
     }).collect();

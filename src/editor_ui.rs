@@ -100,8 +100,44 @@ pub fn create_editor(
                         // PEAK HOLD tab (only meaningful in Pull mode).
                         let slot_gain_mode_snap = params.slot_gain_mode.lock()[editing_slot];
 
+                        // Determine the visible curve set for this mode. If the module has an
+                        // `active_layout`, use its `active` list and `label_overrides`; otherwise
+                        // fall back to rendering all `curve_labels`. Past is the first consumer.
+                        let active_layout_opt: Option<crate::dsp::modules::CurveLayout> =
+                            spec.active_layout.map(|f| {
+                                let mode_byte: u8 = match editing_type {
+                                    crate::dsp::modules::ModuleType::Past => {
+                                        params.slot_past_mode.lock()[editing_slot] as u8
+                                    }
+                                    _ => 0u8,
+                                };
+                                f(mode_byte)
+                            });
+
+                        let visible_curves: Vec<(usize, &str)> = if let Some(layout) = active_layout_opt.as_ref() {
+                            layout.active.iter().map(|&idx| {
+                                let label = layout.label_overrides.iter()
+                                    .find_map(|&(c, l)| if c == idx { Some(l) } else { None })
+                                    .or_else(|| spec.curve_labels.get(idx as usize).copied())
+                                    .unwrap_or("");
+                                (idx as usize, label)
+                            }).collect()
+                        } else {
+                            spec.curve_labels.iter().enumerate()
+                                .map(|(i, l)| (i, *l))
+                                .collect()
+                        };
+
+                        // Snap editing_curve to first visible if the current selection is now hidden
+                        // (e.g. user just changed Past mode).
+                        if !visible_curves.iter().any(|(i, _)| *i == editing_curve) {
+                            if let Some(&(first_visible, _)) = visible_curves.first() {
+                                *params.editing_curve.lock() = first_visible as u8;
+                            }
+                        }
+
                         // Adaptive curve selector buttons
-                        for (i, &default_label) in spec.curve_labels.iter().enumerate() {
+                        for (i, default_label) in visible_curves.iter().copied() {
                             let label = crv::curve_label_for(
                                 editing_type, i, slot_gain_mode_snap, default_label,
                             );
@@ -447,9 +483,54 @@ pub fn create_editor(
                             (t, o, cv)
                         });
 
+                        // Build visible curve set for this slot/mode. Mirrors the tab-strip
+                        // logic above so paint and tabs stay in lockstep.
+                        let active_layout_opt: Option<crate::dsp::modules::CurveLayout> =
+                            spec.active_layout.map(|f| {
+                                let mode_byte: u8 = match editing_type {
+                                    crate::dsp::modules::ModuleType::Past => {
+                                        params.slot_past_mode.lock()[editing_slot] as u8
+                                    }
+                                    _ => 0u8,
+                                };
+                                f(mode_byte)
+                            });
+                        let visible_curves: Vec<(usize, &str)> = if let Some(layout) = active_layout_opt.as_ref() {
+                            layout.active.iter().map(|&idx| {
+                                let label = layout.label_overrides.iter()
+                                    .find_map(|&(c, l)| if c == idx { Some(l) } else { None })
+                                    .or_else(|| spec.curve_labels.get(idx as usize).copied())
+                                    .unwrap_or("");
+                                (idx as usize, label)
+                            }).collect()
+                        } else {
+                            spec.curve_labels.iter().enumerate()
+                                .map(|(i, l)| (i, *l))
+                                .collect()
+                        };
+
+                        // Snap editing_curve to first visible if the current selection is hidden.
+                        let editing_curve_visible = visible_curves.iter().any(|(i, _)| *i == editing_curve);
+                        if !editing_curve_visible {
+                            if let Some(&(first_visible, _)) = visible_curves.first() {
+                                *params.editing_curve.lock() = first_visible as u8;
+                            }
+                        }
+
+                        // total_history_seconds: live value derived from history-depth param +
+                        // current FFT hop. Consumed by display index 13 (Past TIME, "seconds, age").
+                        // All other display indices ignore the value.
+                        let total_history_seconds = {
+                            let depth_secs = params.history_depth.value().seconds();
+                            let hop = (fft_size / crate::dsp::pipeline::OVERLAP).max(1) as f32;
+                            let capacity_frames = ((depth_secs * sr) / hop).ceil().max(1.0);
+                            capacity_frames * (hop / sr.max(1.0))
+                        };
+
                         // Draw inactive curves (dim) — display_curve_idx maps to correct y-axis scale
-                        for i in 0..num_c.min(7) {
+                        for (i, _label) in visible_curves.iter().copied() {
                             if i == editing_curve { continue; }
+                            if i >= num_c.min(7) { continue; }
                             let (tilt, offset, curvature) = slot_meta[i];
                             let disp_i = crv::display_curve_idx(editing_type, i, slot_gain_mode_snap);
                             let offset_fn = crate::editor::curve_config::curve_display_config(
@@ -459,12 +540,12 @@ pub fn create_editor(
                                 ui.painter(), curve_rect, &all_gains[i], disp_i,
                                 spec.color_dim, 1.0,
                                 db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset, curvature,
-                                offset_fn,
+                                offset_fn, total_history_seconds,
                             );
                         }
 
                         // Draw active curve (lit) + interactive widget
-                        if editing_curve < num_c && !all_gains.is_empty() {
+                        if editing_curve_visible && editing_curve < num_c && !all_gains.is_empty() {
                             // Live SC envelope overlay — painted first so the active curve draws
                             // on top. SC affects every Gain mode, so show it for any Gain curve.
                             if editing_type == crate::dsp::modules::ModuleType::Gain {
@@ -491,7 +572,7 @@ pub fn create_editor(
                                 ui.painter(), curve_rect, &all_gains[editing_curve], disp_curve,
                                 spec.color_lit, 2.0,
                                 db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset, curvature,
-                                offset_fn,
+                                offset_fn, total_history_seconds,
                             );
 
                             let mut nodes = slot_nodes[editing_curve];
@@ -1078,7 +1159,35 @@ pub fn create_editor(
                     // for every module type, fixed vertical position.
                     ui.horizontal(|ui| {
                         let spec = crate::dsp::modules::module_spec(editing_type);
-                        if editing_curve < spec.num_curves {
+
+                        // Mirror the tab-strip / paint-loop visibility filter so the
+                        // Offset/Tilt/Curv row only renders for currently visible curves
+                        // when the module declares an `active_layout` (e.g. Past).
+                        let active_layout_opt: Option<crate::dsp::modules::CurveLayout> =
+                            spec.active_layout.map(|f| {
+                                let mode_byte: u8 = match editing_type {
+                                    crate::dsp::modules::ModuleType::Past => {
+                                        params.slot_past_mode.lock()[editing_slot] as u8
+                                    }
+                                    _ => 0u8,
+                                };
+                                f(mode_byte)
+                            });
+                        let editing_curve_in_layout = match active_layout_opt.as_ref() {
+                            Some(layout) => layout.active.iter().any(|&i| i as usize == editing_curve),
+                            None => true,
+                        };
+
+                        // Live total_history_seconds for Past TIME (display index 13);
+                        // ignored by every other display index inside `gain_to_display`.
+                        let total_history_seconds = {
+                            let depth_secs = params.history_depth.value().seconds();
+                            let hop = (fft_size / crate::dsp::pipeline::OVERLAP).max(1) as f32;
+                            let capacity_frames = ((depth_secs * sr) / hop).ceil().max(1.0);
+                            capacity_frames * (hop / sr.max(1.0))
+                        };
+
+                        if editing_curve_in_layout && editing_curve < spec.num_curves {
                             ui.add_space(4.0);
                             let crv_col = spec.color_lit;
                             let curve_label = spec.curve_labels.get(editing_curve).copied().unwrap_or("");
@@ -1095,6 +1204,7 @@ pub fn create_editor(
                                 let off_rel_ms  = rel_ms;
                                 let off_db_min  = db_min;
                                 let off_db_max  = db_max;
+                                let off_total_history_seconds = total_history_seconds;
                                 ui.vertical(|ui| {
                                     let resp = ui.add(
                                         egui::DragValue::new(&mut off_norm)
@@ -1114,7 +1224,7 @@ pub fn create_editor(
                                                     off_disp_idx, g_off,
                                                     off_atk_ms, off_rel_ms,
                                                     off_db_min, off_db_max,
-                                                    0.0,
+                                                    off_total_history_seconds,
                                                 );
                                                 format!("{:.1} {}", phys, off_cfg.y_label)
                                             })

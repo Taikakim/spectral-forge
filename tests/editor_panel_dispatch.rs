@@ -35,3 +35,24 @@ fn rhythm_has_panel_widget_some() {
         "Rhythm should set panel_widget = Some(rhythm_panel::render) after Phase 2d.7",
     );
 }
+
+/// Verifies that when a slot's module has `active_layout = Some(...)`, the
+/// editor consults the layout to decide which curve tabs are rendered.
+/// Logical-level check; UI snapshot deferred to manual visual validation.
+#[test]
+fn past_active_layout_shapes_visible_curves_per_mode() {
+    use spectral_forge::dsp::modules::past::PastMode;
+
+    let layout_fn = module_spec(ModuleType::Past).active_layout
+        .expect("Past has active_layout");
+
+    assert_eq!(layout_fn(PastMode::Granular as u8).active.len(),    5);
+    assert_eq!(layout_fn(PastMode::DecaySorter as u8).active.len(), 3);
+    assert_eq!(layout_fn(PastMode::Convolution as u8).active.len(), 4);
+    assert_eq!(layout_fn(PastMode::Reverse as u8).active.len(),     3);
+    assert_eq!(layout_fn(PastMode::Stretch as u8).active.len(),     2);
+
+    // Non-mode-bearing modules return None and the editor falls back to
+    // rendering all curve_labels.
+    assert!(module_spec(ModuleType::Dynamics).active_layout.is_none());
+}
