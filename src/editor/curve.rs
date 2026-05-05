@@ -327,7 +327,7 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
         },
         ModuleType::Circuit => match curve_idx {
             0 => 6,   // AMOUNT → 0–100 % (drive/attenuation depth)
-            1 => 9,   // THRESH → dBFS-like (threshold / knee parameter)
+            1 => 6,   // THRESH → 0–100 % (normalised trigger level, not dBFS)
             2 => 6,   // SPREAD → 0–100 % (energy bleed fraction)
             3 => 11,  // RELEASE → 0–2 dimensionless (time constant scalar)
             4 => 6,   // MIX → 0–100 %
@@ -362,16 +362,16 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
             0 => 6,   // AMOUNT → 0–100 % (modulation depth / blend)
             1 => 6,   // REACH → 0–100 % (frequency span fraction)
             2 => 6,   // RATE → 0–100 % (modulation rate, mode-dependent)
-            3 => 9,   // THRESH → dBFS-like (gate threshold)
+            3 => 6,   // THRESH → 0–100 % (normalised amp-gate level, not dBFS)
             4 => 6,   // AMPGATE → 0–100 % (amplitude gate fraction)
             5 => 6,   // MIX → 0–100 %
             _ => curve_idx,
         },
         ModuleType::Rhythm => match curve_idx {
             0 => 6,   // AMOUNT → 0–100 % (pulse depth / gate strength)
-            1 => 7,   // DIVISION → 0–200 % dimensionless (maps to step count 1..32)
+            1 => 7,   // DIVISION → 0–200 % dimensionless (maps to step count 1..64)
             2 => 6,   // ATTACK_FADE → 0–100 % (ramp edge fraction, capped at 50%)
-            3 => 7,   // TARGET_PHASE → 0–200 % (future: 0..2π angle)
+            3 => 6,   // TARGET_PHASE → 0–100 % (DSP clamps 0-1 → 0..2π)
             4 => 6,   // MIX → 0–100 %
             _ => curve_idx,
         },

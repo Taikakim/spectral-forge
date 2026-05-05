@@ -50,19 +50,13 @@ pub fn curve_display_config(
         ModuleType::Future   => future_config(curve_idx),
         ModuleType::Punch    => punch_config(curve_idx),
         ModuleType::Rhythm   => rhythm_config(curve_idx),
-        // TODO(2e.3): replace with geometry_config(curve_idx) when that task is implemented
-        ModuleType::Geometry => default_config(),
-        // TODO(2f.3-2f.7): replace with modulate_config(curve_idx) when kernels land
+        ModuleType::Geometry => geometry_config(curve_idx),
         ModuleType::Modulate => modulate_config(curve_idx),
-        // TODO(2g.3-2g.5): replace with circuit_config(curve_idx) when kernels land
-        ModuleType::Circuit => default_config(),
-        // TODO(5a.3-5a.12): replace with life_config(curve_idx) when kernels land
-        ModuleType::Life => default_config(),
-        ModuleType::Past => past_config(curve_idx, 0),
-        // TODO(5b3.5-5b3.12): replace with kinetics_config(curve_idx) when kernels land
-        ModuleType::Kinetics => default_config(),
-        // TODO(6.5.*): replace with harmony_config(curve_idx) when kernels land
-        ModuleType::Harmony => default_config(),
+        ModuleType::Circuit  => circuit_config(curve_idx),
+        ModuleType::Life     => life_config(curve_idx),
+        ModuleType::Past     => past_config(curve_idx, 0),
+        ModuleType::Kinetics => kinetics_config(curve_idx),
+        ModuleType::Harmony  => harmony_config(curve_idx),
         // Modules with no display curves:
         ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
     }
@@ -273,32 +267,202 @@ fn ts_split_config(i: usize) -> CurveDisplayConfig {
     }
 }
 
-/// Curve config for Future module. Stub — populated as Print-Through (Task 3) and
-/// Pre-Echo (Task 4) kernels land. All five curves currently fall through to
-/// default_config() until physical-unit display ranges are decided.
-fn future_config(_curve_idx: usize) -> CurveDisplayConfig {
-    default_config()
+fn geometry_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        0 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        1 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        2 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        3 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        _ => default_config(),
+    }
 }
 
-/// Curve config for Punch module. Stub — populated as the Punch DSP lands in
-/// Tasks 2c.2-2c.6. All six curves currently fall through to default_config()
-/// until physical-unit display ranges are decided.
-fn punch_config(_curve_idx: usize) -> CurveDisplayConfig {
-    default_config()
+fn circuit_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // AMOUNT: effect depth 0–100 %
+        0 | 2 | 4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        // THRESH: normalised trigger level 0–100 % (gain=1.0 → max threshold → no trigger)
+        1 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        // RELEASE: dimensionless time-constant scalar 0–2, neutral = 1.0
+        3 => CurveDisplayConfig {
+            y_label: "", y_min: 0.0, y_max: 2.0, y_log: false,
+            grid_lines: &[(0.5, "0.5"), (1.0, "1.0"), (1.5, "1.5"), (2.0, "2.0")],
+            y_natural: 1.0,
+            offset_fn: off_resistance,
+        },
+        _ => default_config(),
+    }
 }
 
-/// Curve config for Rhythm module. Stub — populated as the Rhythm DSP lands in
-/// Tasks 2d.2-2d.9. All five curves currently fall through to default_config()
-/// until physical-unit display ranges are decided.
-fn rhythm_config(_curve_idx: usize) -> CurveDisplayConfig {
-    default_config()
+fn life_config(i: usize) -> CurveDisplayConfig {
+    // AMOUNT, THRESHOLD, SPEED, REACH, MIX: all 0–100 % (gain=1.0 → 100%)
+    match i {
+        0 | 1 | 2 | 3 | 4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        _ => default_config(),
+    }
 }
 
-/// Curve config for Modulate module. Stub — populated as the Modulate DSP lands
-/// in Tasks 2f.3-2f.7. All six curves currently fall through to default_config()
-/// until physical-unit display ranges are decided.
-fn modulate_config(_curve_idx: usize) -> CurveDisplayConfig {
-    default_config()
+fn kinetics_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // STRENGTH, MASS, REACH, DAMPING: bidirectional 0–200 %, neutral = 100 %
+        0 | 1 | 2 | 3 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        // MIX: 0–100 %
+        4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        _ => default_config(),
+    }
+}
+
+fn harmony_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // AMOUNT, THRESHOLD, STABILITY, SPREAD, MIX: 0–100 %
+        0 | 1 | 2 | 3 | 5 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        // COEFFICIENT: mode-specific weighting 0–200 %, neutral = 100 %
+        4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        _ => default_config(),
+    }
+}
+
+fn modulate_config(i: usize) -> CurveDisplayConfig {
+    // AMOUNT, REACH, RATE, THRESH, AMPGATE, MIX: all 0–100 % (gain=1.0 → 100%)
+    match i {
+        0 | 1 | 2 | 3 | 4 | 5 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        _ => default_config(),
+    }
+}
+
+fn rhythm_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // AMOUNT, ATTACK_FADE, TARGET_PHASE, MIX: 0–100 %
+        0 | 2 | 3 | 4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        // DIVISION: step-count scalar 0–200 % (gain=1.0 → 100% → 16 steps base)
+        1 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        _ => default_config(),
+    }
+}
+
+fn future_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // AMOUNT, THRESHOLD, SPREAD, MIX: 0–100 %
+        0 | 2 | 3 | 4 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        // TIME: lookahead scaling 0–200 % (gain=1.0 → 100% → 1 FFT-hop of lookahead)
+        1 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        _ => default_config(),
+    }
+}
+
+fn punch_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // AMOUNT, FILL_MODE, MIX: 0–100 %
+        0 | 2 | 5 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+        },
+        // WIDTH, AMP_FILL: 0–200 %, neutral = 100 %
+        1 | 3 => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
+            grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
+            y_natural: 100.0,
+            offset_fn: off_amount_200,
+        },
+        // HEAL: release time displayed as ms via portamento scale
+        // display_curve_idx=10: gain_to_display = gain*200 ms; physical_to_y: log 40–1000 ms
+        // DSP formula: heal_ms = gain*150 (clamped 20–300 ms for gain 0.05–2.0)
+        4 => CurveDisplayConfig {
+            y_label: "ms", y_min: 40.0, y_max: 1000.0, y_log: true,
+            grid_lines: &[(40.0, "40ms"), (100.0, "100ms"), (250.0, "250ms"), (1000.0, "1s")],
+            y_natural: 200.0,
+            offset_fn: off_portamento,
+        },
+        _ => default_config(),
+    }
 }
 
 /// Per-curve display calibration for `ModuleType::Past`.
