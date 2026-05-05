@@ -1334,3 +1334,92 @@ impl SpectralModule for KineticsModule {
         }
     }
 }
+
+/// Per-mode `CurveLayout` for Kinetics.
+///
+/// Curves: 0=STRENGTH, 1=MASS, 2=REACH, 3=DAMPING, 4=MIX.
+///
+/// Kernel inspection (all curves go through the 1-pole smoother, but only
+/// the listed indices are actually consumed by the mode's kernel logic):
+/// - Hooke:            reads 0, 1, 2, 3, 4 — all 5 curves.
+/// - GravityWell:      reads 0, 1, 2, 3, 4 — all 5 curves.
+/// - InertialMass:     reads 1, 4           — writes physics.mass; bins not modified.
+/// - OrbitalPhase:     reads 0, 4           — alpha from STRENGTH; MIX blends.
+/// - Ferromagnetism:   reads 0, 2, 3, 4     — STRENGTH, REACH, DAMPING (resistance), MIX.
+/// - ThermalExpansion: reads 0, 3, 4         — STRENGTH for heat; DAMPING for cooling; MIX.
+/// - TuningFork:       reads 0, 2, 4         — STRENGTH (fork threshold/depth), REACH, MIX.
+/// - Diamagnet:        reads 0, 2, 4         — STRENGTH for carve fraction, REACH, MIX.
+///
+/// Wired via `active_layout: Some(crate::dsp::modules::kinetics::active_layout)` on KIN.
+pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
+    match mode_byte {
+        0 => super::CurveLayout {
+            // Hooke: spring restoring force toward neighbour average + harmonic springs.
+            // All 5 curves used: STRENGTH=omega, MASS, REACH=harmonic count, DAMPING, MIX.
+            active:          &[0, 1, 2, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Hooke: per-bin spring restoring force toward neighbour magnitudes; REACH adds sympathetic harmonic springs."),
+        },
+        1 => super::CurveLayout {
+            // GravityWell: attraction toward frequency targets (STRENGTH curve local maxima,
+            // sidechain peaks, or MIDI harmonics). All 5 curves used.
+            active:          &[0, 1, 2, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Gravity Well: Newtonian attraction toward frequency wells; wells come from STRENGTH peaks, sidechain, or MIDI."),
+        },
+        2 => super::CurveLayout {
+            // InertialMass: writes physics.mass per bin; does not modify bins.
+            // Only MASS(1) and MIX(4) consumed; STRENGTH/REACH/DAMPING not read.
+            active:          &[1, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Inertial Mass: writes per-bin mass into BinPhysics for downstream Kinetics slots; MASS sets the target, MIX blends."),
+        },
+        3 => super::CurveLayout {
+            // OrbitalPhase: peak-driven paired-bin linear phase shift.
+            // Only STRENGTH(0) for alpha and MIX(4). MASS/REACH/DAMPING not read.
+            active:          &[0, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Orbital Phase: satellite bins around spectral peaks receive opposite-sign phase rotation; STRENGTH sets the per-hop alpha."),
+        },
+        4 => super::CurveLayout {
+            // Ferromagnetism: pulls satellite phases toward peak phase.
+            // STRENGTH(0) for alpha, REACH(2) for satellite window, DAMPING(3)=resistance, MIX(4).
+            // MASS(1) not read.
+            active:          &[0, 2, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Ferromagnetism: satellite bins' phases are pulled toward nearby spectral peaks; DAMPING adds phase resistance."),
+        },
+        5 => super::CurveLayout {
+            // ThermalExpansion: heat accumulation drives frequency-detune phase rotation.
+            // STRENGTH(0) for heat input, DAMPING(3) for cooling rate, MIX(4).
+            // MASS(1) and REACH(2) not read.
+            active:          &[0, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Thermal Expansion: per-bin temperature accumulates from signal energy; heat drives a frequency-detune phase rotation."),
+        },
+        6 => super::CurveLayout {
+            // TuningFork: sympathetic resonance clusters around detected fork peaks.
+            // STRENGTH(0) for fork detection + modulation depth, REACH(2) for radius, MIX(4).
+            // MASS(1) and DAMPING(3) not read.
+            active:          &[0, 2, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Tuning Fork: loud peaks above STRENGTH threshold act as resonators; neighbours within REACH receive sympathetic phase modulation."),
+        },
+        _ => super::CurveLayout {
+            // Diamagnet: energy-conserving spectral carving toward neighbours.
+            // STRENGTH(0) for carve fraction, REACH(2) for redistribution window, MIX(4).
+            // MASS(1) and DAMPING(3) not read.
+            active:          &[0, 2, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Diamagnet: bins above STRENGTH baseline donate magnitude to neighbours weighted by 1/distance; conserves total spectral energy."),
+        },
+    }
+}

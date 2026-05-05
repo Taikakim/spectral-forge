@@ -80,6 +80,32 @@ fn future_active_layout_matches_kernel_signatures() {
         "PreEcho should expose all 5 curves including THRESHOLD");
 }
 
+/// Kinetics has 8 modes. Curves: 0=STRENGTH, 1=MASS, 2=REACH, 3=DAMPING, 4=MIX.
+/// Highly variable per-mode — InertialMass uses only [1,4]; OrbitalPhase only [0,4].
+#[test]
+fn kinetics_active_layout_matches_kernel_signatures() {
+    use spectral_forge::dsp::modules::kinetics::KineticsMode;
+
+    let layout_fn = module_spec(ModuleType::Kinetics).active_layout
+        .expect("Kinetics should declare an active_layout");
+
+    let modes_and_active: &[(KineticsMode, &[u8])] = &[
+        (KineticsMode::Hooke,            &[0, 1, 2, 3, 4]),
+        (KineticsMode::GravityWell,      &[0, 1, 2, 3, 4]),
+        (KineticsMode::InertialMass,     &[1, 4]),
+        (KineticsMode::OrbitalPhase,     &[0, 4]),
+        (KineticsMode::Ferromagnetism,   &[0, 2, 3, 4]),
+        (KineticsMode::ThermalExpansion, &[0, 3, 4]),
+        (KineticsMode::TuningFork,       &[0, 2, 4]),
+        (KineticsMode::Diamagnet,        &[0, 2, 4]),
+    ];
+    for (mode, expected) in modes_and_active {
+        let layout = layout_fn(*mode as u8);
+        assert_eq!(layout.active, *expected,
+            "Kinetics {:?}: expected active {:?}, got {:?}", mode, expected, layout.active);
+    }
+}
+
 /// Harmony has 8 modes. Curves: 0=AMOUNT, 1=THRESHOLD, 2=STABILITY, 3=SPREAD,
 /// 4=COEFFICIENT, 5=MIX. STABILITY(2) is unused by all current kernels.
 #[test]
