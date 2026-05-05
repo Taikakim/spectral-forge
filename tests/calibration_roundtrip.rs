@@ -603,9 +603,9 @@ mod display_mapping_contract {
         let r = rect();
         let cfg = curve_display_config(ModuleType::Freeze, 0, GainMode::Add);
         let anchors = runtime_anchors(&cfg, 8, 0.0, -80.0, 0.0, 10.0, 100.0);
-        let y = physical_to_y(62.5, &cfg, anchors, r);
+        let y = physical_to_y(1.0, &cfg, anchors, r);
         assert!((y - r.bottom()).abs() < 1.0,
-            "v=62.5 (y_min) should map to rect.bottom()={}, got {}", r.bottom(), y);
+            "v=1.0 (y_min) should map to rect.bottom()={}, got {}", r.bottom(), y);
     }
 
     #[test]
@@ -614,8 +614,8 @@ mod display_mapping_contract {
         let cfg = curve_display_config(ModuleType::Freeze, 0, GainMode::Add);
         let anchors = runtime_anchors(&cfg, 8, 0.0, -80.0, 0.0, 10.0, 100.0);
         let v = screen_y_to_physical(r.bottom(), &cfg, anchors, r);
-        assert!((v - 62.5).abs() < 1.0,
-            "y=rect.bottom() should map back to 62.5 ms, got {}", v);
+        assert!((v - 1.0).abs() < 1.0,
+            "y=rect.bottom() should map back to 1.0 ms, got {}", v);
     }
 
     #[test]

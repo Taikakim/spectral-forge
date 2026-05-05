@@ -111,12 +111,12 @@ fn dynamics_config(i: usize) -> CurveDisplayConfig {
 
 fn freeze_config(i: usize) -> CurveDisplayConfig {
     match i {
-        // LENGTH: gain=1.0 → 500 ms (gain_to_display: gain*500, range 0–4000 ms)
-        // Multiplicative: off=+1 → gain*8 → 4000 ms; off=-1 → gain/8 → 62.5 ms
-        // factor = 4000/500 = 8.0; y_min matches off_freeze_length(1.0, -1.0) * 500
+        // LENGTH: gain=1.0 → 500 ms (gain_to_display: gain*500, range 1–4000 ms)
+        // Geometric lerp: v≥0 → 500*(4000/500)^v = 500*8^v; v<0 → 500*(500/1)^v = 500*500^v
+        // factor positive = 8; factor negative = 500 (asymmetric since y_min=1 ≠ y_max/y_nat^2)
         0 => CurveDisplayConfig {
-            y_label: "ms", y_min: 62.5, y_max: 4000.0, y_log: true,
-            grid_lines: &[(100.0, "100ms"), (500.0, "500ms"), (1000.0, "1s"), (2000.0, "2s")],
+            y_label: "ms", y_min: 1.0, y_max: 4000.0, y_log: true,
+            grid_lines: &[(10.0, "10ms"), (100.0, "100ms"), (1000.0, "1s"), (4000.0, "4s")],
             y_natural: 500.0,
             offset_fn: off_freeze_length,
         },
@@ -616,10 +616,14 @@ fn default_config() -> CurveDisplayConfig {
     g + o
 }
 
-/// Freeze LENGTH: multiplicative, factor = 4000/500 = 8.0.
-/// off=+1 → g×8 → 4000 ms; off=-1 → g/8 → ~62 ms.
-#[inline] pub fn off_freeze_length(g: f32, o: f32, _anchors: (f32, f32, f32)) -> f32 {
-    g * 8.0_f32.powf(o)
+/// Freeze LENGTH ms: geometric lerp from y_natural to y_min/y_max.
+///   v ≥ 0:  factor = (y_max / y_nat)^v  (e.g. 8^v at canonical anchors)
+///   v < 0:  factor = (y_nat / y_min)^v  (e.g. 500^v at canonical anchors)
+#[inline] pub fn off_freeze_length(g: f32, o: f32, anchors: (f32, f32, f32)) -> f32 {
+    let (y_min, y_nat, y_max) = anchors;
+    let factor = if o >= 0.0 { (y_max / y_nat).powf(o) }
+                 else        { (y_nat / y_min).powf(o) };
+    g * factor
 }
 
 /// Freeze THRESHOLD dBFS: WYSIWYG with log-gain dBFS axis (spec §3.1 of

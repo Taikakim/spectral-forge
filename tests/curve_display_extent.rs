@@ -323,3 +323,30 @@ fn off_ratio_wysiwyg_geometric_lerp() {
             "v={v}: expected {display_expected:.3}, got {display_actual:.3}");
     }
 }
+
+#[test]
+fn freeze_length_y_min_is_1ms() {
+    use spectral_forge::editor::curve_config::curve_display_config;
+    use spectral_forge::dsp::modules::{ModuleType, GainMode};
+
+    let cfg = curve_display_config(ModuleType::Freeze, 0, GainMode::Add);
+    assert!((cfg.y_min - 1.0).abs() < 1e-3,
+        "Freeze LENGTH y_min should be 1ms, got {}", cfg.y_min);
+}
+
+#[test]
+fn off_freeze_length_wysiwyg_with_anchors() {
+    use spectral_forge::editor::curve::{gain_to_display, runtime_anchors, axis_aware_lerp};
+    use spectral_forge::editor::curve_config::{curve_display_config, off_freeze_length};
+    use spectral_forge::dsp::modules::{ModuleType, GainMode};
+
+    let cfg = curve_display_config(ModuleType::Freeze, 0, GainMode::Add);
+    let anchors = runtime_anchors(&cfg, 8, 0.0, -60.0, 0.0, 10.0, 100.0);
+    for &v in &[-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
+        let g_off = off_freeze_length(1.0, v, anchors);
+        let display_actual = gain_to_display(8, g_off, 10.0, 100.0, -60.0, 0.0, 0.0);
+        let display_expected = axis_aware_lerp(&cfg, anchors, v);
+        assert!((display_actual - display_expected).abs() < 1.0,
+            "v={v}: expected {display_expected:.3} ms, got {display_actual:.3} ms");
+    }
+}
