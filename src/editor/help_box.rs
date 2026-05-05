@@ -34,16 +34,20 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
         .inner_margin(egui::Margin { left: pad, right: pad, top: pad, bottom: pad })
         .show(ui, |ui| {
             ui.set_width(th::scaled(th::HELP_BOX_WIDTH, scale));
-            ui.label(
-                RichText::new(head)
-                    .color(th::HELP_BOX_HEAD)
-                    .font(FontId::proportional(th::scaled(th::FONT_SIZE_HELP_HEAD, scale))),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(head)
+                        .color(th::HELP_BOX_HEAD)
+                        .font(FontId::proportional(th::scaled(th::FONT_SIZE_HELP_HEAD, scale))),
+                ).wrap(),
             );
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(body.as_ref())
-                    .color(th::HELP_BOX_BODY)
-                    .font(FontId::proportional(th::scaled(th::FONT_SIZE_HELP_BODY, scale))),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(body.as_ref())
+                        .color(th::HELP_BOX_BODY)
+                        .font(FontId::proportional(th::scaled(th::FONT_SIZE_HELP_BODY, scale))),
+                ).wrap(),
             );
         });
 }
