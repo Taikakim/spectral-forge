@@ -619,22 +619,21 @@ pub fn gain_to_display(
 }
 
 
-/// Map a physical value to pixel y for a given curve type.
-pub fn physical_to_y(v: f32, curve_idx: usize, db_min: f32, db_max: f32, rect: Rect) -> f32 {
-    // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
-    match curve_idx {
-        0 => linear_to_y(v, db_min, db_max, rect),
-        1 => log_to_y(v, 1.0, 20.0, rect),
-        2 | 3 => log_to_y(v, 1.0, 1024.0, rect),
-        4 => log_to_y(v, 1.5, 48.0, rect),
-        5 | 12 => linear_to_y(v, -18.0, 18.0, rect),
-        6 => linear_to_y(v, 0.0, 100.0, rect),
-        7 => linear_to_y(v, 0.0, 200.0, rect),
-        8 => log_to_y(v.max(62.5), 62.5, 4000.0, rect),    // Freeze Length 62.5ms–4000ms (matches config y_min)
-        9 => linear_to_y(v, -80.0, 0.0, rect),
-        10 => log_to_y(v.max(40.0), 40.0, 1000.0, rect),   // Portamento 40ms–1000ms (matches config y_min)
-        11 => linear_to_y(v, 0.0, 2.0, rect),               // Resistance 0–2
-        _ => rect.center().y,
+/// Map a physical value to pixel y for a given display config.
+/// `anchors` is `(y_min, y_natural, y_max)` from `runtime_anchors`, i.e. with
+/// runtime substitutions for idx 0 (db range) and idx 13 (history seconds)
+/// already applied. The linear/log axis choice comes from `cfg.y_log`.
+pub fn physical_to_y(
+    v: f32,
+    cfg: &crate::editor::curve_config::CurveDisplayConfig,
+    anchors: (f32, f32, f32),
+    rect: Rect,
+) -> f32 {
+    let (y_min, _y_natural, y_max) = anchors;
+    if cfg.y_log {
+        log_to_y(v.max(y_min), y_min, y_max, rect)
+    } else {
+        linear_to_y(v, y_min, y_max, rect)
     }
 }
 
@@ -677,6 +676,10 @@ pub fn paint_grid(
     let max_hz  = nyquist.max(20_001.0);
     let grid_stroke = Stroke::new(th::scaled_stroke(th::STROKE_THIN, scale), th::GRID_LINE);
     let font = nih_plug_egui::egui::FontId::proportional(th::scaled(th::FONT_SIZE_GRID, scale));
+    // Resolve runtime anchors once for grid-line y mapping.
+    // Pass 0.0 for total_history_seconds — the only index that uses it (idx 13) is the Past
+    // Age curve; Task 14 will plumb the real value end-to-end.
+    let anchors = runtime_anchors(cfg, display_idx, 0.0, db_min, db_max);
 
     // Vertical lines at Hz intervals
     for &f in HZ_VERTICALS {
@@ -734,7 +737,7 @@ pub fn paint_grid(
         // For curves whose runtime display range is user-adjustable (threshold),
         // also respect the current db_min/db_max window.
         if display_idx == 0 && (v < db_min || v > db_max) { continue; }
-        let y = physical_to_y(v, display_idx, db_min, db_max, rect);
+        let y = physical_to_y(v, cfg, anchors, rect);
         painter.line_segment(
             [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
             grid_stroke,
@@ -787,7 +790,7 @@ pub fn paint_response_curve(
     tilt: f32,
     offset: f32,
     curvature: f32,
-    offset_fn: fn(f32, f32) -> f32,
+    cfg: &crate::editor::curve_config::CurveDisplayConfig,
     total_history_seconds: f32,
 ) {
     if gains.len() < 2 { return; }
@@ -796,12 +799,13 @@ pub fn paint_response_curve(
 
     // Coloured response line — dashed for attack/release, solid for all others.
     // Tilt, offset, and curvature are applied to the raw gain before display mapping.
+    let anchors = runtime_anchors(cfg, curve_idx, total_history_seconds, db_min, db_max);
     let pts: Vec<Pos2> = (0..n).map(|k| {
         let f_hz = (k as f32 * sample_rate / fft_size as f32).max(20.0);
         let x    = freq_to_x_max(f_hz, max_hz, rect);
-        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature, offset_fn, max_hz);
+        let adj  = apply_curve_adjustments(gains[k], f_hz, tilt, offset, curvature, cfg.offset_fn, max_hz);
         let v    = gain_to_display(curve_idx, adj, global_attack_ms, global_release_ms, db_min, db_max, total_history_seconds);
-        let y    = physical_to_y(v, curve_idx, db_min, db_max, rect);
+        let y    = physical_to_y(v, cfg, anchors, rect);
         Pos2::new(x, y)
     }).collect();
     let line_stroke = Stroke::new(stroke_width, color);

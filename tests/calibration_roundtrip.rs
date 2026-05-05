@@ -568,7 +568,9 @@ fn ts_split_sensitivity_offset_extremes() {
 /// See docs/superpowers/plans/2026-04-24-calibration-audit.md Task 3b.
 mod display_mapping_contract {
     use nih_plug_egui::egui::{Pos2, Rect, Vec2};
-    use spectral_forge::editor::curve::{gain_to_display, physical_to_y, screen_y_to_physical};
+    use spectral_forge::editor::curve::{gain_to_display, physical_to_y, runtime_anchors, screen_y_to_physical};
+    use spectral_forge::editor::curve_config::curve_display_config;
+    use spectral_forge::dsp::modules::{GainMode, ModuleType};
 
     fn rect() -> Rect {
         Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0))
@@ -599,7 +601,9 @@ mod display_mapping_contract {
     #[test]
     fn freeze_length_physical_to_y_at_y_min_is_rect_bottom() {
         let r = rect();
-        let y = physical_to_y(62.5, 8, -80.0, 0.0, r);
+        let cfg = curve_display_config(ModuleType::Freeze, 0, GainMode::Add);
+        let anchors = runtime_anchors(&cfg, 8, 0.0, -80.0, 0.0);
+        let y = physical_to_y(62.5, &cfg, anchors, r);
         assert!((y - r.bottom()).abs() < 1.0,
             "v=62.5 (y_min) should map to rect.bottom()={}, got {}", r.bottom(), y);
     }
@@ -615,7 +619,9 @@ mod display_mapping_contract {
     #[test]
     fn freeze_length_roundtrip_midrange() {
         let r = rect();
-        let y = physical_to_y(500.0, 8, -80.0, 0.0, r);
+        let cfg = curve_display_config(ModuleType::Freeze, 0, GainMode::Add);
+        let anchors = runtime_anchors(&cfg, 8, 0.0, -80.0, 0.0);
+        let y = physical_to_y(500.0, &cfg, anchors, r);
         let v = screen_y_to_physical(y, 8, -80.0, 0.0, r);
         assert!((v - 500.0).abs() < 1.0,
             "500 ms roundtrip should recover ≈500, got {}", v);
@@ -625,7 +631,9 @@ mod display_mapping_contract {
     #[test]
     fn portamento_physical_to_y_at_y_min_is_rect_bottom() {
         let r = rect();
-        let y = physical_to_y(40.0, 10, -80.0, 0.0, r);
+        let cfg = curve_display_config(ModuleType::Freeze, 2, GainMode::Add);
+        let anchors = runtime_anchors(&cfg, 10, 0.0, -80.0, 0.0);
+        let y = physical_to_y(40.0, &cfg, anchors, r);
         assert!((y - r.bottom()).abs() < 1.0,
             "v=40 (y_min) should map to rect.bottom()={}, got {}", r.bottom(), y);
     }

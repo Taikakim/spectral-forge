@@ -533,14 +533,14 @@ pub fn create_editor(
                             if i >= num_c.min(7) { continue; }
                             let (tilt, offset, curvature) = slot_meta[i];
                             let disp_i = crv::display_curve_idx(editing_type, i, slot_gain_mode_snap);
-                            let offset_fn = crate::editor::curve_config::curve_display_config(
+                            let cfg = crate::editor::curve_config::curve_display_config(
                                 editing_type, i, slot_gain_mode_snap,
-                            ).offset_fn;
+                            );
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[i], disp_i,
                                 spec.color_dim, 1.0,
                                 db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset, curvature,
-                                offset_fn, total_history_seconds,
+                                &cfg, total_history_seconds,
                             );
                         }
 
@@ -565,14 +565,14 @@ pub fn create_editor(
                             let disp_curve = crv::display_curve_idx(
                                 editing_type, editing_curve, slot_gain_mode_snap,
                             );
-                            let offset_fn = crate::editor::curve_config::curve_display_config(
+                            let cfg = crate::editor::curve_config::curve_display_config(
                                 editing_type, editing_curve, slot_gain_mode_snap,
-                            ).offset_fn;
+                            );
                             crv::paint_response_curve(
                                 ui.painter(), curve_rect, &all_gains[editing_curve], disp_curve,
                                 spec.color_lit, 2.0,
                                 db_min, db_max, atk_ms, rel_ms, sr, fft_size, tilt, offset, curvature,
-                                offset_fn, total_history_seconds,
+                                &cfg, total_history_seconds,
                             );
 
                             let mut nodes = slot_nodes[editing_curve];

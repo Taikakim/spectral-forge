@@ -66,3 +66,32 @@ fn runtime_anchors_substitutes_db_range_for_threshold_idx_0() {
     assert!((lo - 0.0).abs() < 1e-3, "expected lo=0, got {lo}");
     assert!((hi - 200.0).abs() < 1e-3, "expected hi=200, got {hi}");
 }
+
+#[test]
+fn physical_to_y_uses_cfg_y_log_for_axis_choice() {
+    use spectral_forge::editor::curve::physical_to_y;
+    use spectral_forge::editor::curve_config::{curve_display_config};
+    use spectral_forge::dsp::modules::{GainMode, ModuleType};
+    use nih_plug_egui::egui::{Pos2, Rect};
+
+    let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0));
+
+    // Dynamics RATIO (idx 1, log axis 1..20). At y_min the pixel is bottom;
+    // at y_max it's top; at the geometric midpoint sqrt(20)≈4.47 it's centre.
+    let ratio_cfg = curve_display_config(ModuleType::Dynamics, 1, GainMode::Add);
+    let anchors_ratio = (ratio_cfg.y_min, ratio_cfg.y_natural, ratio_cfg.y_max);
+
+    let y_bottom = physical_to_y(1.0, &ratio_cfg, anchors_ratio, rect);
+    let y_top    = physical_to_y(20.0, &ratio_cfg, anchors_ratio, rect);
+    let y_mid    = physical_to_y(20f32.sqrt(), &ratio_cfg, anchors_ratio, rect);
+
+    assert!((y_bottom - rect.bottom()).abs() < 1e-3);
+    assert!((y_top    - rect.top()).abs() < 1e-3);
+    assert!((y_mid    - rect.center().y).abs() < 1.0);
+
+    // PAST mix (idx 6, linear axis 0..100). 50 maps to centre.
+    let mix_cfg = curve_display_config(ModuleType::Past, 4, GainMode::Add);
+    let anchors_mix = (mix_cfg.y_min, mix_cfg.y_natural, mix_cfg.y_max);
+    let y_50 = physical_to_y(50.0, &mix_cfg, anchors_mix, rect);
+    assert!((y_50 - rect.center().y).abs() < 1.0);
+}
