@@ -77,3 +77,32 @@ fn future_active_layout_matches_kernel_signatures() {
     assert_eq!(layout_pe.active, &[0u8, 1, 2, 3, 4],
         "PreEcho should expose all 5 curves including THRESHOLD");
 }
+
+/// Circuit has 10 modes. Kernels were inspected to determine which curve indices
+/// each one actually reads. Curves: 0=AMOUNT, 1=THRESH, 2=SPREAD, 3=RELEASE, 4=MIX.
+#[test]
+fn circuit_active_layout_matches_kernel_signatures() {
+    use spectral_forge::dsp::modules::circuit::CircuitMode;
+
+    let layout_fn = module_spec(ModuleType::Circuit).active_layout
+        .expect("Circuit should declare an active_layout");
+
+    let modes_and_active: &[(CircuitMode, &[u8])] = &[
+        (CircuitMode::BbdBins,               &[0, 1, 3, 4]),
+        (CircuitMode::SpectralSchmitt,       &[0, 1, 3, 4]),
+        (CircuitMode::CrossoverDistortion,   &[0, 4]),
+        (CircuitMode::Vactrol,               &[0, 3, 4]),
+        (CircuitMode::TransformerSaturation, &[0, 1, 2, 3, 4]),
+        (CircuitMode::PowerSag,              &[0, 1, 3, 4]),
+        (CircuitMode::ComponentDrift,        &[0, 1, 3, 4]),
+        (CircuitMode::PcbCrosstalk,          &[0, 2, 4]),
+        (CircuitMode::SlewDistortion,        &[0, 1, 3, 4]),
+        (CircuitMode::BiasFuzz,              &[0, 1, 2, 3, 4]),
+    ];
+    for (mode, expected) in modes_and_active {
+        let layout = layout_fn(*mode as u8);
+        assert_eq!(layout.active, *expected,
+            "Circuit mode {:?}: expected active {:?}, got {:?}",
+            mode, expected, layout.active);
+    }
+}

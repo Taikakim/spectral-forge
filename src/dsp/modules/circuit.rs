@@ -1183,3 +1183,115 @@ impl CircuitModule {
         }
     }
 }
+
+// ── Per-mode CurveLayout ───────────────────────────────────────────────────
+
+/// Return the `CurveLayout` for the given Circuit mode byte.
+///
+/// Curves: 0=AMOUNT, 1=THRESH, 2=SPREAD, 3=RELEASE, 4=MIX.
+/// Each mode lists only the curves its kernel actually reads; unused curves
+/// are hidden in the UI so users aren't presented with dead controls.
+///
+/// Mode byte assignment (ordinal of `CircuitMode` variants):
+///   0=BbdBins, 1=SpectralSchmitt, 2=CrossoverDistortion, 3=Vactrol,
+///   4=TransformerSaturation, 5=PowerSag, 6=ComponentDrift, 7=PcbCrosstalk,
+///   8=SlewDistortion, 9=BiasFuzz.
+pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
+    match mode_byte {
+        0 => super::CurveLayout {
+            // BbdBins: 4-stage bucket-brigade delay on per-bin magnitudes + LP + dither.
+            // Reads AMOUNT (delay mix), THRESH (dither amount), RELEASE (LP alpha), MIX.
+            // SPREAD(2) reserved for a future phase; not read by this kernel.
+            active:          &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("BBD-style bin delay: cascades magnitude through 4 LP stages with chip-noise dither."),
+        },
+        1 => super::CurveLayout {
+            // SpectralSchmitt: hysteresis-based per-bin level latch.
+            // Reads AMOUNT (attenuation depth), THRESH (latch high threshold), RELEASE (hysteresis gap), MIX.
+            // SPREAD(2) reserved for a future phase; not read by this kernel.
+            active:          &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Schmitt trigger: per-bin hysteresis latch attenuates bins below a threshold gap."),
+        },
+        2 => super::CurveLayout {
+            // CrossoverDistortion: C¹-smooth deadzone mimicking BJT class-B crossover.
+            // Reads AMOUNT (deadzone width), MIX only.
+            // THRESH(1), SPREAD(2), RELEASE(3) explicitly unused by this kernel.
+            active:          &[0, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Crossover distortion: C¹-smooth deadzone silences bins below the deadzone, phase-preserving above."),
+        },
+        3 => super::CurveLayout {
+            // Vactrol: cascaded 2-pole opto-coupler photocell per bin.
+            // Reads AMOUNT (drive scale), RELEASE (time-constant scale), MIX.
+            // THRESH(1), SPREAD(2) unused by Vactrol v1.
+            active:          &[0, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Vactrol: cascaded fast/slow opto-coupler caps apply soft-saturating gain per bin."),
+        },
+        4 => super::CurveLayout {
+            // TransformerSaturation: magnitude smoother → tanh soft-clip → 3-tap spread.
+            // Reads all 5 curves: AMOUNT (drive), THRESH (knee), SPREAD (leak strength), RELEASE (tau), MIX.
+            active:          &[0, 1, 2, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Transformer saturation: per-bin tanh soft-clip with magnitude smoothing and spectral spread."),
+        },
+        5 => super::CurveLayout {
+            // PowerSag: global per-channel sag envelope weighted by BinPhysics::temperature.
+            // Reads AMOUNT, THRESH (energy threshold), RELEASE (recovery tau), MIX.
+            // SPREAD(2) unused by Power Sag.
+            active:          &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Power sag: energy above threshold drives a sag envelope; hot bins absorb more gain reduction."),
+        },
+        6 => super::CurveLayout {
+            // ComponentDrift: slow LFSR-driven per-bin gain drift modulated by temperature.
+            // Reads AMOUNT, THRESH (temp gate), RELEASE (drift tau), MIX.
+            // SPREAD(2) unused by Component Drift.
+            active:          &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Component drift: pseudo-random per-bin gain wander driven by LFSR; hot bins drift further."),
+        },
+        7 => super::CurveLayout {
+            // PcbCrosstalk: 3-tap magnitude spread stencil.
+            // Reads AMOUNT (raw vs spread blend), SPREAD (leak strength), MIX.
+            // THRESH(1), RELEASE(3) unused by PCB Crosstalk.
+            active:          &[0, 2, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("PCB crosstalk: bins bleed energy into neighbours via a 3-tap spread stencil."),
+        },
+        8 => super::CurveLayout {
+            // SlewDistortion: magnitude rate-limiter with excess-slew phase scramble.
+            // Reads AMOUNT (limiter depth), THRESH (rate cap), RELEASE (phase scramble gain), MIX.
+            // SPREAD(2) unused by Slew Distortion.
+            active:          &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Slew distortion: caps the per-hop magnitude rate of change; excess slew scrambles phase."),
+        },
+        9 => super::CurveLayout {
+            // BiasFuzz: DC-offset envelope shifts zero point, asymmetric tanh clip + spread.
+            // Reads all 5 curves: AMOUNT (drive), THRESH (top rail), SPREAD (bias bleed), RELEASE (tau), MIX.
+            active:          &[0, 1, 2, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Bias fuzz: per-bin DC offset envelope drives asymmetric tanh clipping with optional spectral spread."),
+        },
+        _ => super::CurveLayout {
+            // Out-of-range: fall back to BbdBins layout.
+            active:          &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("BBD-style bin delay: cascades magnitude through 4 LP stages with chip-noise dither."),
+        },
+    }
+}
