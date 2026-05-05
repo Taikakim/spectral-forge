@@ -1211,9 +1211,10 @@ pub fn create_editor(
                                             .range(-1.0..=1.0)
                                             .speed(1.0 / 300.0)
                                             .custom_formatter(move |v, _range| {
-                                                // UI parameter spec §2: offset slider value is a
-                                                // piecewise-linear interpolation between the curve's
-                                                // three declared anchors (y_min, y_natural, y_max).
+                                                // UI parameter spec §2: offset slider value uses
+                                                // axis_aware_lerp between the curve's three declared
+                                                // anchors (y_min, y_natural, y_max) — geometric on
+                                                // log-axis curves, linear on linear-axis curves.
                                                 // Independent of offset_fn — the audio path uses
                                                 // offset_fn separately (see apply_curve_transform).
                                                 //
@@ -1223,17 +1224,12 @@ pub fn create_editor(
                                                 if off_cfg.y_label.is_empty() {
                                                     return format!("{:+.2}", v as f32);
                                                 }
-                                                let (y_min, y_nat, y_max) = crv::runtime_anchors(
+                                                let anchors = crv::runtime_anchors(
                                                     &off_cfg, off_disp_idx, off_total_history_seconds,
                                                     off_db_min, off_db_max,
                                                     off_atk_ms, off_rel_ms,
                                                 );
-                                                let v = v as f32;
-                                                let phys = if v >= 0.0 {
-                                                    y_nat + v * (y_max - y_nat)
-                                                } else {
-                                                    y_nat + v * (y_nat - y_min)
-                                                };
+                                                let phys = crv::axis_aware_lerp(&off_cfg, anchors, v as f32);
                                                 format!("{:.1} {}", phys, off_cfg.y_label)
                                             })
                                     );
