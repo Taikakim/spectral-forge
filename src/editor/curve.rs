@@ -549,18 +549,6 @@ pub fn apply_curve_adjustments(
 }
 
 /// Resolve a `CurveDisplayConfig`'s declared anchors `(y_min, y_natural, y_max)`
-/// into runtime physical units. The default identity passthrough is the right
-/// answer for every absolute-units calibration (dBFS, ratio, ms, %, etc.). The
-/// one exception is **display index 13** (Past's Age/Delay, history-relative
-/// seconds): the config stores the anchors as fractions of `y_max`, and at
-/// runtime we substitute `y_max → total_history_seconds` and scale `y_min` and
-/// `y_natural` by the same factor.
-///
-/// Per UI parameter spec §2, the offset slider's displayed value is a
-/// piecewise-linear interpolation between these three anchors keyed on the
-/// normalised offset `[-1, 1]`. The slider formatter calls this helper so it
-/// receives the runtime-correct anchors regardless of curve type.
-/// Resolve a `CurveDisplayConfig`'s declared anchors `(y_min, y_natural, y_max)`
 /// into runtime physical units. Two display indices need runtime substitution:
 ///   - idx 0 (Dynamics threshold dBFS): `(y_min, y_max)` are taken from the
 ///     active `db_min`/`db_max` parameters; `y_natural` (-20 dBFS) is preserved.
@@ -576,8 +564,8 @@ pub fn runtime_anchors(
 ) -> (f32, f32, f32) {
     match display_idx {
         13 => {
-            let s = total_history_seconds;
-            (cfg.y_min * s, cfg.y_natural * s, cfg.y_max * s)
+            let scale = total_history_seconds;
+            (cfg.y_min * scale, cfg.y_natural * scale, cfg.y_max * scale)
         }
         0 => (db_min, cfg.y_natural, db_max),
         _ => (cfg.y_min, cfg.y_natural, cfg.y_max),

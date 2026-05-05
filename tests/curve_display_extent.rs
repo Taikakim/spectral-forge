@@ -63,5 +63,6 @@ fn runtime_anchors_substitutes_db_range_for_threshold_idx_0() {
     // Other display indices pass through unchanged.
     let phase_cfg = curve_display_config(ModuleType::PhaseSmear, 0, GainMode::Add);
     let (lo, _, hi) = runtime_anchors(&phase_cfg, 7, 0.0, -60.0, 0.0);
-    assert!((lo - 0.0).abs() < 1e-3 && (hi - 200.0).abs() < 1e-3);
+    assert!((lo - 0.0).abs() < 1e-3, "expected lo=0, got {lo}");
+    assert!((hi - 200.0).abs() < 1e-3, "expected hi=200, got {hi}");
 }
