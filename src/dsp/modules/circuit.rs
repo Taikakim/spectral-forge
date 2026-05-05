@@ -50,10 +50,10 @@ fn apply_bbd(
     let num_bins = bins.len();
 
     for k in 0..num_bins {
-        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1 stage-3 output gain
+        let amount = amount_c[k].clamp(0.0, 1.0);
         let dither_amt = thresh_c[k].clamp(0.0, 2.0) * 0.005; // very small noise
         let lp_alpha = (release_c[k].clamp(0.01, 2.0) * 0.4).clamp(0.05, 0.9);
-        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
 
         let dry = bins[k];
         let in_mag = dry.norm();
@@ -106,11 +106,11 @@ fn apply_schmitt(
     let num_bins = bins.len();
 
     for k in 0..num_bins {
-        let attenuation = amount_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1 attenuation when OFF
+        let attenuation = amount_c[k].clamp(0.0, 1.0);
         let high = thresh_c[k].clamp(0.01, 4.0);
         let gap = (release_c[k].clamp(0.0, 2.0) * 0.5).clamp(0.05, 0.95);
         let low = high * (1.0 - gap);
-        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
 
         let mag = bins[k].norm();
         let was_latched = latched[k] != 0;
@@ -142,7 +142,7 @@ fn apply_crossover(bins: &mut [Complex<f32>], curves: &[&[f32]]) {
 
     for k in 0..num_bins {
         let dz_width = amount_c[k].clamp(0.0, 2.0) * 0.1; // up to 0.2 deadzone half-width
-        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
 
         let dry = bins[k];
         let mag = dry.norm();
@@ -197,7 +197,7 @@ fn apply_vactrol(
     for k in 0..num_bins {
         let amount  = amount_c[k].clamp(0.0, 2.0);
         let rel_scl = release_c[k].clamp(0.01, 4.0);   // user scale on both τ
-        let mix     = mix_c[k].clamp(0.0, 2.0) * 0.5;  // 0..1
+        let mix     = mix_c[k].clamp(0.0, 1.0);
 
         let tau_fast = VACTROL_TAU_FAST * rel_scl;
         let tau_slow = VACTROL_TAU_SLOW * rel_scl;
@@ -272,14 +272,10 @@ fn apply_transformer(
     {
         let flux_in: Option<&[f32]> = flux.as_deref();
         for k in 0..num_bins {
-            // Drive 0..1 (range = amount 0..2 scaled by 0.5). At drive=1 and
-            // sub-knee input (0.5 vs knee=1): x=0.5, tanh(0.5)≈0.46 — gentle
-            // compression within the target (0.3, 0.7) window. At drive=1 and
-            // above-knee input (3.0 vs knee=1): x=3.0, tanh→1.0×knee — strong
-            // but bounded saturation, output≈1.0, within (0.5, 2.0). The plan's
-            // ×4.0 was too aggressive: x=8 would blow through to ≈1.0×knee even
-            // for sub-knee inputs.
-            let drive = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1
+            // Drive 0..1: at drive=1 and sub-knee input (0.5 vs knee=1): x=0.5, tanh≈0.46 —
+            // gentle compression. At drive=1 and above-knee input (3.0 vs knee=1): x=3.0,
+            // tanh→1.0×knee — strong saturation.
+            let drive = amount_c[k].clamp(0.0, 1.0);
             let knee  = thresh_c[k].clamp(0.05, 4.0);
             let release = release_c[k].clamp(0.0, 2.0).max(0.01);
             // Magnitude smoother time constant: with `release` clamped to [0.01, 2.0]
@@ -304,7 +300,7 @@ fn apply_transformer(
     // buffer to avoid read-after-write alias; the averaged value is close enough
     // for smooth SPREAD curves (which is how users draw them at hop rate).
     let strength_avg = {
-        let sum: f32 = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 2.0) * 0.5).sum();
+        let sum: f32 = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 1.0)).sum();
         sum / num_bins.max(1) as f32
     };
     let s = strength_avg;
@@ -327,7 +323,7 @@ fn apply_transformer(
             // Silent input: emit spread energy as a real-positive bin.
             Complex::new(new_mag, 0.0)
         };
-        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix    = mix_c[k].clamp(0.0, 1.0);
         bins[k]    = dry * (1.0 - mix) + wet * mix;
 
         prev_w = curr_w;
@@ -429,7 +425,7 @@ fn apply_component_drift(
             let g = (1.0 + drift_env[k]).max(0.0);
             let dry = bins[k];
             let wet = dry * g;
-            let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+            let mix = mix_c[k].clamp(0.0, 1.0);
             bins[k] = dry * (1.0 - mix) + wet * mix;
         }
     }
@@ -486,7 +482,7 @@ fn apply_power_sag(
     // Defensive `.get(0)` matches the file-wide pattern (see probe captures in `process()`):
     // pipeline always supplies full-length curves, but an empty slice from a future call
     // site shouldn't panic mid-audio-thread.
-    let amount  = amount_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 0.5;
+    let amount  = amount_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 1.0);
     let thresh  = thresh_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 4.0);
     let release = release_c.get(0).copied().unwrap_or(0.0).clamp(0.0, 2.0).max(0.01);
     let attack_tau  = 0.05;                        // 50 ms attack (sag onset)
@@ -512,7 +508,7 @@ fn apply_power_sag(
 
         let dry = bins[k];
         let wet = dry * gain_red[k];
-        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
         bins[k] = dry * (1.0 - mix) + wet * mix;
     }
 }
@@ -549,7 +545,7 @@ fn apply_pcb_crosstalk(
     let spread_avg = if num_bins > 0 {
         let mut sum = 0.0_f32;
         for k in 0..num_bins {
-            sum += spread_c[k].clamp(0.0, 2.0) * 0.5;
+            sum += spread_c[k].clamp(0.0, 1.0);
         }
         sum / num_bins as f32
     } else {
@@ -563,8 +559,8 @@ fn apply_pcb_crosstalk(
     // For silent input bins where spread has leaked energy in, emit that energy
     // as a real-positive bin (arbitrary unit phase) — mirrors apply_transformer.
     for k in 0..num_bins {
-        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5;
-        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let amount = amount_c[k].clamp(0.0, 1.0);
+        let mix = mix_c[k].clamp(0.0, 1.0);
         let in_mag = workspace[k];
         // amount blends raw magnitude vs. spread magnitude.
         let out_mag = workspace2[k] * amount + in_mag * (1.0 - amount);
@@ -608,10 +604,10 @@ fn apply_slew_distortion(
     let num_bins = bins.len();
 
     for k in 0..num_bins {
-        let amount        = amount_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1
+        let amount        = amount_c[k].clamp(0.0, 1.0);
         let rate_cap      = thresh_c[k].clamp(0.001, 4.0);               // max delta-mag per hop
         let scramble_gain = release_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1
-        let mix           = mix_c[k].clamp(0.0, 2.0) * 0.5;              // 0..1
+        let mix           = mix_c[k].clamp(0.0, 1.0);
 
         let dry = bins[k];
         let in_mag   = dry.norm();
@@ -685,7 +681,7 @@ fn apply_bias_fuzz(
     {
         let bias_in: Option<&[f32]> = bias.as_deref();
         for k in 0..num_bins {
-            let amount   = amount_c[k].clamp(0.0, 2.0) * 0.5;          // 0..1
+            let amount   = amount_c[k].clamp(0.0, 1.0);
             let top_rail = thresh_c[k].clamp(0.05, 4.0);
             let release  = release_c[k].clamp(0.0, 2.0).max(0.01);
             // Bias envelope tau: 0.05..1.05 sec for release in [0.01, 2].
@@ -710,7 +706,7 @@ fn apply_bias_fuzz(
             let dry   = bins[k];
             let scale = if in_mag > 1e-9 { new_mag / in_mag } else { 0.0 };
             let wet   = dry * scale;
-            let mix   = mix_c[k].clamp(0.0, 2.0) * 0.5;
+            let mix   = mix_c[k].clamp(0.0, 1.0);
             bins[k]   = dry * (1.0 - mix) + wet * mix;
         }
     }
@@ -718,7 +714,7 @@ fn apply_bias_fuzz(
     // --- Pass 2: optional SPREAD — bleed bias to neighbours (single-pass rolling). ---
     // This is one hop behind, matching the established pattern in apply_transformer
     // (PCB Crosstalk and TransformerSat both use a workspace read before-write).
-    let spread_avg = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 2.0) * 0.5).sum::<f32>()
+    let spread_avg = (0..num_bins).map(|k| spread_c[k].clamp(0.0, 1.0)).sum::<f32>()
         / num_bins.max(1) as f32;
     if spread_avg > 0.001 && num_bins >= 3 {
         // Symmetric self-pad at both ends: bin 0 uses bias_lp[0] as left neighbour,

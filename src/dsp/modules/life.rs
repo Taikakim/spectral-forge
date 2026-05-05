@@ -110,7 +110,7 @@ const SANDPAPER_SILENT_FLOOR: f32 = 1e-9;
 /// Brownian — temperature below which the bin is treated as cold (no drift applied).
 const BROWNIAN_TEMP_FLOOR: f32 = 1e-6;
 /// Brownian — curve → amount scaler applied before the [0, MAX] clamp.
-const BROWNIAN_AMOUNT_SCALE: f32 = 0.5;
+const BROWNIAN_AMOUNT_SCALE: f32 = 1.0;
 /// Brownian — upper bound on the scaled amount (keeps drift moderate at curve=2.0).
 const BROWNIAN_AMOUNT_MAX: f32 = 1.0;
 /// Brownian — final per-hop drift multiplier (keeps the random walk small relative to bin magnitude).
@@ -233,9 +233,9 @@ fn apply_viscosity(
     // Power diffusion reads from `scratch_power` (pre-hop snapshot); `bins` is
     // written only at index k, so in-place phasor scaling is safe.
     for k in 1..num_bins - 1 {
-        let d_k     = (amount_c[k]     * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
-        let d_kp1   = (amount_c[k + 1] * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
-        let d_km1   = (amount_c[k - 1] * 0.5 * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
+        let d_k     = (amount_c[k]     * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
+        let d_kp1   = (amount_c[k + 1] * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
+        let d_km1   = (amount_c[k - 1] * VISCOSITY_D_MAX).clamp(0.0, VISCOSITY_D_MAX);
         let d_face_right = 2.0 * d_k * d_kp1 / (d_k + d_kp1 + EPS);
         let d_face_left  = 2.0 * d_k * d_km1 / (d_k + d_km1 + EPS);
         let p_new = scratch_power[k]
@@ -244,7 +244,7 @@ fn apply_viscosity(
 
         let p_new   = p_new.max(0.0);
         let mag_new = p_new.sqrt();
-        let mix     = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let mix     = mix_c[k].clamp(0.0, 1.0);
 
         let mag_old = scratch_mag[k];
         let dry = bins[k];
@@ -290,7 +290,7 @@ fn apply_surface_tension(
         }
 
         let amt_max = SURFACE_TENSION_AMT_MAX;
-        let amt = (amount_c[k] * (amt_max * 0.5)).clamp(0.0, amt_max);
+        let amt = (amount_c[k] * amt_max).clamp(0.0, amt_max);
         let reach_max = SURFACE_TENSION_REACH_MAX;
         let reach_bins = ((reach_c[k] * (reach_max as f32 * 0.5)) as i32).clamp(1, reach_max);
 
@@ -324,7 +324,7 @@ fn apply_surface_tension(
         let old_mag = bins[k].norm();
         let new_mag = scratch_mag[k].max(0.0);
         let scale_wet = if old_mag > 1e-9 { new_mag / old_mag } else { 0.0 };
-        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
         let dry = bins[k];
         let wet = if old_mag > 1e-9 {
             dry * scale_wet
@@ -362,7 +362,7 @@ fn apply_crystallization(
         let sustained = if mag > thresh { 1.0 } else { 0.0 };
         sustain_envelope[k] = sustain_envelope[k] * (1.0 - alpha) + sustained * alpha;
 
-        let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let amt = amount_c[k].clamp(0.0, 1.0);
         let crystal_local = (sustain_envelope[k] * amt).clamp(0.0, 1.0);
 
         // v1 phase-lock target: real axis (frozen phase = 0). Future revision may
@@ -381,7 +381,7 @@ fn apply_crystallization(
         // intended v1 semantic — downstream readers (Freeze) treat it as a
         // durable latch.
         for k in 0..num_bins {
-            let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+            let amt = amount_c[k].clamp(0.0, 1.0);
             let crystal_local = (sustain_envelope[k] * amt).clamp(0.0, 1.0);
             p.crystallization[k] = p.crystallization[k].max(crystal_local);
         }
@@ -416,7 +416,7 @@ fn apply_archimedes(
         sum_amt    += amount_c[k];
         sum_thresh += thresh_c[k];
     }
-    let avg_amt    = (sum_amt    / num_bins as f32 * 0.5).clamp(0.0, 1.0);
+    let avg_amt    = (sum_amt    / num_bins as f32).clamp(0.0, 1.0);
     let avg_thresh = (sum_thresh / num_bins as f32 * 0.5).clamp(0.0, 1.0);
 
     let capacity       = (num_bins as f32 * avg_thresh).max(ARCHIMEDES_CAPACITY_FLOOR);
@@ -424,7 +424,7 @@ fn apply_archimedes(
     let duck_factor    = 1.0 - (overflow_ratio * avg_amt).min(1.0 - ARCHIMEDES_DUCK_FLOOR);
 
     for k in 0..num_bins {
-        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
         let dry = bins[k];
         let wet = bins[k] * duck_factor;
         bins[k] = dry * (1.0 - mix) + wet * mix;
@@ -460,7 +460,7 @@ fn apply_non_newtonian(
         let mag_old = bins[k].norm();
         let limit   = (mag_old - excess * amt).max(0.0);
         let scale   = if mag_old > 1e-9 { limit / mag_old } else { 0.0 };
-        let mix     = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let mix     = mix_c[k].clamp(0.0, 1.0);
         let dry     = bins[k];
         let wet     = bins[k] * scale;
         bins[k]     = dry * (1.0 - mix) + wet * mix;
@@ -502,12 +502,12 @@ fn apply_stiction(
             is_moving[k] = (is_moving[k] - decay).max(0.0);
         }
 
-        let amt = (amount_c[k] * 0.5).clamp(0.0, 1.0);
+        let amt = amount_c[k].clamp(0.0, 1.0);
         // stuck_factor lerps from `1 - amt` (fully stuck, is_moving=0) to `1`
         // (free, is_moving=1). At amt=1 + is_moving=0 the bin is fully silenced.
         let stuck_factor = 1.0 - (1.0 - is_moving[k]) * amt;
 
-        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
         let dry = bins[k];
         let wet = bins[k] * stuck_factor;
         bins[k] = dry * (1.0 - mix) + wet * mix;
@@ -560,7 +560,7 @@ fn apply_yield(
 
         if tear_state[k] > 0.0 && mag > 1e-9 {
             // Common case (no tear, no heal-in-progress): skip the mix/trig work.
-            let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+            let mix = mix_c[k].clamp(0.0, 1.0);
             let yield_mag = thresh.min(mag);
             let phase_scramble = xorshift32_signed_unit(rng_state) * std::f32::consts::PI;
             let new_re = yield_mag * phase_scramble.cos();
@@ -633,7 +633,7 @@ fn apply_capillary(
     for k in 0..num_bins {
         let new_mag = (scratch_mag[k] + wick_carry[k]).max(0.0);
         let old_mag = bins[k].norm();
-        let mix = (mix_c[k].clamp(0.0, 2.0)) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
         let dry = bins[k];
         let wet = if old_mag > CAPILLARY_SILENT_FLOOR {
             bins[k] * (new_mag / old_mag)
@@ -691,7 +691,7 @@ fn apply_sandpaper(
         let log_offset = ((1.0 + reach_factor) * (k as f32).max(1.0).log2() * SANDPAPER_LOG_OFFSET_BASE) as usize;
         let target = (k + log_offset.max(SANDPAPER_MIN_OFFSET)).min(num_bins - 1);
 
-        let mix = mix_c[target].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[target].clamp(0.0, 1.0);
         let cur = bins[target];
         let cur_mag = cur.norm();
         let new_mag = (cur_mag + spark).min(SANDPAPER_SPARK_CAP);
@@ -728,7 +728,7 @@ fn apply_brownian(
         let amt = (amount_c[k] * BROWNIAN_AMOUNT_SCALE).clamp(0.0, BROWNIAN_AMOUNT_MAX);
         let drift_re = xorshift32_signed_unit(rng_state) * amt * t * BROWNIAN_DRIFT_SCALE;
         let drift_im = xorshift32_signed_unit(rng_state) * amt * t * BROWNIAN_DRIFT_SCALE;
-        let mix = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix = mix_c[k].clamp(0.0, 1.0);
         let dry = bins[k];
         let wet = bins[k] + Complex::new(drift_re, drift_im);
         bins[k] = dry * (1.0 - mix) + wet * mix;

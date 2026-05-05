@@ -131,7 +131,7 @@ fn apply_chladni(
         let psi    = plate_phase[k];
         let amt    = (amount_c.get(k).copied().unwrap_or(0.0) * 0.025).clamp(0.0, 0.05);
         let damp   = (damping_c.get(k).copied().unwrap_or(0.0) * 0.01).clamp(0.0, 0.02);
-        let mix    = mix_c.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 0.5;
+        let mix    = mix_c.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
         let suppress = amt * psi;
         let inject   = total_suppressed * (1.0 - psi) * inv_node;
 
@@ -166,7 +166,7 @@ fn apply_helmholtz(
             continue;
         }
 
-        let amount = (amount_c[center] * 0.5).clamp(0.0, 1.0);
+        let amount = amount_c[center].clamp(0.0, 1.0);
         if amount < 0.01 {
             // Trap inactive: drain residual fill so it doesn't leak across reactivations.
             fill_level[k] *= 0.95;
@@ -176,7 +176,7 @@ fn apply_helmholtz(
         let capacity  = capacity_c[center].clamp(0.1, 4.0);
         let release   = (release_c[center] * 0.2).clamp(0.0, 0.5);
         let threshold = (threshold_c[center] * 0.5).clamp(0.1, 1.5);
-        let mix       = (mix_c[center].clamp(0.0, 2.0)) * 0.5;
+        let mix       = mix_c[center].clamp(0.0, 1.0);
 
         // Compute trigger early so it's available for the fill_level cap below.
         let trigger = threshold * capacity;
@@ -272,7 +272,7 @@ impl SpectralModule for GeometryModule {
                     let mix_g    = curves[4].get(0).copied().unwrap_or(0.0);
                     // AMOUNT: (g * 0.025).clamp(0.0, 0.05) → range 0..0.05 → pct = (val/0.05)*100
                     let amt_val = (amount_g * 0.025).clamp(0.0, 0.05);
-                    let mix_val = mix_g.clamp(0.0, 2.0) * 0.5;
+                    let mix_val = mix_g.clamp(0.0, 1.0);
                     probe_amount_pct = (amt_val / 0.05) * 100.0;
                     probe_mix_pct    = mix_val * 100.0;
                 }
@@ -290,9 +290,8 @@ impl SpectralModule for GeometryModule {
                 {
                     let amount_g = curves[0].get(0).copied().unwrap_or(0.0);
                     let mix_g    = curves[4].get(0).copied().unwrap_or(0.0);
-                    // AMOUNT: (g * 0.5).clamp(0.0, 1.0) → range 0..1.0 → pct = val * 100
-                    let amt_val = (amount_g * 0.5).clamp(0.0, 1.0);
-                    let mix_val = mix_g.clamp(0.0, 2.0) * 0.5;
+                    let amt_val = amount_g.clamp(0.0, 1.0);
+                    let mix_val = mix_g.clamp(0.0, 1.0);
                     probe_amount_pct = amt_val * 100.0;
                     probe_mix_pct    = mix_val * 100.0;
                 }

@@ -119,7 +119,7 @@ impl SpectralModule for FutureModule {
                     let spread_gain = spread_curve.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
                     let spread_pct  = (spread_gain * 0.20).clamp(0.0, 0.50);
                     let mix_gain    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let mix         = (mix_gain * 0.5).clamp(0.0, 1.0);
+                    let mix         = mix_gain.clamp(0.0, 1.0);
 
                     let dry = bins[k];
                     let wet = self.ring[ch][read_pos][k];
@@ -169,7 +169,7 @@ impl SpectralModule for FutureModule {
                     let spread_gain = spread_curve.get(k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
                     let hf_damp     = (spread_gain * 0.20).clamp(0.0, 1.0);                  // 0 nominal, 1.0 = max damping
                     let mix_gain    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let mix         = (mix_gain * 0.5).clamp(0.0, 1.0);
+                    let mix         = mix_gain.clamp(0.0, 1.0);
 
                     // High-frequency damping factor: 1.0 at bin 0, (1 - hf_damp) at Nyquist.
                     let bin_norm    = k as f32 / (n - 1).max(1) as f32;

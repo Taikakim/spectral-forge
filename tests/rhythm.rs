@@ -83,7 +83,7 @@ fn euclidean_gate_silences_off_steps() {
     m.set_mode(RhythmMode::Euclidean);
     m.reset(48000.0, 1024);
 
-    // AMOUNT=2.0 (full gate depth), DIVISION=1.0 (8 steps), ATTACK_FADE=0.0 (instant), MIX=2.0
+    // AMOUNT=2.0 (depth=1.0 after clamp(0,1)), DIVISION=1.0 (8 steps), ATTACK_FADE=0.0 (instant), MIX=2.0 (mix=1.0 after clamp(0,1))
     let amount = vec![2.0f32; 513];
     let div    = vec![1.0f32; 513];
     let af     = vec![0.0f32; 513];
@@ -96,7 +96,8 @@ fn euclidean_gate_silences_off_steps() {
     ctx.bpm = 120.0;
     ctx.beat_position = 0.0; // explicit even though it's the default — clarifies intent
 
-    // At step 0, Bresenham Bjorklund(5,8)[0] = true → gate open.
+    // probe_k drives pulse count: amount=2.0 → pulses=(2.0*8).round()=16, min(16,8)=8 → Bjorklund(8,8).
+    // At step 0, Bjorklund(8,8)[0] = true → gate open.
     // depth=1.0, mix=1.0, af=0.0 → gain == 1.0 → bins must equal input (1.0, 0.0).
     let mut bins = vec![Complex::new(1.0, 0.0); 513];
     let mut supp = vec![0.0f32; 513];
@@ -122,16 +123,16 @@ fn euclidean_gate_silences_off_step() {
     m.set_mode(RhythmMode::Euclidean);
     m.reset(48000.0, 1024);
 
-    // probe_k = n/2 = 513/2 = 256. Set amount[probe_k]=1.25 so that
-    // pulses_g=1.25 → pulses=(1.25*0.5*8).round()=5 → Bjorklund(5,8).
-    // All other bins: amount=2.0 → depth=(2.0*0.5)=1.0 (full attenuation).
-    // DIVISION=1.0 (8 steps), ATTACK_FADE=0.0 (instant), MIX=2.0 (mix=1.0).
-    let mut amount = vec![2.0f32; 513];
-    amount[256] = 1.25; // probe_k drives pulse count; other bins get full depth
+    // probe_k = n/2 = 513/2 = 256. Set amount[probe_k]=0.625 so that
+    // pulses_g=0.625 → pulses=(0.625*8).round()=5 → Bjorklund(5,8).
+    // All other bins: amount=1.0 → depth=1.0 (full attenuation).
+    // DIVISION=1.0 (8 steps), ATTACK_FADE=0.0 (instant), MIX=1.0 (fully wet).
+    let mut amount = vec![1.0f32; 513];
+    amount[256] = 0.625; // probe_k drives pulse count; other bins get full depth
     let div    = vec![1.0f32; 513];
     let af     = vec![0.0f32; 513];
     let tphase = vec![1.0f32; 513];
-    let mix    = vec![2.0f32; 513];
+    let mix    = vec![1.0f32; 513];
     let curves: Vec<&[f32]> = vec![&amount, &div, &af, &tphase, &mix];
 
     // Step 1 of Bresenham Bjorklund(5,8) = false (gate closed).
@@ -148,7 +149,7 @@ fn euclidean_gate_silences_off_step() {
 
     // gate closed, depth=1.0 (most bins), mix=1.0:
     // gain = 1 - 1.0 + 1.0*0.0 = 0.0 → bins ~0.
-    // probe_k bin has depth=0.625, so it becomes 0.375 — skip that bin.
+    // probe_k bin has depth=0.625 (amount[256]=0.625 clamped to [0,1]), so it becomes 0.375 — skip that bin.
     for (idx, c) in bins.iter().enumerate() {
         if idx == 256 { continue; } // probe_k: different depth, skip
         assert!(c.re.abs() < 1e-4 && c.im.abs() < 1e-4,

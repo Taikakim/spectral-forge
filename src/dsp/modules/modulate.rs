@@ -49,7 +49,7 @@ fn apply_phase_phaser(
         let rate         = rate_c[k].clamp(0.0, 4.0);
         let thresh       = thresh_c[k].clamp(0.01, 4.0);
         let gate_strength = ampgate_c[k].clamp(0.0, 2.0);
-        let mix          = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix          = mix_c[k].clamp(0.0, 1.0);
 
         let mag = bins[k].norm();
         let gate_factor = if gate_strength > 0.001 {
@@ -87,11 +87,11 @@ fn apply_bin_swapper(
     scratch[..num_bins].copy_from_slice(&bins[..num_bins]);
 
     for k in 0..num_bins {
-        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1 blend
+        let amount = amount_c[k].clamp(0.0, 1.0);
         let reach  = reach_c[k].clamp(0.0, 4.0);
         let offset = (reach * 5.0).round() as i32;       // up to 20 bins offset
         let thresh = thresh_c[k].clamp(0.0, 4.0) * 0.1; // magnitude floor
-        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;    // 0..1
+        let mix    = mix_c[k].clamp(0.0, 1.0);    // 0..1
 
         let cur_mag = scratch[k].norm();
         if cur_mag < thresh {
@@ -124,10 +124,10 @@ fn apply_rm_fm_matrix(
     let num_bins = bins.len().min(sidechain.len());
 
     for k in 0..num_bins {
-        let fm_blend = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0=pure RM, 1=pure FM
+        let fm_blend = amount_c[k].clamp(0.0, 1.0); // 0=pure RM, 1=pure FM
         let reach    = reach_c[k].clamp(0.0, 4.0);
         let thresh   = thresh_c[k].clamp(0.0, 4.0) * 0.1;
-        let mix      = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix      = mix_c[k].clamp(0.0, 1.0);
 
         let sc = sidechain[k].max(0.0);
         if sc <= thresh {
@@ -173,10 +173,12 @@ fn apply_diode_rm(
     let num_bins = bins.len().min(sidechain.len());
 
     for k in 0..num_bins {
-        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5; // 0..1
+        // AMOUNT is a ring-mod gain multiplier (not wet/dry), so it keeps the 0..2 range.
+        // Stability requires amount * sc < 1 at neutral; * 0.5 ensures this for sc ≤ 1.
+        let amount = amount_c[k].clamp(0.0, 2.0) * 0.5;
         let reach  = reach_c[k].clamp(0.0, 4.0);
         let thresh = thresh_c[k].clamp(0.01, 4.0) * 0.5; // input level above which diode closes
-        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix    = mix_c[k].clamp(0.0, 1.0);
 
         let sc        = sidechain[k].max(0.0);
         let dry       = bins[k];
@@ -249,7 +251,7 @@ fn apply_ground_loop(
             break;
         }
         let harmonic_amp = amount * sag_factor / h as f32;
-        let mix          = mix_c[target].clamp(0.0, 2.0) * 0.5;
+        let mix          = mix_c[target].clamp(0.0, 1.0);
         let cur_mag      = bins[target].norm().max(1e-9);
         let new_mag      = cur_mag + harmonic_amp;
         let scale        = new_mag / cur_mag;
@@ -287,7 +289,7 @@ fn apply_gravity_phaser(
         // 0.01 floor prevents div-by-zero in gate_factor when thresh_c[k] is 0.
         let thresh  = thresh_c[k].clamp(0.01, 4.0);
         let ampgate = ampgate_c[k].clamp(0.0, 2.0);
-        let mix     = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix     = mix_c[k].clamp(0.0, 1.0);
 
         let mag = bins[k].norm();
         // Amp-gated drive: when ampgate > 0, scale per-bin drive by min(mag/thresh, 1).
@@ -377,7 +379,7 @@ fn apply_gravity_phaser_sc_positioned(
     for k in 0..num_bins {
         let amount = amount_c[k].clamp(0.0, 2.0);
         let reach  = reach_c[k].clamp(0.0, 4.0);
-        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix    = mix_c[k].clamp(0.0, 1.0);
 
         let width_bins = (reach * 12.0).max(1.0);
         let mut force = 0.0_f32;
@@ -469,7 +471,7 @@ fn apply_pll_tear(
     let tear_thresh  = PLL_TEAR_THRESHOLD * thresh_scale.min(2.0);
 
     // REACH defines bin range upper bound (0..2 → 0..num_bins).
-    let reach_norm = reach_c.first().copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.5;
+    let reach_norm = reach_c.first().copied().unwrap_or(1.0).clamp(0.0, 1.0);
     let max_bin    = (((reach_norm + 0.5) * num_bins as f32) as usize).min(num_bins);
 
     let stepped_lo = PLL_MIN_BIN;
@@ -489,7 +491,7 @@ fn apply_pll_tear(
 
     for k in 0..num_bins {
         let amount = amount_c[k].clamp(0.0, 2.0);
-        let mix    = mix_c[k].clamp(0.0, 2.0) * 0.5;
+        let mix    = mix_c[k].clamp(0.0, 1.0);
 
         if k < stepped_lo || k >= stepped_hi {
             // Bin out of PLL range: passthrough.
@@ -819,7 +821,7 @@ impl ModulateModule {
             let modulator = self.fm_partials[j];
             if carrier.bin == modulator.bin { continue; }
 
-            let depth = coefficient.get(carrier.bin).copied().unwrap_or(0.0).clamp(0.0, 2.0) * 0.5;
+            let depth = coefficient.get(carrier.bin).copied().unwrap_or(0.0).clamp(0.0, 1.0);
             let mix_v = mix_curve.get(carrier.bin).copied().unwrap_or(1.0).clamp(0.0, 1.0);
 
             let mod_freq     = self.fm_partial_freq[j];

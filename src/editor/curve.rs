@@ -317,6 +317,81 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
             4 => 6,   // MIX → 0–100 %
             _ => curve_idx,
         },
+        ModuleType::Geometry => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (gain=1.0 → 100% depth after * 0.5 fix)
+            1 => 7,   // MODE_CAP → 0–200 % dimensionless (eigenmode index 0..2)
+            2 => 6,   // DAMP_REL → 0–100 % (magnitude bleed / release)
+            3 => 7,   // THRESH → 0–200 % dimensionless (overflow threshold 0..2)
+            4 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Circuit => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (drive/attenuation depth)
+            1 => 9,   // THRESH → dBFS-like (threshold / knee parameter)
+            2 => 6,   // SPREAD → 0–100 % (energy bleed fraction)
+            3 => 11,  // RELEASE → 0–2 dimensionless (time constant scalar)
+            4 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Life => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (effect depth / intensity)
+            1 => 6,   // THRESHOLD → 0–100 % (magnitude floor; not dBFS — DSP uses gain*0.5)
+            2 => 6,   // SPEED → 0–100 % (LP coefficient / update rate)
+            3 => 6,   // REACH → 0–100 % (bin neighbourhood fraction)
+            4 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Kinetics => match curve_idx {
+            0 => 7,   // STRENGTH → 0–200 % (spring/force; neutral=1.0 → 100%)
+            1 => 7,   // MASS → 0–200 % (inertia; neutral=1.0 → 100%)
+            2 => 7,   // REACH → 0–200 % (bin radius; neutral=1.0 → 100%)
+            3 => 7,   // DAMPING → 0–200 % (viscous damping; neutral=1.0 → 100%)
+            4 => 6,   // MIX → 0–100 % (direct gain, no *0.5 in Kinetics)
+            _ => curve_idx,
+        },
+        ModuleType::Harmony => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (harmonic addition strength)
+            1 => 6,   // THRESHOLD → 0–100 % (magnitude gate; DSP uses gain*0.5)
+            2 => 6,   // STABILITY → 0–100 % (unused in most modes)
+            3 => 6,   // SPREAD → 0–100 % (harmonic spread snap radius)
+            4 => 7,   // COEFFICIENT → 0–200 % (mode-specific weighting; neutral=1.0)
+            5 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Modulate => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (modulation depth / blend)
+            1 => 6,   // REACH → 0–100 % (frequency span fraction)
+            2 => 6,   // RATE → 0–100 % (modulation rate, mode-dependent)
+            3 => 9,   // THRESH → dBFS-like (gate threshold)
+            4 => 6,   // AMPGATE → 0–100 % (amplitude gate fraction)
+            5 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Rhythm => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (pulse depth / gate strength)
+            1 => 7,   // DIVISION → 0–200 % dimensionless (maps to step count 1..32)
+            2 => 6,   // ATTACK_FADE → 0–100 % (ramp edge fraction, capped at 50%)
+            3 => 7,   // TARGET_PHASE → 0–200 % (future: 0..2π angle)
+            4 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Future => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (leak / echo amplitude)
+            1 => 7,   // TIME → 0–200 % dimensionless (delay hops 1..16, fft-size-relative)
+            2 => 6,   // THRESHOLD → 0–100 % (feedback %, PreEcho only)
+            3 => 6,   // SPREAD → 0–100 % (HF damping / side-bleed fraction)
+            4 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
+        ModuleType::Punch => match curve_idx {
+            0 => 6,   // AMOUNT → 0–100 % (carve depth)
+            1 => 7,   // WIDTH → 0–200 % dimensionless (peak detection window in bins)
+            2 => 6,   // FILL_MODE → 0–100 % (pitch-fill drift rate)
+            3 => 7,   // AMP_FILL → 0–200 % (amplitude boost; neutral=1.0)
+            4 => 10,  // HEAL → ms log (gain*150 → 20–2000 ms; portamento scale fits)
+            5 => 6,   // MIX → 0–100 %
+            _ => curve_idx,
+        },
         _ => curve_idx,
     }
 }

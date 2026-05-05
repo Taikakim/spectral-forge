@@ -493,7 +493,7 @@ impl HarmonyModule {
             }
             let delta_semitones = -(nearest_d as f32);
             // SPREAD ∈ [0,2] → snap radius ∈ [0.0, 1.0] of full snap.
-            let s = spread.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.5;
+            let s = spread.get(k).copied().unwrap_or(1.0).clamp(0.0, 1.0);
             let snap = amt * s;
 
             let new_midi = midi + snap * delta_semitones;

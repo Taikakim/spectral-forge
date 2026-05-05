@@ -201,7 +201,7 @@ impl SpectralModule for RhythmModule {
         match self.mode {
             RhythmMode::Euclidean => {
                 let pulses_g = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                let pulses   = ((pulses_g * 0.5) * steps as f32).round() as usize;
+                let pulses   = (pulses_g * steps as f32).round() as usize;
                 // Stack scratch — max 32 steps from division_to_steps table; zero allocation.
                 let mut pattern = [false; 32];
                 bjorklund_into(pulses, steps, &mut pattern);
@@ -209,7 +209,7 @@ impl SpectralModule for RhythmModule {
 
                 // Attack/fade shape — fraction of the step over which to ramp up/down.
                 let af_g     = af_curve.get(probe_k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
-                let edge     = (af_g * 0.5).clamp(0.0, 0.5);
+                let edge     = af_g.clamp(0.0, 0.5);
                 let step_pos = step_idx_f.fract();
                 let edge_gate = if !gate_on {
                     0.0
@@ -224,9 +224,9 @@ impl SpectralModule for RhythmModule {
                 #[allow(clippy::needless_range_loop)] // index `k` is needed for multi-slice per-bin lookup
                 for k in 0..n {
                     let amount_g = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let depth    = (amount_g * 0.5).clamp(0.0, 1.0);
+                    let depth    = amount_g.clamp(0.0, 1.0);
                     let mix_g    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let mix      = (mix_g * 0.5).clamp(0.0, 1.0);
+                    let mix      = mix_g.clamp(0.0, 1.0);
 
                     let dry  = bins[k];
                     let gain = 1.0 - depth + depth * edge_gate;
@@ -313,7 +313,7 @@ impl SpectralModule for RhythmModule {
                 }
 
                 let mix_g_global = mix_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                let mix_global   = (mix_g_global * 0.5).clamp(0.0, 1.0);
+                let mix_global   = mix_g_global.clamp(0.0, 1.0);
                 let amount_g     = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
 
                 // First pass: compute per-bin "voice gate" — max envelope for voices whose peak is at k.
@@ -328,7 +328,7 @@ impl SpectralModule for RhythmModule {
                     }
                     let dry = bins[k];
                     // Wet: original × voice_gate × amount, with amount=2.0 as full passthrough.
-                    let wet = dry * (voice_gate * amount_g * 0.5);
+                    let wet = dry * (voice_gate * amount_g.clamp(0.0, 1.0));
                     bins[k] = Complex::new(
                         dry.re * (1.0 - mix_global) + wet.re * mix_global,
                         dry.im * (1.0 - mix_global) + wet.im * mix_global,
@@ -337,8 +337,7 @@ impl SpectralModule for RhythmModule {
 
                 #[cfg(any(test, feature = "probe"))]
                 {
-                    let amount_norm = (amount_g * 0.5).clamp(0.0, 1.0);
-                    probe_amount_pct = amount_norm * 100.0;
+                    probe_amount_pct = amount_g.clamp(0.0, 1.0) * 100.0;
                     probe_mix_pct    = mix_global * 100.0;
                 }
 
@@ -348,7 +347,7 @@ impl SpectralModule for RhythmModule {
             }
             RhythmMode::PhaseReset => {
                 let af_g     = af_curve.get(probe_k).copied().unwrap_or(0.0).clamp(0.0, 2.0);
-                let edge     = (af_g * 0.5).clamp(0.0, 0.5);
+                let edge     = af_g.clamp(0.0, 0.5);
                 let step_pos = step_idx_f.fract();
 
                 // Reset envelope: 1.0 at the start of a step, decaying linearly across `edge`
@@ -370,9 +369,9 @@ impl SpectralModule for RhythmModule {
                         continue;
                     }
                     let amount_g = amount_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let strength = (amount_g * 0.5).clamp(0.0, 1.0);
+                    let strength = amount_g.clamp(0.0, 1.0);
                     let mix_g    = mix_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    let mix      = (mix_g * 0.5).clamp(0.0, 1.0);
+                    let mix      = mix_g.clamp(0.0, 1.0);
                     // TARGET_PHASE curve: gain 1.0 → 0 phase. Range -π..+π mapped from 0..2.
                     let tphase_g     = tphase_curve.get(k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
                     let target_phase = (tphase_g - 1.0) * std::f32::consts::PI;
@@ -394,8 +393,8 @@ impl SpectralModule for RhythmModule {
                 {
                     let amount_g_probe = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
                     let mix_g_probe    = mix_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
-                    probe_amount_pct = (amount_g_probe * 0.5).clamp(0.0, 1.0) * 100.0;
-                    probe_mix_pct    = (mix_g_probe    * 0.5).clamp(0.0, 1.0) * 100.0;
+                    probe_amount_pct = amount_g_probe.clamp(0.0, 1.0) * 100.0;
+                    probe_mix_pct    = mix_g_probe.clamp(0.0, 1.0) * 100.0;
                 }
             }
         }
