@@ -565,10 +565,14 @@ fn default_config() -> CurveDisplayConfig {
     if o >= 0.0 { g * 10f32.powf(0.3 * o) } else { g * 10f32.powf(0.6 * o) }
 }
 
-/// Ratio 1–20: gain=1.0 → ratio 1:1.
-/// off=+1 → g=20.0 → ratio 20:1; off=-1 → clamped at y_min (ratio can't go below 1).
+/// Ratio 1–20: WYSIWYG with log axis (spec §2 axis-aware lerp).
+/// Geometric lerp from y_natural=1 to y_max=20 on the positive side.
+/// Negative side: y_min == y_natural == 1, so the slider has no negative
+/// reach (ratio cannot go below 1:1) — return g unchanged.
+///   v ≥ 0:  factor = (y_max / y_nat)^v = 20^v
+///   v < 0:  factor = 1 (no-op)
 #[inline] pub fn off_ratio(g: f32, o: f32, _anchors: (f32, f32, f32)) -> f32 {
-    if o >= 0.0 { g + 19.0 * o } else { g }
+    if o >= 0.0 { g * 20.0_f32.powf(o) } else { g }
 }
 
 /// Attack/Release ms: geometric lerp from y_natural (=runtime attack_ms or

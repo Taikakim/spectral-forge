@@ -306,3 +306,20 @@ fn knee_idx_4_reaches_zero_db_at_gain_zero() {
     let v = gain_to_display(4, 0.0, 10.0, 100.0, -60.0, 0.0, 0.0);
     assert!(v <= 0.01, "expected ≈0 dB knee at gain=0, got {v}");
 }
+
+#[test]
+fn off_ratio_wysiwyg_geometric_lerp() {
+    use spectral_forge::editor::curve::{gain_to_display, runtime_anchors, axis_aware_lerp};
+    use spectral_forge::editor::curve_config::{curve_display_config, off_ratio};
+    use spectral_forge::dsp::modules::{ModuleType, GainMode};
+
+    let cfg = curve_display_config(ModuleType::Dynamics, 1, GainMode::Add);
+    let anchors = runtime_anchors(&cfg, 1, 0.0, -60.0, 0.0, 10.0, 100.0);
+    for &v in &[-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
+        let g_off = off_ratio(1.0, v, anchors);
+        let display_actual = gain_to_display(1, g_off, 10.0, 100.0, -60.0, 0.0, 0.0);
+        let display_expected = axis_aware_lerp(&cfg, anchors, v);
+        assert!((display_actual - display_expected).abs() < 0.5,
+            "v={v}: expected {display_expected:.3}, got {display_actual:.3}");
+    }
+}
