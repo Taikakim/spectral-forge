@@ -331,10 +331,14 @@ fn offset_calibration_attack_multiplicative() {
     let hi = (cfg.offset_fn)(g_neutral, 1.0, (cfg.y_min, cfg.y_natural, cfg.y_max));
     assert!((hi - 1024.0).abs() < 0.1,
         "atk off=+1 should give g=1024.0, got {}", hi);
-    // off=-1 → g/1024
+    // off=-1: geometric lerp uses (y_nat/y_min)^v. Static cfg has y_nat=y_min=1.0,
+    // so (1.0/1.0)^(-1) = 1.0 — negative offset does nothing when y_nat == y_min.
+    // WYSIWYG is exercised via runtime anchors (runtime_anchors substitutes attack_ms
+    // for y_natural on idx 2), where y_nat diverges from y_min; see
+    // off_atk_rel_wysiwyg_at_attack_ms_10 in curve_display_extent.rs.
     let lo = (cfg.offset_fn)(g_neutral, -1.0, (cfg.y_min, cfg.y_natural, cfg.y_max));
-    assert!((lo - 1.0 / 1024.0).abs() < 1e-5,
-        "atk off=-1 should give g=1/1024, got {}", lo);
+    assert!((lo - 1.0).abs() < 1e-5,
+        "atk off=-1 at static anchors (y_nat==y_min==1): no movement, got {}", lo);
     // off=0 → identity
     assert!(((cfg.offset_fn)(g_neutral, 0.0, (cfg.y_min, cfg.y_natural, cfg.y_max)) - g_neutral).abs() < 1e-7,
         "atk off=0 must be identity");

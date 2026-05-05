@@ -574,10 +574,17 @@ fn default_config() -> CurveDisplayConfig {
     if o >= 0.0 { g + 19.0 * o } else { g }
 }
 
-/// Attack/Release multiplier: multiplicative with factor 1024.
-/// off=+1 → g×1024; off=-1 → g/1024.
-#[inline] pub fn off_atk_rel(g: f32, o: f32, _anchors: (f32, f32, f32)) -> f32 {
-    g * 1024.0_f32.powf(o)
+/// Attack/Release ms: geometric lerp from y_natural (=runtime attack_ms or
+/// release_ms after substitution by runtime_anchors) to y_min/y_max.
+///   v ≥ 0:  factor = (y_max  / y_nat)^v
+///   v < 0:  factor = (y_nat  / y_min)^v
+/// gain_to_display(2, g, attack_ms) = attack_ms · g, so:
+///   gain_off = phys / y_nat = factor (since phys = y_nat · factor).
+#[inline] pub fn off_atk_rel(g: f32, o: f32, anchors: (f32, f32, f32)) -> f32 {
+    let (y_min, y_nat, y_max) = anchors;
+    let factor = if o >= 0.0 { (y_max / y_nat).powf(o) }
+                 else        { (y_nat / y_min).powf(o) };
+    g * factor
 }
 
 /// Knee dB: gain=1.0 → 6 dB knee (neutral).

@@ -617,8 +617,8 @@ pub fn gain_to_display(
             (-20.0 + t_db * (60.0 / 18.0)).clamp(db_min, db_max)
         }
         1 => gain.clamp(1.0, 20.0),
-        2 => (global_attack_ms  * gain.max(0.01)).clamp(1.0, 1024.0),
-        3 => (global_release_ms * gain.max(0.01)).clamp(1.0, 1024.0),
+        2 => (global_attack_ms  * gain.max(0.0)).clamp(1.0, 1024.0),
+        3 => (global_release_ms * gain.max(0.0)).clamp(1.0, 1024.0),
         4 => (gain * 6.0).clamp(1.5, 48.0),
         5 | 12 => if gain > 1e-6 { 20.0 * gain.log10() } else { -60.0 },
         6 => (gain * 100.0).clamp(0.0, 100.0),
