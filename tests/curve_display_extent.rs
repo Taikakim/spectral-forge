@@ -1,7 +1,7 @@
 //! UI regression: response-curve polyline extends to Nyquist at the displayed
 //! sample rate, not a hardcoded upper frequency.
 
-use spectral_forge::editor::curve::{compute_curve_response, CurveNode};
+use spectral_forge::editor::curve::{compute_curve_response, gain_to_display, CurveNode};
 
 #[test]
 fn curve_response_spans_full_num_bins_at_44_1_khz() {
@@ -18,11 +18,10 @@ fn curve_response_spans_full_num_bins_at_44_1_khz() {
 }
 
 #[test]
-fn freeze_threshold_dbfs_reaches_floor_with_eq_node_minimum() {
+fn gain_to_display_idx9_eq_node_range_spans_full_dbfs_window() {
     // gain ≈ 0.126 corresponds to a -18 dB EQ bell (10^(-18/20)).
     // The display range is -80..0 dBFS; the formula must reach the floor.
-    // db_min and db_max are unused by display_idx == 9 (it owns its own range).
-    use spectral_forge::editor::curve::gain_to_display;
+    // Pass sentinel values for db_min/db_max; idx=9 owns its own -80..0 dBFS range regardless.
 
     let g_min = 10f32.powf(-18.0 / 20.0); // 0.1259
     let g_neutral = 1.0f32;
