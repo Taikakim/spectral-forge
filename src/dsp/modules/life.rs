@@ -877,3 +877,96 @@ impl LifeModule {
         }
     }
 }
+
+// ── Per-mode curve visibility ──────────────────────────────────────────────
+
+/// Returns the active curve layout for the given Life mode byte.
+///
+/// Curve indices (matching `ModuleSpec::curve_labels` for Life):
+///   0 AMOUNT · 1 THRESHOLD · 2 SPEED · 3 REACH · 4 MIX
+///
+/// Mode map (matches `LifeMode` discriminants):
+///   0 Viscosity       — AMOUNT, MIX (diffusion alpha + wet blend)
+///   1 SurfaceTension  — AMOUNT, THRESHOLD, REACH, MIX
+///   2 Crystallization — AMOUNT, THRESHOLD, SPEED, MIX
+///   3 Archimedes      — AMOUNT, THRESHOLD, MIX
+///   4 NonNewtonian    — AMOUNT, THRESHOLD, MIX
+///   5 Stiction        — AMOUNT, THRESHOLD, SPEED, MIX
+///   6 Yield           — AMOUNT, THRESHOLD, SPEED, MIX
+///   7 Capillary       — AMOUNT, THRESHOLD, SPEED, REACH, MIX
+///   8 Sandpaper       — AMOUNT, THRESHOLD, REACH, MIX
+///   9 Brownian        — AMOUNT, MIX  (random walk; THRESHOLD/SPEED/REACH unused)
+pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
+    match mode_byte {
+        0 => super::CurveLayout {
+            // Viscosity — FTCS diffusion: amount scales D, no reach/speed/thresh
+            active: &[0, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        1 => super::CurveLayout {
+            // SurfaceTension — peak coalescence: amount, threshold gate, reach, mix
+            active: &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        2 => super::CurveLayout {
+            // Crystallization — phase-lock: amount, threshold, speed (LP rate), mix
+            active: &[0, 1, 2, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        3 => super::CurveLayout {
+            // Archimedes — global ducking: amount, threshold, mix
+            active: &[0, 1, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        4 => super::CurveLayout {
+            // NonNewtonian — rate-limiting: amount, threshold, mix
+            active: &[0, 1, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        5 => super::CurveLayout {
+            // Stiction — static/kinetic friction: amount, threshold, speed, mix
+            active: &[0, 1, 2, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        6 => super::CurveLayout {
+            // Yield — fabric tearing + phase scramble: amount, threshold, speed, mix
+            active: &[0, 1, 2, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        7 => super::CurveLayout {
+            // Capillary — harmonic wicking: amount, threshold, speed, reach, mix
+            active: &[0, 1, 2, 3, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        8 => super::CurveLayout {
+            // Sandpaper — granular phase friction: amount, threshold, reach, mix
+            active: &[0, 1, 3, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+        _ => super::CurveLayout {
+            // Brownian (9) and any future modes — amount, mix only
+            active: &[0, 4],
+            label_overrides: &[],
+            help_for: |_| "",
+            mode_overview: None,
+        },
+    }
+}

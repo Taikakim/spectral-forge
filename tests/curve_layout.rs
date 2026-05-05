@@ -247,3 +247,32 @@ fn circuit_active_layout_matches_kernel_signatures() {
             mode, expected, layout.active);
     }
 }
+
+/// Life has 10 modes. Curves: 0=AMOUNT, 1=THRESHOLD, 2=SPEED, 3=REACH, 4=MIX
+/// (matching `ModuleSpec::curve_labels` for Life).
+/// Each mode reads only the curves its kernel actually uses.
+#[test]
+fn life_active_layout_matches_kernel_signatures() {
+    use spectral_forge::dsp::modules::life::LifeMode;
+
+    let layout_fn = module_spec(ModuleType::Life).active_layout
+        .expect("Life should declare an active_layout");
+
+    let modes_and_active: &[(LifeMode, &[u8])] = &[
+        (LifeMode::Viscosity,       &[0, 4]),
+        (LifeMode::SurfaceTension,  &[0, 1, 3, 4]),
+        (LifeMode::Crystallization, &[0, 1, 2, 4]),
+        (LifeMode::Archimedes,      &[0, 1, 4]),
+        (LifeMode::NonNewtonian,    &[0, 1, 4]),
+        (LifeMode::Stiction,        &[0, 1, 2, 4]),
+        (LifeMode::Yield,           &[0, 1, 2, 4]),
+        (LifeMode::Capillary,       &[0, 1, 2, 3, 4]),
+        (LifeMode::Sandpaper,       &[0, 1, 3, 4]),
+        (LifeMode::Brownian,        &[0, 4]),
+    ];
+    for (mode, expected) in modes_and_active {
+        let layout = layout_fn(*mode as u8);
+        assert_eq!(layout.active, *expected,
+            "Life {:?}: expected active {:?}, got {:?}", mode, expected, layout.active);
+    }
+}
