@@ -142,10 +142,11 @@ pub fn default_nodes_for_module_curve(
         // produces gain = 10^(-0.334 * 18 / 20) = 0.5. Centring the default
         // means the offset slider has equal headroom in both directions.
         (ModuleType::Past, 1) => flat_at_y(-0.334),
-        // Past Smear (curve 3): default OFF (gain ≈ 0.126 < 0.5 toggle floor).
-        // Positive offset turns smear on per-bin; negative is a no-op.
-        // y = -1.0 → gain = 10^(-18/20) ≈ 0.126.
-        (ModuleType::Past, 3) => flat_at_y(-1.0),
+        // Past Smear (curve 3): default sits exactly on the >0.5 toggle
+        // threshold so positive offset enables smear and negative offset
+        // disables it, with the slider lerp tracking the audible boundary.
+        // y = -0.334 → gain = 10^(-0.334 * 18 / 20) = 0.5.
+        (ModuleType::Past, 3) => flat_at_y(-0.334),
         _ => default_nodes_for_curve(curve_idx),
     }
 }
@@ -470,6 +471,32 @@ pub fn apply_curve_adjustments(
     let t = tilt * shape;
     let g_off = offset_fn(gain, offset);
     (g_off * (1.0 + t)).max(0.0)
+}
+
+/// Resolve a `CurveDisplayConfig`'s declared anchors `(y_min, y_natural, y_max)`
+/// into runtime physical units. The default identity passthrough is the right
+/// answer for every absolute-units calibration (dBFS, ratio, ms, %, etc.). The
+/// one exception is **display index 13** (Past's Age/Delay, history-relative
+/// seconds): the config stores the anchors as fractions of `y_max`, and at
+/// runtime we substitute `y_max → total_history_seconds` and scale `y_min` and
+/// `y_natural` by the same factor.
+///
+/// Per UI parameter spec §2, the offset slider's displayed value is a
+/// piecewise-linear interpolation between these three anchors keyed on the
+/// normalised offset `[-1, 1]`. The slider formatter calls this helper so it
+/// receives the runtime-correct anchors regardless of curve type.
+pub fn runtime_anchors(
+    cfg: &crate::editor::curve_config::CurveDisplayConfig,
+    display_idx: usize,
+    total_history_seconds: f32,
+) -> (f32, f32, f32) {
+    if display_idx == 13 {
+        // Past Age/Delay: cfg anchors are fractions of total_history_seconds.
+        let scale = total_history_seconds;
+        (cfg.y_min * scale, cfg.y_natural * scale, cfg.y_max * scale)
+    } else {
+        (cfg.y_min, cfg.y_natural, cfg.y_max)
+    }
 }
 
 /// Convert a curve's linear gain to its physical display value (no freq scaling).

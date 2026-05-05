@@ -318,12 +318,15 @@ pub fn past_config(curve_idx: usize, _mode: u8) -> CurveDisplayConfig {
             offset_fn: off_mix,
         },
         1 => CurveDisplayConfig {
-            // y_max placeholder; the painter substitutes `total_history_seconds`
-            // when rendering. The slider's custom_formatter passes the live
-            // value via gain_to_display(13, ...).
+            // Display index 13 (Past Age/Delay) treats these anchors as
+            // fractions of `total_history_seconds` — the runtime substitution
+            // happens in `runtime_anchors()` and `gain_to_display(13, ...)`.
+            // y_natural at 0.5 puts the offset slider's neutral at the
+            // midpoint of the buffer so the slider has equal headroom in
+            // both directions (spec §2 piecewise lerp).
             y_label: "s", y_min: 0.0, y_max: 1.0, y_log: false,
             grid_lines: &[(0.25, "25%"), (0.5, "50%"), (0.75, "75%"), (1.0, "100%")],
-            y_natural: 0.0,
+            y_natural: 0.5,
             offset_fn: off_amount_norm,
         },
         2 => CurveDisplayConfig {
@@ -336,10 +339,14 @@ pub fn past_config(curve_idx: usize, _mode: u8) -> CurveDisplayConfig {
             offset_fn: off_freeze_thresh,
         },
         3 => CurveDisplayConfig {
+            // Smear is a >0.5 toggle. Centre y_natural at 50% so the slider
+            // lerp gives the user visible movement on both sides — and use
+            // `off_amount_norm` (symmetric add+clamp) so positive offset
+            // pushes the gain over the toggle threshold.
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
-            y_natural: 100.0,
-            offset_fn: off_mix,
+            y_natural: 50.0,
+            offset_fn: off_amount_norm,
         },
         4 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,

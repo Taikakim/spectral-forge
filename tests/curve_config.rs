@@ -147,13 +147,14 @@ fn past_config_returns_calibrated_display_per_curve() {
     assert!((amount.y_natural - 100.0).abs() < 1e-6);
     assert!(is_mix(amount.offset_fn), "AMOUNT should route to off_mix");
 
-    // TIME (curve 1) — seconds, neutral at 0.0, off_amount_norm
+    // TIME (curve 1) — seconds, neutral at 0.5 (midpoint fraction of total
+    // history; runtime_anchors() scales by total_history_seconds), off_amount_norm
     let time = curve_display_config(ModuleType::Past, 1, GainMode::Add);
     assert_eq!(time.y_label, "s");
     assert_eq!(time.y_min, 0.0);
-    // y_max is set to a placeholder of 1.0 inside curve_display_config and rewritten
-    // at paint time using `total_history_seconds` from the live Pipeline. Test the
-    // structural identity here.
+    // y_max=1.0 placeholder; runtime_anchors substitutes total_history_seconds.
+    assert_eq!(time.y_max, 1.0);
+    assert!((time.y_natural - 0.5).abs() < 1e-6, "TIME y_natural should be 0.5 (midpoint fraction)");
     assert!(is_amount_norm(time.offset_fn), "TIME should route to off_amount_norm");
 
     // THRESHOLD (curve 2) — dBFS -80..0, neutral -60, off_freeze_thresh so the
@@ -166,10 +167,14 @@ fn past_config_returns_calibrated_display_per_curve() {
     assert!((thresh.y_natural - (-60.0)).abs() < 1e-6);
     assert!(is_freeze_thresh(thresh.offset_fn), "THRESHOLD should route to off_freeze_thresh");
 
-    // SPREAD (Smear in Granular) — % units
+    // SPREAD / Smear (curve 3) — %, neutral at 50% (midpoint = on the toggle
+    // boundary), off_amount_norm so positive offset enables smear.
     let spread = curve_display_config(ModuleType::Past, 3, GainMode::Add);
     assert_eq!(spread.y_label, "%");
-    assert!(is_mix(spread.offset_fn), "SPREAD should route to off_mix");
+    assert_eq!(spread.y_min, 0.0);
+    assert_eq!(spread.y_max, 100.0);
+    assert!((spread.y_natural - 50.0).abs() < 1e-6, "Smear y_natural should be 50%");
+    assert!(is_amount_norm(spread.offset_fn), "Smear should route to off_amount_norm");
 
     // MIX
     let mix = curve_display_config(ModuleType::Past, 4, GainMode::Add);
@@ -195,10 +200,11 @@ fn past_default_nodes_centre_age_and_floor_smear() {
         assert!((n.y - (-0.334)).abs() < 1e-3, "Age default y should be ≈-0.334, got {}", n.y);
     }
 
-    // Smear (curve 3): default y = -1.0 → gain ≈ 0.126 (below the >0.5 toggle).
+    // Smear (curve 3): default y ≈ -0.334 → gain ≈ 0.5, exactly on the toggle
+    // boundary so positive offset turns smear on, negative turns it off.
     let smear = default_nodes_for_module_curve(ModuleType::Past, 3);
     for n in &smear {
-        assert!((n.y - (-1.0)).abs() < 1e-6, "Smear default y should be -1.0, got {}", n.y);
+        assert!((n.y - (-0.334)).abs() < 1e-3, "Smear default y should be ≈-0.334, got {}", n.y);
     }
 
     // AMOUNT (curve 0), THRESHOLD (curve 2), MIX (curve 4) keep the legacy
@@ -216,4 +222,55 @@ fn past_default_nodes_centre_age_and_floor_smear() {
     let dyn_ratio = default_nodes_for_module_curve(ModuleType::Dynamics, 1);
     assert!((dyn_ratio[5].y - 0.334).abs() < 1e-3,
         "Dynamics Ratio should keep its high-shelf y=0.334 preset");
+}
+
+/// `runtime_anchors` returns absolute (y_min, y_natural, y_max) for normal
+/// display indices, and substitutes total_history_seconds for index 13 (Past
+/// Age/Delay) treating the config anchors as fractions of the buffer.
+#[test]
+fn runtime_anchors_substitutes_history_seconds_for_index_13() {
+    use spectral_forge::editor::curve::runtime_anchors;
+    use spectral_forge::editor::curve_config::{curve_display_config};
+    use spectral_forge::dsp::modules::{ModuleType, GainMode};
+
+    // Past THRESHOLD (display idx 9) — anchors are absolute dBFS, no scaling.
+    let cfg = curve_display_config(ModuleType::Past, 2, GainMode::Add);
+    let (lo, nat, hi) = runtime_anchors(&cfg, 9, 4.0);
+    assert_eq!(lo, -80.0);
+    assert!((nat - (-60.0)).abs() < 1e-6);
+    assert_eq!(hi, 0.0);
+
+    // Past Age (display idx 13) — anchors are fractions, scaled by total.
+    let cfg = curve_display_config(ModuleType::Past, 1, GainMode::Add);
+    let (lo, nat, hi) = runtime_anchors(&cfg, 13, 4.0);
+    assert_eq!(lo, 0.0);
+    assert!((nat - 2.0).abs() < 1e-6, "y_natural=0.5 × total=4.0 = 2.0 s, got {nat}");
+    assert!((hi - 4.0).abs() < 1e-6);
+}
+
+/// Spec §2 piecewise-linear interpolation: at offset = 0 the slider reads
+/// y_natural; at +1 it reads y_max; at -1 it reads y_min; the in-between
+/// values lerp linearly between those three anchors.
+///
+/// This is the formula the slider's custom_formatter implements directly —
+/// independent of `offset_fn`. The test pins down the math against Past's
+/// THRESHOLD (-80..-60..0 dBFS), which was the user-visible regression
+/// (Threshold display "couldn't go below -40 dBFS").
+#[test]
+fn slider_lerp_covers_full_range_for_past_threshold() {
+    let lerp = |y_min: f32, y_nat: f32, y_max: f32, v: f32| -> f32 {
+        if v >= 0.0 {
+            y_nat + v * (y_max - y_nat)
+        } else {
+            y_nat + v * (y_nat - y_min)
+        }
+    };
+    let (y_min, y_nat, y_max) = (-80.0_f32, -60.0_f32, 0.0_f32);
+    assert!((lerp(y_min, y_nat, y_max,  0.0) - (-60.0)).abs() < 1e-5);
+    assert!((lerp(y_min, y_nat, y_max,  1.0) -    0.0 ).abs() < 1e-5);
+    assert!((lerp(y_min, y_nat, y_max, -1.0) - (-80.0)).abs() < 1e-5);
+    // -0.5 should land midway between -60 and -80 = -70 dBFS, NOT clamped at -40.
+    assert!((lerp(y_min, y_nat, y_max, -0.5) - (-70.0)).abs() < 1e-5);
+    // -0.25 → -65 dBFS.
+    assert!((lerp(y_min, y_nat, y_max, -0.25) - (-65.0)).abs() < 1e-5);
 }

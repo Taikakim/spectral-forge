@@ -1211,21 +1211,28 @@ pub fn create_editor(
                                             .range(-1.0..=1.0)
                                             .speed(1.0 / 300.0)
                                             .custom_formatter(move |v, _range| {
-                                                // Modules without a calibrated offset_fn (default_config)
-                                                // have y_label="" and offset_fn=off_identity. Computing
-                                                // phys from a constant g_off would render a fixed string
-                                                // and the slider would appear stuck. Fall back to the
-                                                // raw normalised value so the drag is visible.
+                                                // UI parameter spec §2: offset slider value is a
+                                                // piecewise-linear interpolation between the curve's
+                                                // three declared anchors (y_min, y_natural, y_max).
+                                                // Independent of offset_fn — the audio path uses
+                                                // offset_fn separately (see apply_curve_transform).
+                                                //
+                                                // Modules without a calibrated config (y_label="")
+                                                // fall back to showing the raw normalised value so
+                                                // the drag is visible.
                                                 if off_cfg.y_label.is_empty() {
                                                     return format!("{:+.2}", v as f32);
                                                 }
-                                                let g_off = (off_cfg.offset_fn)(1.0, v as f32);
-                                                let phys = crv::gain_to_display(
-                                                    off_disp_idx, g_off,
-                                                    off_atk_ms, off_rel_ms,
-                                                    off_db_min, off_db_max,
-                                                    off_total_history_seconds,
+                                                let (y_min, y_nat, y_max) = crv::runtime_anchors(
+                                                    &off_cfg, off_disp_idx, off_total_history_seconds,
                                                 );
+                                                let v = v as f32;
+                                                let phys = if v >= 0.0 {
+                                                    y_nat + v * (y_max - y_nat)
+                                                } else {
+                                                    y_nat + v * (y_nat - y_min)
+                                                };
+                                                let _ = (off_atk_ms, off_rel_ms, off_db_min, off_db_max);
                                                 format!("{:.1} {}", phys, off_cfg.y_label)
                                             })
                                     );
