@@ -273,6 +273,34 @@ impl SpectralModule for PunchModule {
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }
 
+/// Per-mode `CurveLayout` for Punch.
+///
+/// Curves: 0=AMOUNT, 1=WIDTH, 2=FILL_MODE, 3=AMP_FILL, 4=HEAL, 5=MIX.
+///
+/// Both Direct and Inverse share a single kernel that reads all 6 curves.
+/// The only difference is which `peak_source` slice is used for detection;
+/// the curve consumption is identical, so both modes expose the full set.
+///
+/// Wired via `active_layout: Some(crate::dsp::modules::punch::active_layout)` on PUNCH.
+pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
+    match mode_byte {
+        0 => super::CurveLayout {
+            // Direct: peaks at sidechain maxima — carves and fills at detected peaks.
+            active:          &[0, 1, 2, 3, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Direct: carves notches at sidechain spectral peaks; fills neighbours with AMP_FILL boost."),
+        },
+        _ => super::CurveLayout {
+            // Inverse: peaks at sidechain minima (1 - sc); same curves, inverted detection.
+            active:          &[0, 1, 2, 3, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Inverse: carves notches at sidechain spectral troughs (inverted peaks); fills neighbours."),
+        },
+    }
+}
+
 /// Detect up to `out.len()` local maxima in `mag`, above `threshold`, separated by
 /// at least `min_dist` bins. Returns the number of peaks written.
 ///

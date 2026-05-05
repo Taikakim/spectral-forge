@@ -80,6 +80,26 @@ fn future_active_layout_matches_kernel_signatures() {
         "PreEcho should expose all 5 curves including THRESHOLD");
 }
 
+/// Punch has 2 modes. Curves: 0=AMOUNT, 1=WIDTH, 2=FILL_MODE, 3=AMP_FILL, 4=HEAL, 5=MIX.
+/// Both Direct and Inverse use the same kernel and read all 6 curves.
+#[test]
+fn punch_active_layout_matches_kernel_signatures() {
+    use spectral_forge::dsp::modules::punch::PunchMode;
+
+    let layout_fn = module_spec(ModuleType::Punch).active_layout
+        .expect("Punch should declare an active_layout");
+
+    let modes_and_active: &[(PunchMode, &[u8])] = &[
+        (PunchMode::Direct,  &[0, 1, 2, 3, 4, 5]),
+        (PunchMode::Inverse, &[0, 1, 2, 3, 4, 5]),
+    ];
+    for (mode, expected) in modes_and_active {
+        let layout = layout_fn(*mode as u8);
+        assert_eq!(layout.active, *expected,
+            "Punch {:?}: expected active {:?}, got {:?}", mode, expected, layout.active);
+    }
+}
+
 /// Geometry has 2 modes. Curves: 0=AMOUNT, 1=MODE_CAP, 2=DAMP_REL, 3=THRESH, 4=MIX.
 /// Chladni does not read THRESH(3); Helmholtz reads all 5.
 #[test]
