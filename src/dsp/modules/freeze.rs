@@ -12,6 +12,15 @@ pub fn curve_to_threshold_db(curve_gain: f32) -> f32 {
     (-20.0 + t_db * (60.0 / 18.0)).clamp(-80.0, 0.0)
 }
 
+/// Map a per-bin threshold curve gain to a linear magnitude floor, matching
+/// the dBFS shown by the UI for display index 9. Compare a bin's magnitude
+/// (not magnitude-squared) directly against the return value, or compare
+/// squared magnitude against `lin * lin`.
+#[inline]
+pub fn curve_gain_to_threshold_lin(curve_gain: f32) -> f32 {
+    10.0_f32.powf(curve_to_threshold_db(curve_gain) / 20.0)
+}
+
 pub struct FreezeModule {
     frozen_bins:      Vec<Complex<f32>>,
     freeze_target:    Vec<Complex<f32>>,

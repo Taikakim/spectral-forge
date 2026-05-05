@@ -158,3 +158,16 @@ fn threshold_idx9_dsp_matches_display_log_formula() {
             "DSP {dsp} ≠ UI {ui} at gain={g}");
     }
 }
+
+#[test]
+fn curve_gain_to_threshold_lin_round_trips_through_dbfs() {
+    use spectral_forge::dsp::modules::freeze::{curve_gain_to_threshold_lin, curve_to_threshold_db};
+
+    for &g in &[0.126_f32, 0.5, 1.0, 2.0, 7.94] {
+        let db = curve_to_threshold_db(g);
+        let lin_expected = 10f32.powf(db / 20.0);
+        let lin_actual   = curve_gain_to_threshold_lin(g);
+        assert!((lin_actual - lin_expected).abs() < 1e-6,
+            "expected {lin_expected}, got {lin_actual} at gain={g}");
+    }
+}
