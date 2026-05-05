@@ -588,11 +588,11 @@ mod display_mapping_contract {
     }
 
     #[test]
-    fn freeze_threshold_gain_1p5_matches_linear_dsp() {
-        // DSP formula: -40 + gain*20, so gain=1.5 → -10 dBFS.
+    fn freeze_threshold_gain_1p5_matches_log_dsp() {
+        // Log formula: -20 + 20*log10(1.5)*(60/18) ≈ -8.26 dBFS.
         let v = gain_to_display(9, 1.5, 10.0, 100.0, -80.0, 0.0, 0.0);
-        assert!((v - (-10.0)).abs() < 0.5,
-            "gain=1.5 should be ≈-10 dBFS (DSP linear formula), got {}", v);
+        assert!((v - (-8.26)).abs() < 0.1,
+            "gain=1.5 should be ≈-8.26 dBFS (log formula), got {}", v);
     }
 
     // ── Freeze Length (display_idx = 8) ───────────────────────────────────────

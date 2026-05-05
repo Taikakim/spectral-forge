@@ -3,10 +3,12 @@ use crate::params::{FxChannelTarget, StereoLink};
 use super::{ModuleContext, ModuleType, SpectralModule};
 
 /// Map a per-bin threshold curve gain (linear, 1.0 = neutral) to dBFS threshold.
-/// Linear in gain space: gain=1.0 → -20 dBFS (neutral); gain=2.0 → 0 dBFS (y_max);
-/// gain≤-2.0 → -80 dBFS (y_min, clamped). Matches off_freeze_thresh calibration.
+/// Log mapping mirroring the idx=9 arm in `editor::curve::gain_to_display`:
+/// gain=1.0 → -20 dBFS; gain≈0.126 (-18 dB EQ trough) → -80 dBFS;
+/// gain≈8.0 (+18 dB EQ peak) → 0 dBFS.
 pub fn curve_to_threshold_db(curve_gain: f32) -> f32 {
-    (-40.0 + curve_gain * 20.0).clamp(-80.0, 0.0)
+    let t_db = if curve_gain > 1e-10 { 20.0 * curve_gain.log10() } else { -120.0 };
+    (-20.0 + t_db * (60.0 / 18.0)).clamp(-80.0, 0.0)
 }
 
 pub struct FreezeModule {

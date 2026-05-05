@@ -143,3 +143,18 @@ fn past_probe_window_populated_only_in_reverse() {
     assert!(p.past_stretch_rate.is_none());
     assert!(p.past_stretch_dither_pct.is_none());
 }
+
+/// Pins DSP-UI parity for display index 9 (Freeze + PAST threshold).
+/// `curve_to_threshold_db` must produce the same value as `gain_to_display(9, …)`.
+#[test]
+fn freeze_threshold_dsp_matches_display_log_formula() {
+    use spectral_forge::dsp::modules::freeze::curve_to_threshold_db;
+    use spectral_forge::editor::curve::gain_to_display;
+
+    for &g in &[0.126_f32, 0.5, 1.0, 2.0, 7.94] {
+        let dsp = curve_to_threshold_db(g);
+        let ui  = gain_to_display(9, g, 0.0, 0.0, -60.0, 0.0, 0.0);
+        assert!((dsp - ui).abs() < 1e-3,
+            "DSP {dsp} ≠ UI {ui} at gain={g}");
+    }
+}
