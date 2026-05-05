@@ -735,3 +735,97 @@ impl SpectralModule for HarmonyModule {
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }
+
+/// Per-mode `CurveLayout` for Harmony.
+///
+/// Curves: 0=AMOUNT, 1=THRESHOLD, 2=STABILITY, 3=SPREAD, 4=COEFFICIENT, 5=MIX.
+///
+/// Kernel inspection:
+/// - Chordification:    reads 0, 1, 3, 5       — no STABILITY(2), no COEFFICIENT(4).
+/// - Undertone:         reads 0, 1, 3, 4, 5    — no STABILITY(2).
+/// - Companding:        reads 0, 4, 5           — no THRESHOLD(1), no STABILITY(2), no SPREAD(3).
+/// - FormantRotation:   reads 0, 4, 5           — COEFFICIENT(4) is the harmonic-shift ratio.
+/// - Lifter:            reads 0, 3, 4, 5        — SPREAD=envelope gain; COEFFICIENT=pitch gain.
+/// - Inharmonic:        reads 0, 1, 4, 5        — no STABILITY(2), no SPREAD(3).
+/// - HarmonicGenerator: reads 0, 1, 3, 4, 5    — no STABILITY(2).
+/// - Shuffler:          reads 0, 1, 3, 5        — no STABILITY(2), no COEFFICIENT(4).
+///
+/// STABILITY(2) is not used by any current kernel — it is reserved for a future mode.
+///
+/// Wired via `active_layout: Some(crate::dsp::modules::harmony::active_layout)` on HARM2.
+pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
+    match mode_byte {
+        0 => super::CurveLayout {
+            // Chordification: AMOUNT × magnitude threshold; THRESHOLD gates bins;
+            // SPREAD controls snap radius (full snap vs partial); MIX blends.
+            // STABILITY(2) and COEFFICIENT(4) not read.
+            active:          &[0, 1, 3, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Chordification: snaps out-of-chord bins toward the nearest in-chord pitch class; SPREAD controls snap radius."),
+        },
+        1 => super::CurveLayout {
+            // Undertone: peak detection via THRESHOLD; AMOUNT scales partial amplitudes;
+            // SPREAD sets decay; COEFFICIENT selects hum frequency (off/50/60/120 Hz).
+            // STABILITY(2) not read.
+            active:          &[0, 1, 3, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Undertone: generates sub-octave partials below detected peaks; COEFFICIENT selects hum-frequency weighting."),
+        },
+        2 => super::CurveLayout {
+            // Companding: classifies bins via ctx.harmonic_groups; AMOUNT gates per-bin;
+            // COEFFICIENT sets attenuation depth for fundamentals/harmonics; MIX blends.
+            // THRESHOLD(1), STABILITY(2), and SPREAD(3) not read.
+            active:          &[0, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Companding: attenuates harmonic overtone bins relative to fundamentals; COEFFICIENT sets attenuation depth."),
+        },
+        3 => super::CurveLayout {
+            // FormantRotation: extracts spectral envelope from cepstrum; COEFFICIENT is
+            // the harmonic-shift ratio [0.5, 2.0]; AMOUNT × MIX blends. No THRESHOLD,
+            // STABILITY, or SPREAD.
+            active:          &[0, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Formant Rotation: preserves formants while shifting harmonics by the COEFFICIENT ratio."),
+        },
+        4 => super::CurveLayout {
+            // Lifter: cepstrum-domain envelope/pitch shaping. SPREAD gates low-quefrency
+            // (envelope); COEFFICIENT gates high-quefrency (pitch). AMOUNT × MIX blend.
+            // THRESHOLD(1) and STABILITY(2) not read.
+            active:          &[0, 3, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Lifter: cepstrum-domain shaping; SPREAD scales the envelope quefrency window; COEFFICIENT scales the pitch quefrency."),
+        },
+        5 => super::CurveLayout {
+            // Inharmonic: moves partials toward stiffness/Bessel/prime frequency grids.
+            // AMOUNT × MIX per-partial; THRESHOLD gates detection; COEFFICIENT picks
+            // the inharmonicity model / parameter. STABILITY(2) and SPREAD(3) not read.
+            active:          &[0, 1, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Inharmonic: remaps partials to stiffness, Bessel, or prime frequency grids; COEFFICIENT selects the inharmonicity model."),
+        },
+        6 => super::CurveLayout {
+            // HarmonicGenerator: generates overtone series from detected peaks.
+            // AMOUNT × MIX per-partial; THRESHOLD gates detection; SPREAD sets decay;
+            // COEFFICIENT sets harmonic count. STABILITY(2) not read.
+            active:          &[0, 1, 3, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Harmonic Generator: adds an overtone series above each detected peak; COEFFICIENT controls harmonic count."),
+        },
+        _ => super::CurveLayout {
+            // Shuffler: randomly swaps bins with a reach-distance neighbour above THRESHOLD.
+            // AMOUNT × probability; SPREAD sets reach; MIX blends. STABILITY(2) and
+            // COEFFICIENT(4) not read.
+            active:          &[0, 1, 3, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Shuffler: probabilistically swaps bin energy with a SPREAD-reach neighbour above THRESHOLD."),
+        },
+    }
+}

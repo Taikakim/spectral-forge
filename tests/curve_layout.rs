@@ -80,6 +80,32 @@ fn future_active_layout_matches_kernel_signatures() {
         "PreEcho should expose all 5 curves including THRESHOLD");
 }
 
+/// Harmony has 8 modes. Curves: 0=AMOUNT, 1=THRESHOLD, 2=STABILITY, 3=SPREAD,
+/// 4=COEFFICIENT, 5=MIX. STABILITY(2) is unused by all current kernels.
+#[test]
+fn harmony_active_layout_matches_kernel_signatures() {
+    use spectral_forge::dsp::modules::harmony::HarmonyMode;
+
+    let layout_fn = module_spec(ModuleType::Harmony).active_layout
+        .expect("Harmony should declare an active_layout");
+
+    let modes_and_active: &[(HarmonyMode, &[u8])] = &[
+        (HarmonyMode::Chordification,    &[0, 1, 3, 5]),
+        (HarmonyMode::Undertone,         &[0, 1, 3, 4, 5]),
+        (HarmonyMode::Companding,        &[0, 4, 5]),
+        (HarmonyMode::FormantRotation,   &[0, 4, 5]),
+        (HarmonyMode::Lifter,            &[0, 3, 4, 5]),
+        (HarmonyMode::Inharmonic,        &[0, 1, 4, 5]),
+        (HarmonyMode::HarmonicGenerator, &[0, 1, 3, 4, 5]),
+        (HarmonyMode::Shuffler,          &[0, 1, 3, 5]),
+    ];
+    for (mode, expected) in modes_and_active {
+        let layout = layout_fn(*mode as u8);
+        assert_eq!(layout.active, *expected,
+            "Harmony {:?}: expected active {:?}, got {:?}", mode, expected, layout.active);
+    }
+}
+
 /// Modulate has 8 modes. Curves: 0=AMOUNT, 1=REACH, 2=RATE, 3=THRESH, 4=AMPGATE, 5=MIX.
 /// Each mode reads a distinct subset of curves.
 #[test]

@@ -805,7 +805,7 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         // Companding reads ctx.harmonic_groups (Phase 6.5 Task 11).
         needs_harmonic_groups: true,
         needs_midi: false,
-        active_layout: None,
+        active_layout: Some(crate::dsp::modules::harmony::active_layout),
     };
     static MASTER: ModuleSpec = ModuleSpec {
         display_name: "Master",
