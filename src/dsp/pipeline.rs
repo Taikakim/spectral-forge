@@ -1117,6 +1117,23 @@ impl Pipeline {
                 );
                 total_hops_ref[ch] = total_hops_ref[ch].wrapping_add(1);
 
+                // Periodic reset to keep the cumulative phase counter
+                // bounded. Without this, prev_unwrapped_phase grows by
+                // ~2π·k·hop/N every hop; at high bins it exceeds f32
+                // fractional precision after ~30 minutes and damping
+                // begins to corrupt phases — audible as progressive
+                // smearing on the wet path. Resetting every 4096 hops
+                // (~22 sec at fft=2048/overlap=4/sr=48kHz) bounds the
+                // accumulated value. The single-hop discontinuity is
+                // inaudible because damp_low_energy_bins only blends
+                // low-energy bins toward the expected phase. See
+                // docs/superpowers/specs/2026-05-06-stabilization-sweep.md §5.
+                const PLPV_PHASE_RESET_PERIOD: u64 = 4096;
+                if total_hops_ref[ch] % PLPV_PHASE_RESET_PERIOD == 0 {
+                    prev_unwrapped_phase_ref[ch].fill(0.0);
+                    total_hops_ref[ch] = 0;
+                }
+
                 // Phase 4.2: detect spectral peaks + assign Voronoi skirts.
                 // Operates on the raw FFT magnitudes already in scratch_mags_ref
                 // (filled above for damping; identical input).
