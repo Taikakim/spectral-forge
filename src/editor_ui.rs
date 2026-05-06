@@ -1373,13 +1373,25 @@ pub fn create_editor(
                     }
                     // Render popups (egui Area — appears above matrix)
                     if let Some(changed_slot) = crate::editor::module_popup::show_popup(ui, &params, scale) {
-                        // Republish all 7 curves for the slot so DSP sees the reset nodes immediately.
+                        // Reset graph_node FloatParam atomics so the editor display matches.
+                        // assign_module already wrote the correct defaults into slot_curve_nodes;
+                        // we mirror those through setter so param.value() is also updated.
                         let nodes_snap = params.slot_curve_nodes.lock()[changed_slot];
+                        for c in 0..7 {
+                            for n in 0..crate::param_ids::NUM_NODES {
+                                if let Some((x_p, y_p, q_p)) = params.graph_node(changed_slot, c, n) {
+                                    let node = nodes_snap[c][n];
+                                    setter.set_parameter(x_p, node.x);
+                                    setter.set_parameter(y_p, node.y);
+                                    setter.set_parameter(q_p, node.q);
+                                }
+                            }
+                        }
+                        // Republish all 7 curves to curve_tx so DSP sees reset nodes immediately.
                         use crate::dsp::pipeline::MAX_NUM_BINS;
                         if let Some(slot_chs) = curve_tx.get(changed_slot) {
                             for (c, tx_arc) in slot_chs.iter().enumerate().take(7) {
-                                let curve_nodes = &nodes_snap[c];
-                                let gains = crv::compute_curve_response(curve_nodes, MAX_NUM_BINS, sr, fft_size);
+                                let gains = crv::compute_curve_response(&nodes_snap[c], MAX_NUM_BINS, sr, fft_size);
                                 if let Some(mut tx) = tx_arc.try_lock() {
                                     tx.input_buffer_mut().copy_from_slice(&gains);
                                     tx.publish();
