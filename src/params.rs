@@ -575,7 +575,14 @@ impl Default for SpectralForgeParams {
 
             suppression_width: FloatParam::new(
                 "Suppression Width", 0.05,
-                FloatRange::Linear { min: 0.0, max: 0.5 },
+                // Widened from 0..0.5 to 0..12 st on 2026-05-06: original
+                // range was below the engine's < 0.01 st no-smoothing
+                // cutoff for almost the whole travel, so the slider had
+                // no audible effect at any setting. 12 st = one octave
+                // each side, the standard upper bound for spectral GR
+                // smoothing in this class of plugin. Default kept low
+                // (0.05) to match the prior surgical default.
+                FloatRange::Linear { min: 0.0, max: 12.0 },
             ).with_smoother(SmoothingStyle::Linear(50.0))
              .with_step_size(0.01)
              .with_unit(" st"),

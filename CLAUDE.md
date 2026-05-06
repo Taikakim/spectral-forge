@@ -139,7 +139,7 @@ Curves map linear gain values (1.0 = neutral) to physical units. The Dynamics mo
 
 | Index | Name       | 1.0 maps to          | Range          | Used by Dynamics |
 |-------|------------|----------------------|----------------|------------------|
-| 0     | THRESHOLD  | -20 dBFS             | -60 … 0 dBFS   | yes              |
+| 0     | THRESHOLD  | -20 dBFS             | -120 … +24 dBFS| yes              |
 | 1     | RATIO      | 1:1 (no compression) | 1:1 … 20:1     | yes              |
 | 2     | ATTACK     | global attack × 1    | 0.1 … 500 ms   | yes              |
 | 3     | RELEASE    | global release × 1   | 1 … 2000 ms    | yes              |

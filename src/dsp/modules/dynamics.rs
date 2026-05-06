@@ -106,7 +106,18 @@ impl SpectralModule for DynamicsModule {
             //         [4]=knee, [5]=mix
             let t    = curves.get(0).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
             let t_db = linear_to_db(t);
-            self.bp_threshold[k] = (-20.0 + t_db * (60.0 / 18.0)).clamp(-60.0, 0.0);
+            // Widened from the original (-60, 0) clamp on 2026-05-06: the
+            // upper bound at 0 dBFS meant "threshold-at-max" still
+            // compressed any 0-dBFS-peak signal (no bypass headroom),
+            // and the lower bound at -60 dBFS desynced from the
+            // display formula at curve.rs:618 which clamps to the
+            // user's graph axis (often -100..0). Slider reading -100
+            // dBFS but DSP running at -60 dBFS — see the 2026-05-06
+            // stabilization-backlog "Width / Threshold scaling" entry.
+            // (-120, 24) covers "compress everything" through "true
+            // bypass for any sane signal" while bounding pathological
+            // values.
+            self.bp_threshold[k] = (-20.0 + t_db * (60.0 / 18.0)).clamp(-120.0, 24.0);
 
             let r = curves.get(1).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
             self.bp_ratio[k] = r.clamp(1.0, 20.0);
