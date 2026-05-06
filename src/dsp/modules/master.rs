@@ -23,7 +23,12 @@ impl SpectralModule for MasterModule {
     ) {
         suppression_out.fill(0.0);
         if self.clip_enabled {
-            crate::dsp::soft_clip::apply_soft_clip(bins, ctx.num_bins, self.clip_threshold_db);
+            crate::dsp::soft_clip::apply_soft_clip(
+                bins,
+                ctx.num_bins,
+                self.clip_threshold_db,
+                ctx.fft_size,
+            );
         }
     }
     fn module_type(&self) -> ModuleType { ModuleType::Master }
