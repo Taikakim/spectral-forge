@@ -119,7 +119,13 @@ impl SpectralModule for PhaseSmearModule {
             // the modified phase.
             match plpv {
                 Some(unwrapped) => {
-                    unwrapped[k].set(unwrapped[k].get() + rand_phase * mix);
+                    // Only modify the global phase accumulator when the bin has signal.
+                    // With zero-magnitude bins (no routing to this slot), writing a random
+                    // phase delta would corrupt the pipeline's unwrapped_phase buffer and
+                    // apply phase smear to the master output regardless of routing.
+                    if bins[k].norm_sqr() > 1e-20 {
+                        unwrapped[k].set(unwrapped[k].get() + rand_phase * mix);
+                    }
                 }
                 None => {
                     let dry = bins[k];
