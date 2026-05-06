@@ -914,6 +914,7 @@ unsafe impl Params for SpectralForgeParams {
 
         params.push(("auto_makeup".to_string(),   self.auto_makeup.as_ptr(),   String::new()));
         params.push(("delta_monitor".to_string(), self.delta_monitor.as_ptr(), String::new()));
+        params.push(("master_clip_enabled".to_string(), self.master_clip_enabled.as_ptr(), String::new()));
         params.push(("enable_heavy_modules".to_string(), self.enable_heavy_modules.as_ptr(), String::new()));
         params.push(("plpv_enable".to_string(), self.plpv_enable.as_ptr(), String::new()));
         params.push(("plpv_dynamics_enable".to_string(), self.plpv_dynamics_enable.as_ptr(), String::new()));
