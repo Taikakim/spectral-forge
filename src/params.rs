@@ -354,6 +354,11 @@ pub struct SpectralForgeParams {
     /// See docs/superpowers/specs/2026-05-06-stabilization-sweep.md §4.4.
     pub master_clip_enabled: BoolParam,
 
+    /// Master soft clip threshold (dBFS). Bins below the linear-equivalent
+    /// magnitude pass through untouched; bins above get a soft asymptotic
+    /// approach toward 4× threshold. 0 dB = least clipping, -24 dB = most.
+    pub master_clip_threshold_db: FloatParam,
+
     pub plpv_phase_noise_floor_db: FloatParam,
 
     pub plpv_max_peaks: IntParam,
@@ -579,6 +584,13 @@ impl Default for SpectralForgeParams {
             delta_monitor: BoolParam::new("Delta Monitor", false),
             enable_heavy_modules: BoolParam::new("Enable Heavy Modules", true),
             master_clip_enabled: BoolParam::new("Master Clip", true),
+            master_clip_threshold_db: FloatParam::new(
+                "Master Clip Threshold",
+                0.0,
+                FloatRange::Linear { min: -24.0, max: 0.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.5),
             plpv_enable: BoolParam::new("PLPV Enable", true),
 
             plpv_dynamics_enable: BoolParam::new("Dynamics PLPV", true),
@@ -915,6 +927,7 @@ unsafe impl Params for SpectralForgeParams {
         params.push(("auto_makeup".to_string(),   self.auto_makeup.as_ptr(),   String::new()));
         params.push(("delta_monitor".to_string(), self.delta_monitor.as_ptr(), String::new()));
         params.push(("master_clip_enabled".to_string(), self.master_clip_enabled.as_ptr(), String::new()));
+        params.push(("master_clip_threshold_db".to_string(), self.master_clip_threshold_db.as_ptr(), String::new()));
         params.push(("enable_heavy_modules".to_string(), self.enable_heavy_modules.as_ptr(), String::new()));
         params.push(("plpv_enable".to_string(), self.plpv_enable.as_ptr(), String::new()));
         params.push(("plpv_dynamics_enable".to_string(), self.plpv_dynamics_enable.as_ptr(), String::new()));

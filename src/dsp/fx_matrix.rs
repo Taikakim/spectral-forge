@@ -474,6 +474,13 @@ impl FxMatrix {
         }
     }
 
+    /// Propagate the master clipper threshold (dBFS) to slot 8.
+    pub fn set_master_clip_threshold_db(&mut self, threshold_db: f32) {
+        if let Some(ref mut m) = self.slots[8] {
+            m.set_master_clip_threshold_db(threshold_db);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn process_hop(
         &mut self,

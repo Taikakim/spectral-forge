@@ -116,10 +116,11 @@ fn soft_clip_clamps_high_magnitude_when_on() {
     use num_complex::Complex;
     use spectral_forge::dsp::soft_clip::apply_soft_clip;
     let mut bins = [Complex::new(10.0_f32, 0.0); 32];
-    apply_soft_clip(&mut bins, 32);
+    // threshold_db = 0 → t_lin = 1, ceiling = 4.
+    apply_soft_clip(&mut bins, 32, 0.0);
     for k in 0..32 {
         assert!(bins[k].norm() < 4.0,
-            "soft-clip with K=4.0 must keep magnitude under 4.0; bin {k} got {}", bins[k].norm());
+            "soft-clip ceiling = 4× threshold; bin {k} got {}", bins[k].norm());
     }
 }
 
@@ -160,14 +161,16 @@ fn fx_matrix_set_past_scalars_dispatches_to_past_slots() {
 }
 
 #[test]
-fn soft_clip_passes_low_magnitude_almost_unchanged() {
+fn soft_clip_passes_low_magnitude_unchanged() {
     use num_complex::Complex;
     use spectral_forge::dsp::soft_clip::apply_soft_clip;
+    // After the threshold-knee reshape, bins at or below the threshold pass
+    // through bit-exact. threshold_db = 0 → t_lin = 1; mag = 0.1 < 1.
     let mut bins = [Complex::new(0.1_f32, 0.0); 16];
-    let original = bins[0].norm();
-    apply_soft_clip(&mut bins, 16);
-    let attenuation = bins[0].norm() / original;
-    // |out|/|in| = K / (K + |in|) = 4.0 / 4.1 ≈ 0.976
-    assert!(attenuation > 0.95 && attenuation < 1.0,
-        "small bins should be barely attenuated; got {attenuation}");
+    let original = bins[0];
+    apply_soft_clip(&mut bins, 16, 0.0);
+    for c in &bins {
+        assert!((c.re - original.re).abs() < 1e-9 && (c.im - original.im).abs() < 1e-9,
+            "below-threshold bin must be unchanged; got {c:?} from {original:?}");
+    }
 }

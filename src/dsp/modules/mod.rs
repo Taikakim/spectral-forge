@@ -365,6 +365,10 @@ pub trait SpectralModule: Send {
     /// this; all other modules use the no-op default.
     fn set_master_clip_enabled(&mut self, _enabled: bool) {}
 
+    /// Update the master clipper threshold (dBFS). Only `MasterModule`
+    /// overrides this.
+    fn set_master_clip_threshold_db(&mut self, _threshold_db: f32) {}
+
     /// Toggle the per-module PLPV peak-locked ducking path. Default no-op
     /// for everything except DynamicsModule. Mirrors the per-mode setter
     /// convention (`set_gain_mode`, `set_future_mode`, etc.) so each module

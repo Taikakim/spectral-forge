@@ -1134,6 +1134,8 @@ pub fn create_editor(
                             setter.set_parameter(&params.master_clip_enabled, !clip_enabled);
                             setter.end_set_parameter(&params.master_clip_enabled);
                         }
+                        ui.add_space(2.0);
+                        knob!(ui, &params.master_clip_threshold_db, "THR");
                     });
 
                     ui.add_space(2.0);

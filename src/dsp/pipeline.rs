@@ -640,6 +640,7 @@ impl Pipeline {
         let plpv_freeze_enable = params.plpv_freeze_enable.value();
         let plpv_midside_enable = params.plpv_midside_enable.value();
         let master_clip_enabled = params.master_clip_enabled.value();
+        let master_clip_threshold_db = params.master_clip_threshold_db.value();
         let plpv_phase_noise_floor_db = params.plpv_phase_noise_floor_db.smoothed.next_step(block_size);
         // Phase 4.2: control-rate peak-detection params. Read once per block.
         let max_peaks_capped: usize = (params.plpv_max_peaks.value() as usize).min(MAX_PEAKS);
@@ -948,6 +949,7 @@ impl Pipeline {
         // Propagate master clipper enable flag each block. Only MasterModule (slot 8)
         // overrides the trait default; all others are no-ops.
         self.fx_matrix.set_master_clip_enabled(master_clip_enabled);
+        self.fx_matrix.set_master_clip_threshold_db(master_clip_threshold_db);
 
         // Build route matrix from automatable params each block.
         // virtual_rows + amp_mode + amp_params are not exposed as automation
