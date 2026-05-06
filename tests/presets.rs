@@ -3,10 +3,9 @@ fn preset_default_has_correct_types() {
     let s = spectral_forge::presets::preset_default();
     use spectral_forge::dsp::modules::ModuleType;
     assert_eq!(s.slot_module_types[0], ModuleType::Dynamics);
-    assert_eq!(s.slot_module_types[1], ModuleType::Dynamics);
-    assert_eq!(s.slot_module_types[2], ModuleType::Gain);
+    assert_eq!(s.slot_module_types[1], ModuleType::Gain);
     assert_eq!(s.slot_module_types[8], ModuleType::Master);
-    for i in 3..8 {
+    for i in 2..8 {
         assert_eq!(s.slot_module_types[i], ModuleType::Empty);
     }
 }

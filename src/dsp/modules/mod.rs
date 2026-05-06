@@ -84,10 +84,10 @@ impl Default for RouteMatrix {
             amp_mode:   default_amp_modes(),
             amp_params: default_amp_params(),
         };
-        // Serial: slot 0 → slot 1 → slot 2 → Master (slot 8).
+        // Default chain: Dynamics (slot 0) → Gain (slot 1) → Master (slot 8).
+        // Matches the default slot_module_types in params.rs (Dynamics + Gain).
         m.send[0][1] = 1.0;
-        m.send[1][2] = 1.0;
-        m.send[2][8] = 1.0;
+        m.send[1][8] = 1.0;
         m
     }
 }

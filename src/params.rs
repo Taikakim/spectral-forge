@@ -416,14 +416,13 @@ impl Default for SpectralForgeParams {
             slot_module_types: Arc::new(Mutex::new({
                 let mut t = [ModuleType::Empty; 9];
                 t[0] = ModuleType::Dynamics;
-                t[1] = ModuleType::Dynamics;
-                t[2] = ModuleType::Gain;
+                t[1] = ModuleType::Gain;
                 t[8] = ModuleType::Master;
                 t
             })),
             slot_names: Arc::new(Mutex::new({
                 let mut names = [[0u8; 32]; 9];
-                let labels: &[&str] = &["Dynamics", "Dynamics 2", "Gain", "Slot 4", "Slot 5",
+                let labels: &[&str] = &["Dynamics", "Gain", "Slot 3", "Slot 4", "Slot 5",
                                          "Slot 6", "Slot 7", "Slot 8", "Master"];
                 for (i, label) in labels.iter().enumerate() {
                     let b = label.as_bytes();

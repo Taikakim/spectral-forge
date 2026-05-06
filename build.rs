@@ -215,12 +215,15 @@ fn emit_matrix_inits(f: &mut File) {
     // Param ID convention: mr{row}c{col}  where  row = DESTINATION slot,  col = SOURCE slot.
     // This is the TRANSPOSE of RouteMatrix.send[src][dst] (first index = source).
     // When building RouteMatrix from params: send[col][r] = mr{r}c{col}.value()
-    // Default: serial chain. mr1c0=1 (slot 0 → row 1 = slot 1), mr2c1=1, etc.
+    //
+    // Default routing: Dynamics (slot 0) → Gain (slot 1) → Master (slot 8).
+    // Matches the default slot_module_types in params.rs / presets.rs.
+    // mr1c0 = 1.0 (col 0 → row 1) and mr8c1 = 1.0 (col 1 → row 8); rest are 0.
     for r in 0..NUM_MATRIX_ROWS {
         for col in 0..NUM_SLOTS {
             let id = format!("mr{}c{}", r, col);
             let rust_name = format!("mr{}c{}", r, col);
-            let default: f32 = if col + 1 == r { 1.0 } else { 0.0 };
+            let default: f32 = if (r == 1 && col == 0) || (r == 8 && col == 1) { 1.0 } else { 0.0 };
             writeln!(
                 f,
                 "            {rust_name}: FloatParam::new(\"{id}\", {default}f32, \

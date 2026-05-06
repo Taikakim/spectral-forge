@@ -39,15 +39,13 @@ fn neutral_curves() -> [[CurveNode; NUM_NODES]; 7] {
 pub fn preset_default() -> PluginState {
     let mut types = [ModuleType::Empty; 9];
     types[0] = ModuleType::Dynamics;
-    types[1] = ModuleType::Dynamics;
-    types[2] = ModuleType::Gain;
+    types[1] = ModuleType::Gain;
     types[8] = ModuleType::Master;
 
     let mut names = [[0u8; 32]; 9];
     names[0] = slot_name("Dynamics");
-    names[1] = slot_name("Dynamics 2");
-    names[2] = slot_name("Gain");
-    for i in 3..8 { names[i] = slot_name(&format!("Slot {}", i + 1)); }
+    names[1] = slot_name("Gain");
+    for i in 2..8 { names[i] = slot_name(&format!("Slot {}", i + 1)); }
     names[8] = slot_name("Master");
 
     PluginState {

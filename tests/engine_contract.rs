@@ -194,11 +194,13 @@ fn fx_matrix_no_route_to_master_produces_silence() {
     types[8] = ModuleType::Master;
     let mut fm = FxMatrix::new(44100.0, 2048, &types);
 
-    // Use a route matrix with NO send to Master (slot 8)
+    // Use a route matrix with NO send to Master (slot 8). The default has
+    // 0→1 and 1→8 set; both must be cleared to actually orphan slot 8.
     let mut rm = RouteMatrix::default();
     rm.send[0][1] = 1.0;
     rm.send[1][2] = 1.0;
-    rm.send[2][8] = 0.0;   // explicitly clear the default route to Master
+    rm.send[1][8] = 0.0;   // clear the default Gain→Master route
+    rm.send[2][8] = 0.0;   // (no slot 2→Master either)
 
     let mut bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); n];
     let curves: Vec<Vec<Vec<f32>>> = (0..9)
