@@ -44,7 +44,7 @@ const ASSIGNABLE: &[ModuleType] = &[
 ];
 
 /// Render the popup if open. Call every frame from the main UI closure.
-/// Returns true if the popup consumed a click.
+/// Returns `Some(slot)` if a module was just assigned (curves need republishing), else `None`.
 ///
 /// UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §4
 /// `scale` is the frame-scoped UI scale factor; font sizes flow through `th::scaled`.
@@ -52,16 +52,16 @@ pub fn show_popup(
     ui:     &mut Ui,
     params: &SpectralForgeParams,
     scale:  f32,
-) -> bool {
+) -> Option<usize> {
     let key = ui.id().with("module_popup");
     let state: PopupState = ui.data(|d| d.get_temp(key).unwrap_or_default());
-    if !state.open { return false; }
+    if !state.open { return None; }
 
     let types = *params.slot_module_types.lock();
     let ts_count = ts_split_count(&types);
     let slot = state.slot;
 
-    let mut consumed = false;
+    let mut assigned_slot: Option<usize> = None;
     let mut new_state = state.clone();
 
     let area_response = egui::Area::new(egui::Id::new("module_popup_area"))
@@ -92,7 +92,7 @@ pub fn show_popup(
                             if resp.clicked() {
                                 assign_module(params, slot, ty);
                                 new_state.open = false;
-                                consumed = true;
+                                assigned_slot = Some(slot);
                             }
                         });
                     });
@@ -109,7 +109,7 @@ pub fn show_popup(
                 if ui.button("Remove module").clicked() {
                     assign_module(params, slot, ModuleType::Empty);
                     new_state.open = false;
-                    consumed = true;
+                    assigned_slot = Some(slot);
                 }
 
                 ui.separator();
@@ -129,7 +129,7 @@ pub fn show_popup(
     }
 
     ui.data_mut(|d| d.insert_temp(key, new_state));
-    consumed
+    assigned_slot
 }
 
 /// Open the popup for a slot at the given screen position.
@@ -152,7 +152,7 @@ fn assign_module(params: &SpectralForgeParams, slot: usize, ty: ModuleType) {
         names[slot][..len].copy_from_slice(&b[..len]);
     }
     let mut nodes = params.slot_curve_nodes.lock();
-    for c in 0..spec.num_curves.min(7) {
+    for c in 0..7 {
         nodes[slot][c] = crate::editor::curve::default_nodes_for_module_curve(ty, c);
     }
     // Reset tilt/offset/curvature FloatParam smoothers for this slot.

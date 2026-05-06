@@ -1372,7 +1372,21 @@ pub fn create_editor(
                         crate::editor::amp_popup::open_at(ui, row, col, pos);
                     }
                     // Render popups (egui Area — appears above matrix)
-                    let _ = crate::editor::module_popup::show_popup(ui, &params, scale);
+                    if let Some(changed_slot) = crate::editor::module_popup::show_popup(ui, &params, scale) {
+                        // Republish all 7 curves for the slot so DSP sees the reset nodes immediately.
+                        let nodes_snap = params.slot_curve_nodes.lock()[changed_slot];
+                        use crate::dsp::pipeline::MAX_NUM_BINS;
+                        if let Some(slot_chs) = curve_tx.get(changed_slot) {
+                            for (c, tx_arc) in slot_chs.iter().enumerate().take(7) {
+                                let curve_nodes = &nodes_snap[c];
+                                let gains = crv::compute_curve_response(curve_nodes, MAX_NUM_BINS, sr, fft_size);
+                                if let Some(mut tx) = tx_arc.try_lock() {
+                                    tx.input_buffer_mut().copy_from_slice(&gains);
+                                    tx.publish();
+                                }
+                            }
+                        }
+                    }
                     let _ = crate::editor::amp_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::circuit_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::life_popup::show_popup(ui, &params, scale);

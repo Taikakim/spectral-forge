@@ -228,7 +228,7 @@ fn emit_matrix_inits(f: &mut File) {
                 f,
                 "            {rust_name}: FloatParam::new(\"{id}\", {default}f32, \
                  FloatRange::Linear {{ min: -1.0f32, max: 1.0f32 }})\
-                 .with_smoother(SmoothingStyle::Linear(2.0))\
+                 .with_smoother(SmoothingStyle::Linear(100.0))\
                  .hide_in_generic_ui(),"
             )
             .unwrap();
