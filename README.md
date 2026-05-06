@@ -1,5 +1,8 @@
 # Spectral Forge
 
+A quick recap of what's going on:
+0.1 was just a succesful proof of concept, that I decided to transform the project into something more ambitious: not only a scalable UI, presets, automation and a better modularised codebase making adding new modules easier. The next version will have not only these basic plugin features, but also a fully modular routing between modules, with several new ones already under works. Currently this means that the main branch is not properly tested since my focus is on the dev branch which is very much a work in progress. So, compiling the plugin yourself it is not functional at this stage. Use the release binaries for now.
+
 A spectral compressor and modular effects processor for Linux/Windows, implemented as a CLAP plugin. Designed for Bitwig Studio.
 
 Patent-safe design — does not use the Hilbert/convolution approach from oeksound's patents.
