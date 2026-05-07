@@ -36,10 +36,11 @@ pub fn preset_menu_ui(
     params: &Arc<SpectralForgeParams>,
     setter: &ParamSetter,
 ) {
+    use crate::editor::help_box::{track_help, HelpTopic};
     ui.horizontal(|ui| {
         let current_label = state.selected.as_deref().unwrap_or("-- Preset --");
 
-        egui::ComboBox::from_id_salt("preset_pulldown")
+        let combo = egui::ComboBox::from_id_salt("preset_pulldown")
             .selected_text(current_label)
             .width(180.0)
             .show_ui(ui, |ui| {
@@ -53,12 +54,17 @@ pub fn preset_menu_ui(
                     }
                 }
             });
+        track_help(ui, &combo.response, HelpTopic::PresetMenu);
 
-        if ui.button("Save").clicked() {
+        let save_resp = ui.button("Save");
+        track_help(ui, &save_resp, HelpTopic::PresetMenu);
+        if save_resp.clicked() {
             state.save_popup_open = true;
         }
 
-        if ui.button("Folder").clicked() {
+        let folder_resp = ui.button("Folder");
+        track_help(ui, &folder_resp, HelpTopic::PresetMenu);
+        if folder_resp.clicked() {
             let dir = preset_dir();
             let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
         }

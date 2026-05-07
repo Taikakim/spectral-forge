@@ -5,6 +5,7 @@ use triple_buffer::Input as TbInput;
 use std::sync::{Arc, atomic::Ordering};
 use crate::params::SpectralForgeParams;
 use crate::editor::{curve as crv, spectrum_display as sd, theme as th};
+use crate::editor::help_box::{HelpTopic, track_help};
 use crate::editor::mod_ring::{mod_ring_overlay};
 use crate::dsp::modulation_ring::{RingKey, RingStateBank};
 
@@ -35,6 +36,10 @@ pub fn create_editor(
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
             }
+
+            // Clear any per-widget help focus from the previous frame. Widgets
+            // claim it back via `track_help` while they're hovered/dragged.
+            crate::editor::help_box::reset_focus(ctx);
 
             // Scaling: use the user's chosen scale directly as pixels_per_point.
             // This is stable (no feedback loop) and ensures content renders at the target
@@ -176,6 +181,7 @@ pub fn create_editor(
                                 egui::Sense::click()
                             };
                             let resp = ui.add(btn.sense(sense));
+                            track_help(ui, &resp, HelpTopic::CurveTab);
                             if !gain_disabled && resp.clicked() {
                                 *params.editing_curve.lock() = i as u8;
                             }
@@ -190,11 +196,13 @@ pub fn create_editor(
                         ui.label(egui::RichText::new("Ceil").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         {
                             let mut v = *params.graph_db_max.lock();
-                            if ui.add(
+                            let resp = ui.add(
                                 egui::DragValue::new(&mut v)
                                     .range(-20.0..=0.0)
                                     .suffix(" dB").speed(0.5).max_decimals(1),
-                            ).changed() {
+                            );
+                            track_help(ui, &resp, HelpTopic::GraphCeil);
+                            if resp.changed() {
                                 *params.graph_db_max.lock() = v.max(db_min + 6.0);
                             }
                         }
@@ -202,11 +210,13 @@ pub fn create_editor(
                         ui.label(egui::RichText::new("Falloff").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                         {
                             let mut v = *params.peak_falloff_ms.lock();
-                            if ui.add(
+                            let resp = ui.add(
                                 egui::DragValue::new(&mut v)
                                     .range(0.0..=5000.0)
                                     .suffix(" ms").speed(10.0).max_decimals(0),
-                            ).changed() {
+                            );
+                            track_help(ui, &resp, HelpTopic::PeakFalloff);
+                            if resp.changed() {
                                 *params.peak_falloff_ms.lock() = v;
                             }
                         }
@@ -232,9 +242,34 @@ pub fn create_editor(
                         )
                         .fill(th::BG)
                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                        if ui.add(reset_btn).clicked() {
+                        let reset_resp = ui.add(reset_btn);
+                        track_help(ui, &reset_resp, HelpTopic::ResetToDefault);
+                        if reset_resp.clicked() {
                             let key = egui::Id::new("show_reset_dialog");
                             ui.ctx().data_mut(|d| d.insert_temp(key, true));
+                        }
+
+                        // HELP toggle — show or hide context-sensitive help.
+                        ui.add_space(8.0);
+                        let help_on = params.help_enabled.value();
+                        let (help_fill, help_text_color) = if help_on {
+                            (th::BORDER, th::BG)
+                        } else {
+                            (th::BG, th::LABEL_DIM)
+                        };
+                        let help_btn = egui::Button::new(
+                            egui::RichText::new("HELP")
+                                .color(help_text_color)
+                                .size(th::scaled(th::FONT_SIZE_LABEL, scale)),
+                        )
+                        .fill(help_fill)
+                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                        let help_resp = ui.add(help_btn);
+                        track_help(ui, &help_resp, HelpTopic::HelpToggle);
+                        if help_resp.clicked() {
+                            setter.begin_set_parameter(&params.help_enabled);
+                            setter.set_parameter(&params.help_enabled, !help_on);
+                            setter.end_set_parameter(&params.help_enabled);
                         }
                     });
 
@@ -292,7 +327,9 @@ pub fn create_editor(
                             )
                             .fill(fill)
                             .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                            if ui.add(btn).clicked() {
+                            let resp = ui.add(btn);
+                            track_help(ui, &resp, HelpTopic::FftSize);
+                            if resp.clicked() {
                                 setter.begin_set_parameter(&params.fft_size);
                                 setter.set_parameter(&params.fft_size, choice);
                                 setter.end_set_parameter(&params.fft_size);
@@ -323,7 +360,9 @@ pub fn create_editor(
                             )
                             .fill(fill)
                             .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                            if ui.add(btn).clicked() {
+                            let resp = ui.add(btn);
+                            track_help(ui, &resp, HelpTopic::UiScale);
+                            if resp.clicked() {
                                 *params.ui_scale.lock() = step_scale;
                             }
                         }
@@ -359,7 +398,8 @@ pub fn create_editor(
                             (avail.max.y - strip_height).max(avail.min.y),
                         ),
                     );
-                    ui.allocate_rect(curve_rect, egui::Sense::hover());
+                    let curve_area_resp = ui.allocate_rect(curve_rect, egui::Sense::hover());
+                    track_help(ui, &curve_area_resp, HelpTopic::CurveGraph);
 
                     // Read spectrum + suppression from bridge.
                     // Cache the last successful read so try_lock misses don't flicker.
@@ -786,6 +826,7 @@ pub fn create_editor(
                                 ui.id().with("slot_header_interact"),
                                 egui::Sense::click(),
                             );
+                            track_help(ui, &header_resp, HelpTopic::SlotName);
                             if header_resp.clicked() {
                                 ui.data_mut(|d| d.insert_temp(name_edit_key, true));
                             }
@@ -847,6 +888,7 @@ pub fn create_editor(
                                     .fill(fill)
                                     .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                     let resp = ui.add(btn);
+                                    track_help(ui, &resp, HelpTopic::ModuleMode);
                                     if is_gain && resp.clicked() {
                                         params.slot_gain_mode.lock()[edit_slot] = mode;
                                     }
@@ -897,6 +939,7 @@ pub fn create_editor(
                                         .fill(fill)
                                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                         let resp = ui.add(btn);
+                                        track_help(ui, &resp, HelpTopic::ModuleMode);
                                         if resp.clicked() {
                                             params.slot_future_mode.lock()[edit_slot] = mode;
                                         }
@@ -917,6 +960,7 @@ pub fn create_editor(
                                         .fill(fill)
                                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                         let resp = ui.add(btn);
+                                        track_help(ui, &resp, HelpTopic::ModuleMode);
                                         if resp.clicked() {
                                             params.slot_punch_mode.lock()[edit_slot] = mode;
                                         }
@@ -938,6 +982,7 @@ pub fn create_editor(
                                         .fill(fill)
                                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                         let resp = ui.add(btn);
+                                        track_help(ui, &resp, HelpTopic::ModuleMode);
                                         if resp.clicked() {
                                             params.slot_rhythm_mode.lock()[edit_slot] = mode;
                                         }
@@ -958,6 +1003,7 @@ pub fn create_editor(
                                         .fill(fill)
                                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                         let resp = ui.add(btn);
+                                        track_help(ui, &resp, HelpTopic::ModuleMode);
                                         if resp.clicked() {
                                             params.slot_geometry_mode.lock()[edit_slot] = mode;
                                         }
@@ -984,6 +1030,7 @@ pub fn create_editor(
                                         .fill(fill)
                                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                         let resp = ui.add(btn);
+                                        track_help(ui, &resp, HelpTopic::ModuleMode);
                                         if resp.clicked() {
                                             params.slot_modulate_mode.lock()[edit_slot] = mode;
                                         }
@@ -996,6 +1043,7 @@ pub fn create_editor(
                                                 &mut repel,
                                                 egui::RichText::new("Repel").size(th::scaled(th::FONT_SIZE_LABEL, scale)),
                                             );
+                                            track_help(ui, &resp, HelpTopic::ModulateRepel);
                                             if resp.changed() {
                                                 params.slot_modulate_repel.lock()[edit_slot] = repel;
                                             }
@@ -1006,6 +1054,7 @@ pub fn create_editor(
                                                 &mut scp,
                                                 egui::RichText::new("SC-pos").size(th::scaled(th::FONT_SIZE_LABEL, scale)),
                                             );
+                                            track_help(ui, &resp, HelpTopic::ModulateScPositioned);
                                             if resp.changed() {
                                                 params.slot_modulate_sc_positioned.lock()[edit_slot] = scp;
                                             }
@@ -1021,6 +1070,7 @@ pub fn create_editor(
                                     .fill(th::BG)
                                     .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                     let resp = ui.add(btn);
+                                    track_help(ui, &resp, HelpTopic::ModuleMode);
                                     if resp.clicked() {
                                         crate::editor::circuit_popup::open_at(ui, edit_slot, resp.rect.right_top());
                                     }
@@ -1034,6 +1084,7 @@ pub fn create_editor(
                                     .fill(th::BG)
                                     .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                     let resp = ui.add(btn);
+                                    track_help(ui, &resp, HelpTopic::ModuleMode);
                                     if resp.clicked() {
                                         crate::editor::life_popup::open_at(ui, edit_slot, resp.rect.right_top());
                                     }
@@ -1047,6 +1098,7 @@ pub fn create_editor(
                                                     .color(if selected { th::MODULE_COLOR_LIT } else { th::LABEL_DIM })
                                                     .size(th::scaled(th::FONT_SIZE_LABEL, scale))
                                             ).on_hover_text(hint);
+                                            track_help(ui, &resp, HelpTopic::ModuleMode);
                                             if resp.clicked() && !selected {
                                                 params.slot_past_mode.lock()[edit_slot] = mode;
                                             }
@@ -1068,6 +1120,7 @@ pub fn create_editor(
                                                         .color(if selected { th::MODULE_COLOR_LIT } else { th::LABEL_DIM })
                                                         .size(th::scaled(th::FONT_SIZE_LABEL, scale))
                                                 );
+                                                track_help(ui, &resp, HelpTopic::PastSortKey);
                                                 if resp.clicked() && !selected {
                                                     params.slot_past_sort_key.lock()[edit_slot] = sort_key;
                                                 }
@@ -1084,6 +1137,7 @@ pub fn create_editor(
                                     .fill(th::BG)
                                     .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                     let resp = ui.add(btn);
+                                    track_help(ui, &resp, HelpTopic::ModuleMode);
                                     if resp.clicked() {
                                         crate::editor::kinetics_popup::open_at(ui, edit_slot, resp.rect.right_top());
                                     }
@@ -1097,6 +1151,7 @@ pub fn create_editor(
                                     .fill(th::BG)
                                     .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
                                     let resp = ui.add(btn);
+                                    track_help(ui, &resp, HelpTopic::ModuleMode);
                                     if resp.clicked() {
                                         crate::editor::harmony_popup::open_at(ui, edit_slot, resp.rect.right_top());
                                     }
@@ -1109,9 +1164,10 @@ pub fn create_editor(
                     use nih_plug_egui::widgets::ParamSlider;
 
                     macro_rules! knob {
-                        ($ui:expr, $param:expr, $label:expr) => {{
+                        ($ui:expr, $param:expr, $label:expr, $topic:expr) => {{
                             $ui.vertical(|ui| {
-                                ui.add(ParamSlider::for_param($param, setter).with_width(36.0));
+                                let resp = ui.add(ParamSlider::for_param($param, setter).with_width(36.0));
+                                track_help(ui, &resp, $topic);
                                 ui.label(
                                     egui::RichText::new($label).color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)),
                                 );
@@ -1119,7 +1175,7 @@ pub fn create_editor(
                         }};
                     }
 
-                    let toggle = |ui: &mut egui::Ui, val: bool, label: &str| -> bool {
+                    let toggle = |ui: &mut egui::Ui, val: bool, label: &str, topic: HelpTopic| -> bool {
                         let (fill, text_color) = if val {
                             (th::BORDER, th::BG)
                         } else {
@@ -1130,39 +1186,41 @@ pub fn create_editor(
                         )
                         .fill(fill)
                         .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                        ui.add(btn).clicked()
+                        let resp = ui.add(btn);
+                        track_help(ui, &resp, topic);
+                        resp.clicked()
                     };
 
                     // Row 1 — always visible: global gain/mix + toggle buttons
                     ui.horizontal(|ui| {
-                        knob!(ui, &params.input_gain,  "IN");
-                        knob!(ui, &params.output_gain, "OUT");
-                        knob!(ui, &params.mix,         "MIX");
+                        knob!(ui, &params.input_gain,  "IN",  HelpTopic::InputGain);
+                        knob!(ui, &params.output_gain, "OUT", HelpTopic::OutputGain);
+                        knob!(ui, &params.mix,         "MIX", HelpTopic::Mix);
 
                         ui.add_space(8.0);
 
                         let auto_mk = params.auto_makeup.value();
-                        if toggle(ui, auto_mk, "AUTO MK") {
+                        if toggle(ui, auto_mk, "AUTO MK", HelpTopic::AutoMakeup) {
                             setter.begin_set_parameter(&params.auto_makeup);
                             setter.set_parameter(&params.auto_makeup, !auto_mk);
                             setter.end_set_parameter(&params.auto_makeup);
                         }
                         ui.add_space(4.0);
                         let delta = params.delta_monitor.value();
-                        if toggle(ui, delta, "DELTA") {
+                        if toggle(ui, delta, "DELTA", HelpTopic::DeltaMonitor) {
                             setter.begin_set_parameter(&params.delta_monitor);
                             setter.set_parameter(&params.delta_monitor, !delta);
                             setter.end_set_parameter(&params.delta_monitor);
                         }
                         ui.add_space(4.0);
                         let clip_enabled = params.master_clip_enabled.value();
-                        if toggle(ui, clip_enabled, "CLIP") {
+                        if toggle(ui, clip_enabled, "CLIP", HelpTopic::MasterClip) {
                             setter.begin_set_parameter(&params.master_clip_enabled);
                             setter.set_parameter(&params.master_clip_enabled, !clip_enabled);
                             setter.end_set_parameter(&params.master_clip_enabled);
                         }
                         ui.add_space(2.0);
-                        knob!(ui, &params.master_clip_threshold_db, "THR");
+                        knob!(ui, &params.master_clip_threshold_db, "THR", HelpTopic::MasterClipThreshold);
                     });
 
                     ui.add_space(2.0);
@@ -1189,10 +1247,10 @@ pub fn create_editor(
                                 .inner_margin(egui::Margin { left: 4, right: 4, top: 4, bottom: 4 });
                             let dyn_resp = dyn_frame.show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    knob!(ui, &params.attack_ms,         "Atk");
-                                    knob!(ui, &params.release_ms,        "Rel");
-                                    knob!(ui, &params.sensitivity,       "Sens");
-                                    knob!(ui, &params.suppression_width, "Width");
+                                    knob!(ui, &params.attack_ms,         "Atk",   HelpTopic::DynAttack);
+                                    knob!(ui, &params.release_ms,        "Rel",   HelpTopic::DynRelease);
+                                    knob!(ui, &params.sensitivity,       "Sens",  HelpTopic::DynSensitivity);
+                                    knob!(ui, &params.suppression_width, "Width", HelpTopic::DynSuppressionWidth);
                                 });
                             });
                             let lbl_pos = dyn_resp.response.rect.left_top() + egui::vec2(4.0, 0.0);
@@ -1290,6 +1348,7 @@ pub fn create_editor(
                                                 format!("{:.1} {}", phys, off_cfg.y_label)
                                             })
                                     );
+                                    track_help(ui, &resp, HelpTopic::Offset);
                                     if resp.drag_started() { setter.begin_set_parameter(off_p); }
                                     if resp.changed() {
                                         let clamped = off_norm.clamp(-1.0, 1.0);
@@ -1311,6 +1370,7 @@ pub fn create_editor(
                                             .speed(1.0 / 300.0)
                                             .fixed_decimals(2)
                                     );
+                                    track_help(ui, &resp, HelpTopic::Tilt);
                                     if resp.drag_started() { setter.begin_set_parameter(tilt_p); }
                                     if resp.changed() {
                                         let clamped = tilt_norm.clamp(-1.0, 1.0);
@@ -1332,6 +1392,7 @@ pub fn create_editor(
                                             .speed(1.0 / 300.0)
                                             .fixed_decimals(2)
                                     );
+                                    track_help(ui, &resp, HelpTopic::Curvature);
                                     if resp.drag_started() { setter.begin_set_parameter(curv_p); }
                                     if resp.changed() { setter.set_parameter(curv_p, curv_val.clamp(0.0, 1.0)); }
                                     if resp.drag_stopped() { setter.end_set_parameter(curv_p); }
@@ -1484,6 +1545,7 @@ fn sc_strip_ui(
                         if v <= -90.0 { "−∞".to_owned() } else { format!("{:.1}", v) }
                     })
             );
+            track_help(ui, &resp, HelpTopic::ScGain);
             if resp.changed() {
                 params.slot_sc_gain_db.lock()[slot_idx] = g;
             }
@@ -1500,7 +1562,7 @@ fn sc_strip_ui(
                 ScChannel::M  => "M",
                 ScChannel::S  => "S",
             };
-            egui::ComboBox::new(("sc_chan_slot", slot_idx), "Source")
+            let combo = egui::ComboBox::new(("sc_chan_slot", slot_idx), "Source")
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     for (v, text) in [
@@ -1516,6 +1578,7 @@ fn sc_strip_ui(
                         }
                     }
                 });
+            track_help(ui, &combo.response, HelpTopic::ScChannel);
         }
     });
 }

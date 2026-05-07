@@ -358,6 +358,11 @@ pub struct SpectralForgeParams {
     /// approach toward 4× threshold. 0 dB = least clipping, -24 dB = most.
     pub master_clip_threshold_db: FloatParam,
 
+    /// Show context-sensitive help in the help box next to the routing
+    /// matrix. Default true. When false, the help box renders a small
+    /// placeholder so the layout doesn't shift.
+    pub help_enabled: BoolParam,
+
     pub plpv_phase_noise_floor_db: FloatParam,
 
     pub plpv_max_peaks: IntParam,
@@ -595,6 +600,7 @@ impl Default for SpectralForgeParams {
             )
             .with_unit(" dB")
             .with_step_size(0.5),
+            help_enabled: BoolParam::new("Help Tooltips", true),
             plpv_enable: BoolParam::new("PLPV Enable", true),
 
             plpv_dynamics_enable: BoolParam::new("Dynamics PLPV", true),
@@ -932,6 +938,7 @@ unsafe impl Params for SpectralForgeParams {
         params.push(("delta_monitor".to_string(), self.delta_monitor.as_ptr(), String::new()));
         params.push(("master_clip_enabled".to_string(), self.master_clip_enabled.as_ptr(), String::new()));
         params.push(("master_clip_threshold_db".to_string(), self.master_clip_threshold_db.as_ptr(), String::new()));
+        params.push(("help_enabled".to_string(),         self.help_enabled.as_ptr(),         String::new()));
         params.push(("enable_heavy_modules".to_string(), self.enable_heavy_modules.as_ptr(), String::new()));
         params.push(("plpv_enable".to_string(), self.plpv_enable.as_ptr(), String::new()));
         params.push(("plpv_dynamics_enable".to_string(), self.plpv_dynamics_enable.as_ptr(), String::new()));

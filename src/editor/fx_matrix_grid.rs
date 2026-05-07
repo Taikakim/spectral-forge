@@ -194,6 +194,9 @@ pub fn paint_fx_matrix_grid(
                             ui.id().with(("mat_diag", row)),
                             egui::Sense::click(),
                         );
+                        crate::editor::help_box::track_help(
+                            ui, &interact, crate::editor::help_box::HelpTopic::MatrixSlotSelect,
+                        );
                         if interact.clicked() {
                             result.left_click_slot = Some(row);
                         }
@@ -255,6 +258,9 @@ pub fn paint_fx_matrix_grid(
                             );
                             crate::editor::delayed_tooltip(ui, &inner.inner,
                                 format!("Slot {} \u{2192} Slot {} send", row + 1, col + 1));
+                            crate::editor::help_box::track_help(
+                                ui, &inner.inner, crate::editor::help_box::HelpTopic::MatrixCellSend,
+                            );
 
                             // Amp-mode indicator dot (top-right corner) when non-Linear.
                             let amp_mode = route_matrix.amp_mode[row][col];
@@ -371,6 +377,9 @@ pub fn paint_fx_matrix_grid(
                         );
                         crate::editor::delayed_tooltip(ui, &vinner.inner,
                             format!("{} \u{2192} Slot {} send", vrow_label, col + 1));
+                        crate::editor::help_box::track_help(
+                            ui, &vinner.inner, crate::editor::help_box::HelpTopic::MatrixCellSend,
+                        );
 
                         let amp_mode = route_matrix.amp_mode[*vrow_src][col];
                         if amp_mode != AmpMode::Linear {

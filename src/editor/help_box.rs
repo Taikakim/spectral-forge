@@ -1,7 +1,12 @@
 //! Help-box widget rendered right of the FX matrix.
 //!
-//! Shows the module's overview when a slot is selected (no curve focused),
-//! or a per-curve summary when a curve is selected.
+//! Three-tier help precedence:
+//! 1. **Per-widget topic** — set transiently by `track_help()` while the user
+//!    hovers/drags a parameter. Cleared at the top of every frame.
+//! 2. **Per-curve / per-mode help** — derived from the focused slot's
+//!    `module_spec().active_layout` for the focused curve.
+//! 3. **Module fallback** — static module-level description with curve label.
+//!
 //! See spec docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md §8
 //! and docs/superpowers/specs/2026-05-04-past-module-ux-design.md §4.
 
@@ -13,9 +18,138 @@ use crate::dsp::modules::{module_spec, CurveLayout, ModuleType};
 use crate::editor::theme as th;
 use crate::params::SpectralForgeParams;
 
+// ── HelpTopic — context-sensitive help focus ───────────────────────────────
+
+/// A discrete help topic identifying which parameter or graph element the
+/// user is currently interacting with. Set by `track_help()` per frame and
+/// consumed by `draw()` to populate the help-box body.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum HelpTopic {
+    // Top bar
+    PresetMenu,
+    GraphCeil,
+    PeakFalloff,
+    ResetToDefault,
+    HelpToggle,
+    FftSize,
+    UiScale,
+
+    // Curve area
+    CurveTab,
+    CurveGraph,
+    CurveNode,
+    SlotName,
+
+    // Sidechain strip
+    ScGain,
+    ScChannel,
+
+    // Mode buttons
+    ModuleMode,
+    PastSortKey,
+    ModulateRepel,
+    ModulateScPositioned,
+
+    // Master row
+    InputGain,
+    OutputGain,
+    Mix,
+    AutoMakeup,
+    DeltaMonitor,
+    MasterClip,
+    MasterClipThreshold,
+
+    // Dynamics panel knobs
+    DynAttack,
+    DynRelease,
+    DynSensitivity,
+    DynSuppressionWidth,
+
+    // Per-curve transforms
+    Offset,
+    Tilt,
+    Curvature,
+
+    // Routing matrix
+    MatrixCellSend,
+    MatrixSlotSelect,
+}
+
+/// Map a topic to its help text.
+pub fn topic_help_text(topic: HelpTopic) -> &'static str {
+    match topic {
+        HelpTopic::PresetMenu       => "Presets — load, save, rename, or browse the patch library. Files live in the user preset folder.",
+        HelpTopic::GraphCeil        => "Spectrum display ceiling (dB). Sets the top of the visible curve area; only affects the display, not the audio.",
+        HelpTopic::PeakFalloff      => "Peak-hold falloff (ms). 0 = no hold; higher values keep peaks visible longer in the spectrum overlay.",
+        HelpTopic::ResetToDefault   => "Reset every parameter to its factory default and clear all module state. Cannot be undone.",
+        HelpTopic::HelpToggle       => "Show or hide context-sensitive help in this panel.",
+        HelpTopic::FftSize          => "FFT size — analysis window length. Larger windows give finer frequency resolution but slower transient response and more latency. Bitwig compensates the latency automatically.",
+        HelpTopic::UiScale          => "UI zoom factor — scales the entire window.",
+
+        HelpTopic::CurveTab         => "Click to switch which curve you're editing for this slot. The active curve is what the graph below shows and what the Offset/Tilt/Curv sliders modify.",
+        HelpTopic::CurveGraph       => "Drag the dots to shape this curve. The X axis is frequency (log, 20 Hz–Nyquist); the Y axis is the curve's parameter (label shown on the left). Outer dots are shelves, inner dots are bell filters. Right-click a dot to flatten it.",
+        HelpTopic::CurveNode        => "Drag this node to change the curve's value at this frequency. Drag past the top/bottom edge to reach the virtual −2..+2 range; a red triangle marks the off-rect direction.",
+        HelpTopic::SlotName         => "Click to rename this slot. The name shows up in the routing matrix labels.",
+
+        HelpTopic::ScGain           => "Sidechain input gain (dB) for this slot. −∞ disables the slot's sidechain entirely. Only relevant for SC-aware modules (Dynamics, etc.).",
+        HelpTopic::ScChannel        => "Source for this slot's sidechain: Follow uses the host's SC bus; L+R sums; L/R/M/S taps an individual stream.",
+
+        HelpTopic::ModuleMode       => "Module mode — switches between sub-algorithms within this module. Each mode rewires which curves are active and may add extra controls.",
+        HelpTopic::PastSortKey      => "DecaySorter sort key — chooses which spectral feature determines bin reordering: by age, by magnitude, by spectral centroid, etc.",
+        HelpTopic::ModulateRepel    => "Reverse the gravitational force in Modulate's Gravity mode (push instead of pull).",
+        HelpTopic::ModulateScPositioned => "Use sidechain bins to position the gravity well in Modulate's Gravity mode.",
+
+        HelpTopic::InputGain        => "Pre-FX input gain. Applied before any analysis or processing.",
+        HelpTopic::OutputGain       => "Post-FX output gain. Applied after the wet/dry mix.",
+        HelpTopic::Mix              => "Wet/dry blend. 0% = full dry (true bypass — bit-perfect). 100% = full wet.",
+        HelpTopic::AutoMakeup       => "Auto makeup — automatically compensates for level loss from compression/expansion in dynamics-style modules.",
+        HelpTopic::DeltaMonitor     => "Delta monitor — output only the difference between dry and wet (what the chain removed). Useful for hearing exactly what the FX is doing.",
+        HelpTopic::MasterClip       => "Master soft-clip — final-stage saturation that limits output to a controlled ceiling. Off bypasses the clipper entirely.",
+        HelpTopic::MasterClipThreshold => "Master clip threshold (dB). Signal above this magnitude gets soft-saturated; quieter content passes untouched.",
+
+        HelpTopic::DynAttack        => "Dynamics global attack time (ms). Per-curve ATTACK multiplies this value, so this is the baseline at neutral curve gain.",
+        HelpTopic::DynRelease       => "Dynamics global release time (ms). Per-curve RELEASE multiplies this value, so this is the baseline at neutral curve gain.",
+        HelpTopic::DynSensitivity   => "Dynamics envelope follower sensitivity. Higher values track faster onsets but are more prone to chattering.",
+        HelpTopic::DynSuppressionWidth => "Width of the per-bin suppression footprint. Wider = the bin's gain reduction also pulls down its neighbours, smoothing the spectral result.",
+
+        HelpTopic::Offset           => "Offset — shifts the entire curve up or down. v=0 sits at the curve's natural value; v=±1 reaches the curve's display min/max via the calibrated axis_aware_lerp.",
+        HelpTopic::Tilt             => "Tilt — frequency-dependent shift pivoted at 1 kHz. Negative tilts the curve down at high frequencies; positive tilts it up. Up to ±2 dB/oct.",
+        HelpTopic::Curvature        => "Curvature — bends the tilt into a smoothstep S-curve, concentrating the change around the 1 kHz pivot. 0 = straight tilt; 1 = full S.",
+
+        HelpTopic::MatrixCellSend   => "Routing matrix cell — send amplitude from this row's slot to this column's slot. 0 = off, 1 = unity. Drag to set; right-click for the amp popup.",
+        HelpTopic::MatrixSlotSelect => "Click to focus this slot in the curve editor above. Right-click to assign a different module type.",
+    }
+}
+
+const HELP_TOPIC_KEY: &str = "spectral_forge::help_topic";
+
+fn topic_id() -> egui::Id { egui::Id::new(HELP_TOPIC_KEY) }
+
+/// Track that `response` is being hovered/dragged/focused. If so, claim the
+/// per-frame help focus for `topic`. Multiple widgets may call this in a
+/// single frame; the last claim wins.
+pub fn track_help(ui: &egui::Ui, response: &egui::Response, topic: HelpTopic) {
+    if response.hovered() || response.dragged() || response.has_focus() {
+        ui.ctx().data_mut(|d| d.insert_temp::<Option<HelpTopic>>(topic_id(), Some(topic)));
+    }
+}
+
+/// Clear the per-frame help focus. Call once at the very top of the editor
+/// frame so stale focus from a previous frame doesn't leak through.
+pub fn reset_focus(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp::<Option<HelpTopic>>(topic_id(), None));
+}
+
+fn current_topic(ctx: &egui::Context) -> Option<HelpTopic> {
+    ctx.data(|d| d.get_temp::<Option<HelpTopic>>(topic_id())).flatten()
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+
 /// Render the help-box. The caller positions it in the layout (e.g. right of
 /// the matrix). Width is fixed via `th::HELP_BOX_WIDTH`; height grows with
-/// content.
+/// content. Renders a blank frame when `params.help_enabled` is false so the
+/// layout doesn't collapse.
 pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
     let editing_slot  = (*params.editing_slot.lock() as usize).min(8);
     let editing_curve = (*params.editing_curve.lock() as usize).min(7);
@@ -24,8 +158,18 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
 
     let layout = active_layout_for_slot(editing_type, params, editing_slot);
 
-    let head: &str = spec.display_name;
-    let body = body_text(layout.as_ref(), editing_type, editing_curve, spec.curve_labels);
+    let help_on = params.help_enabled.value();
+    let topic   = current_topic(ui.ctx());
+
+    let (head, body): (&str, Cow<'static, str>) = if !help_on {
+        ("Help (off)", Cow::Borrowed("Toggle the HELP button in the top bar to bring help back."))
+    } else if let Some(t) = topic {
+        (topic_head(t), Cow::Borrowed(topic_help_text(t)))
+    } else {
+        let h = spec.display_name;
+        let b = body_text(layout.as_ref(), editing_type, editing_curve, spec.curve_labels);
+        (h, b)
+    };
 
     let pad = th::scaled(th::HELP_BOX_PADDING, scale).round() as i8;
     Frame::new()
@@ -50,6 +194,52 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
                 ).wrap(),
             );
         });
+}
+
+/// Short heading shown above the body when a topic is focused.
+fn topic_head(topic: HelpTopic) -> &'static str {
+    match topic {
+        HelpTopic::PresetMenu       => "Presets",
+        HelpTopic::GraphCeil        => "Spectrum Ceiling",
+        HelpTopic::PeakFalloff      => "Peak Falloff",
+        HelpTopic::ResetToDefault   => "Reset to Default",
+        HelpTopic::HelpToggle       => "Help",
+        HelpTopic::FftSize          => "FFT Size",
+        HelpTopic::UiScale          => "UI Scale",
+
+        HelpTopic::CurveTab         => "Curve Selector",
+        HelpTopic::CurveGraph       => "Curve Editor",
+        HelpTopic::CurveNode        => "Curve Node",
+        HelpTopic::SlotName         => "Slot Name",
+
+        HelpTopic::ScGain           => "Sidechain Gain",
+        HelpTopic::ScChannel        => "Sidechain Source",
+
+        HelpTopic::ModuleMode       => "Module Mode",
+        HelpTopic::PastSortKey      => "DecaySorter Key",
+        HelpTopic::ModulateRepel    => "Modulate · Repel",
+        HelpTopic::ModulateScPositioned => "Modulate · SC-Pos",
+
+        HelpTopic::InputGain        => "Input Gain",
+        HelpTopic::OutputGain       => "Output Gain",
+        HelpTopic::Mix              => "Mix",
+        HelpTopic::AutoMakeup       => "Auto Makeup",
+        HelpTopic::DeltaMonitor     => "Delta Monitor",
+        HelpTopic::MasterClip       => "Master Clip",
+        HelpTopic::MasterClipThreshold => "Master Clip Threshold",
+
+        HelpTopic::DynAttack        => "Dynamics · Attack",
+        HelpTopic::DynRelease       => "Dynamics · Release",
+        HelpTopic::DynSensitivity   => "Dynamics · Sensitivity",
+        HelpTopic::DynSuppressionWidth => "Dynamics · Width",
+
+        HelpTopic::Offset           => "Curve Offset",
+        HelpTopic::Tilt             => "Curve Tilt",
+        HelpTopic::Curvature        => "Curve Curvature",
+
+        HelpTopic::MatrixCellSend   => "Matrix Send",
+        HelpTopic::MatrixSlotSelect => "Slot",
+    }
 }
 
 fn active_layout_for_slot(
@@ -179,5 +369,18 @@ mod tests {
         // Past static description starts with "Past —"; curve label appended.
         assert!(body.starts_with("Past —"));
         assert!(body.contains("Curve: AMOUNT"));
+    }
+
+    #[test]
+    fn topic_help_text_covers_all_variants() {
+        // A spot-check that key topics resolve to non-empty strings.
+        for t in [
+            HelpTopic::FftSize, HelpTopic::Mix, HelpTopic::Offset,
+            HelpTopic::Tilt, HelpTopic::Curvature, HelpTopic::CurveGraph,
+            HelpTopic::MatrixCellSend, HelpTopic::HelpToggle,
+        ] {
+            assert!(!topic_help_text(t).is_empty(), "{:?} has empty help text", t);
+            assert!(!topic_head(t).is_empty(),     "{:?} has empty head", t);
+        }
     }
 }
