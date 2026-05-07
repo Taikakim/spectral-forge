@@ -123,31 +123,20 @@ pub fn default_nodes_for_module_curve(
 ) -> [CurveNode; 6] {
     use crate::dsp::modules::ModuleType;
 
-    // Build a flat node row at a given y value, preserving the standard
-    // x spacing used by `default_nodes()`.
-    fn flat_at_y(y: f32) -> [CurveNode; 6] {
-        [
-            CurveNode { x: 0.0, y, q: 0.3 },
-            CurveNode { x: 0.2, y, q: 0.5 },
-            CurveNode { x: 0.4, y, q: 0.5 },
-            CurveNode { x: 0.6, y, q: 0.5 },
-            CurveNode { x: 0.8, y, q: 0.5 },
-            CurveNode { x: 1.0, y, q: 0.3 },
-        ]
-    }
-
+    // PAST Age (curve 1) and Smear (curve 3) get truly neutral defaults so the
+    // displayed curve is a flat horizontal line at gain=1.0 (matching every
+    // other module's flat default). Bells at y=0 short-circuit to a 1.0
+    // multiplier so the curve is straight; the offset slider modulates from
+    // there exactly like other curves. (`default_nodes_for_curve(1)` would
+    // route through the RATIO fallback and produce a non-flat baseline.)
+    //
+    // Earlier code used `flat_at_y(-0.334)` here to seed a centred 50% display
+    // for an "equal headroom" intent, but bells are bandwidth-limited and
+    // don't sum to a flat non-neutral curve — the result was a comb of bumps.
+    // The non-neutral baseline can't be expressed in the current bell+shelf
+    // math; the right fix would be a global-gain parameter, not per-bell offsets.
     match (module_type, curve_idx) {
-        // Past Age / Delay (curve 1): default to gain ≈ 0.5 → display ≈ 50% of
-        // total history. y = log(0.5)*20/18 ≈ -0.334 → compute_curve_response
-        // produces gain = 10^(-0.334 * 18 / 20) = 0.5. Centring the default
-        // means the offset slider has equal headroom in both directions.
-        (ModuleType::Past, 1) => flat_at_y(-0.334),
-        // Past Smear (curve 3): default starts at the audible toggle threshold
-        // (gain = 0.5 → 50% display). cfg.y_natural = 100% with off_mix
-        // (additive only on negative offset), so the offset ring reduces smear
-        // toward 0% and positive offset is clamped at 100%.
-        // y = -0.334 → gain = 10^(-0.334 * 18 / 20) = 0.5.
-        (ModuleType::Past, 3) => flat_at_y(-0.334),
+        (ModuleType::Past, 1) | (ModuleType::Past, 3) => default_nodes(),
         _ => default_nodes_for_curve(curve_idx),
     }
 }

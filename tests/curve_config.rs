@@ -190,34 +190,21 @@ fn past_config_returns_calibrated_display_per_curve() {
     assert!(is_identity(oob.offset_fn), "OOB should route to off_identity");
 }
 
-/// Past Age (curve 1) defaults user-drawn y to a midpoint so the offset slider
-/// has headroom in both directions. Past Smear (curve 3) defaults user-drawn y
-/// low so positive offset enables smear instead of being a clamped no-op.
+/// All PAST curves use the universal neutral default (y=0). Earlier code seeded
+/// PAST Age + Smear at y=-0.334 to "centre at 50%", but bells are bandwidth-
+/// limited and don't sum to a flat non-neutral curve — the result was a comb of
+/// bumps rather than a flat line. Pins the all-neutral convention so a future
+/// regression (re-introducing flat_at_y) breaks this test.
 #[test]
 fn past_default_nodes_centre_age_and_floor_smear() {
     use spectral_forge::editor::curve::default_nodes_for_module_curve;
     use spectral_forge::dsp::modules::ModuleType;
 
-    // Age (curve 1): default y ≈ -0.334 → gain ≈ 0.5 (midpoint of [0, 1]).
-    let age = default_nodes_for_module_curve(ModuleType::Past, 1);
-    for n in &age {
-        assert!((n.y - (-0.334)).abs() < 1e-3, "Age default y should be ≈-0.334, got {}", n.y);
-    }
-
-    // Smear (curve 3): default y ≈ -0.334 → gain ≈ 0.5, exactly on the toggle
-    // boundary so positive offset turns smear on, negative turns it off.
-    let smear = default_nodes_for_module_curve(ModuleType::Past, 3);
-    for n in &smear {
-        assert!((n.y - (-0.334)).abs() < 1e-3, "Smear default y should be ≈-0.334, got {}", n.y);
-    }
-
-    // AMOUNT (curve 0), THRESHOLD (curve 2), MIX (curve 4) keep the legacy
-    // y=0 default — they're at-y_max calibrations where bidirectional offset
-    // isn't expected (or, for THRESHOLD, off_freeze_thresh handles both sides).
-    for c in [0, 2, 4] {
+    for c in 0..7 {
         let nodes = default_nodes_for_module_curve(ModuleType::Past, c);
         for n in &nodes {
-            assert_eq!(n.y, 0.0, "Past curve {c} should keep y=0 default");
+            assert_eq!(n.y, 0.0,
+                "Past curve {c} should default to neutral (y=0); got {}", n.y);
         }
     }
 
