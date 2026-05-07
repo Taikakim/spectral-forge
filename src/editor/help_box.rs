@@ -253,12 +253,13 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
     };
 
     let pad = th::scaled(th::HELP_BOX_PADDING, scale).round() as i8;
+    let inner_w = th::scaled(th::HELP_BOX_WIDTH, scale);
     Frame::new()
         .fill(th::HELP_BOX_BG)
         .stroke(Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::HELP_BOX_BORDER))
         .inner_margin(egui::Margin { left: pad, right: pad, top: pad, bottom: pad })
         .show(ui, |ui| {
-            ui.set_width(th::scaled(th::HELP_BOX_WIDTH, scale));
+            ui.set_width(inner_w);
             ui.add(
                 egui::Label::new(
                     RichText::new(head.as_ref())
@@ -268,16 +269,16 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
             );
             ui.add_space(4.0);
             // Body. Always rendered through a LayoutJob with explicit wrap
-            // width — `Label::wrap()` proved unreliable for these labels in
-            // the current nih_plug-egui (per-character wrapping in some
-            // cases). The LayoutJob path also lets us inline a yellow
-            // "Feedback" prefix for matrix feedback cells without a second
-            // widget.
+            // width — `Label::wrap()` and `ui.available_width()` both
+            // proved unreliable inside this Frame (parent UI width leaks
+            // through). Hard-coding the wrap target to the same value we
+            // gave to `set_width` (minus the symmetric inner margin) is
+            // the only reliable way to keep body text bounded.
             let body_font  = FontId::proportional(th::scaled(th::FONT_SIZE_HELP_BODY, scale));
             let body_color = th::HELP_BOX_BODY;
             let yellow     = egui::Color32::from_rgb(0xff, 0xc8, 0x40);
             let mut job = egui::text::LayoutJob::default();
-            job.wrap.max_width      = ui.available_width();
+            job.wrap.max_width      = (inner_w - 2.0 * pad as f32).max(40.0);
             job.wrap.break_anywhere = false;
             if let Some(prefix) = yellow_prefix {
                 job.append(

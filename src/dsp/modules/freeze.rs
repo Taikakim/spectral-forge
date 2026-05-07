@@ -171,11 +171,12 @@ impl SpectralModule for FreezeModule {
             // Range adjusted on 2026-05-07 (D-1b): the previous 0..1000 ms
             // ceiling at curve gain * 200 made even the neutral position
             // (200 ms) feel sluggish on percussive freezes. New mapping:
-            // neutral = 150 ms, ceiling = 750 ms — fast enough to feel
-            // instantaneous at v = 0, long enough at v = +1 to glide
-            // smoothly through chord changes.
+            // neutral = 150 ms, ceiling = 750 ms, floor = 1 ms (not 0:
+            // a true-zero portamento was rejected by the user — freezes
+            // need at least one hop of glide so the capture doesn't snap
+            // visibly).
             let port_ms   = (curves.get(2).and_then(|c| c.get(k)).copied().unwrap_or(1.0)
-                             * 150.0).clamp(0.0, 750.0);
+                             * 150.0).clamp(1.0, 750.0);
             let port_hops = (port_ms / hop_ms).max(0.5);
 
             // Resistance is a dimensionless relative-excess threshold (0–2).
