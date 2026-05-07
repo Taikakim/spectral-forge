@@ -138,6 +138,21 @@ pub fn open_popup(ui: &mut Ui, slot: usize, pos: Pos2) {
     ui.data_mut(|d| d.insert_temp(key, PopupState { open: true, slot, pos }));
 }
 
+/// Yields `(curve_index, kind, value)` triples for every transform FloatParam
+/// that needs to be reset on module switch. `kind` is "tilt" | "offset" |
+/// "curvature". Caller (editor_ui.rs) iterates these and writes each via
+/// `setter.set_parameter`. Mirrors the per-curve graph_node reset block.
+pub fn transform_reset_pairs(slot: usize) -> impl Iterator<Item = (usize, &'static str, f32)> {
+    let _ = slot;
+    (0..7).flat_map(|c| {
+        [
+            (c, "tilt", 0.0_f32),
+            (c, "offset", 0.0_f32),
+            (c, "curvature", 0.0_f32),
+        ]
+    })
+}
+
 /// Assign a module type to a slot: update slot_module_types, reset slot_curve_nodes, set name.
 fn assign_module(params: &SpectralForgeParams, slot: usize, ty: ModuleType) {
     params.slot_module_types.lock()[slot] = ty;

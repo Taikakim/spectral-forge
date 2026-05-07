@@ -1375,6 +1375,20 @@ pub fn create_editor(
                                 }
                             }
                         }
+                        // Reset tilt/offset/curvature FloatParam atomics so the slider UI matches.
+                        // assign_module reset the smoothers; the setter writes mirror the FloatParam
+                        // values through nih-plug's host-aware path so .value() also reads zero.
+                        for (c, kind, value) in crate::editor::module_popup::transform_reset_pairs(changed_slot) {
+                            let p = match kind {
+                                "tilt"      => params.tilt_param(changed_slot, c),
+                                "offset"    => params.offset_param(changed_slot, c),
+                                "curvature" => params.curvature_param(changed_slot, c),
+                                _ => None,
+                            };
+                            if let Some(fp) = p {
+                                setter.set_parameter(fp, value);
+                            }
+                        }
                         // Republish all 7 curves to curve_tx so DSP sees reset nodes immediately.
                         use crate::dsp::pipeline::MAX_NUM_BINS;
                         if let Some(slot_chs) = curve_tx.get(changed_slot) {
