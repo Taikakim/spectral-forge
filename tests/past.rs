@@ -349,13 +349,15 @@ fn set_past_mode_changes_dispatch() {
 
 #[test]
 fn past_threshold_at_neutral_gain_gates_by_dbfs_not_raw_magnitude() {
-    // At curve gain=1.0 (neutral), the new gate threshold is -20 dBFS = 0.1 linear.
-    // Under the OLD raw-magnitude gate, bins below mag 1.0 were all gated.
-    // Under the NEW gate, only bins below 0.1 (≈ -20 dBFS) are gated.
+    // At curve gain=1.0 (neutral), the gate threshold is -20 dBFS in calibrated
+    // dBFS terms. With fft_size=2048, the raw FFT bin scale is fft_size/4 = 512x
+    // larger than calibrated, so the gate's raw-bin threshold = 0.1 * 512 = 51.2.
     //
-    // Probe bin: mag ≈ 0.583 — passes the new gate, but would be gated under the old.
-    // We detect "gate ran" by checking that the granular kernel overwrites bins[50]
-    // with the history value (which has zero imaginary part).
+    // A bin with raw mag 0.583 maps to ≈ -64 dBFS calibrated → below the gate
+    // → kernel skipped → bin passes through unchanged (im stays at 0.3).
+    //
+    // A bin with raw mag 600 maps to ≈ +1.4 dBFS calibrated → above the gate
+    // → kernel runs → bin overwritten with history value (im → 0).
     use spectral_forge::dsp::history_buffer::HistoryBuffer;
     use spectral_forge::dsp::modules::past::{PastModule, PastMode};
     use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
@@ -367,6 +369,7 @@ fn past_threshold_at_neutral_gain_gates_by_dbfs_not_raw_magnitude() {
     for _ in 0..16 {
         let mut frame = vec![Complex::new(0.0, 0.0); n];
         frame[50] = Complex::new(0.5, 0.0); // pure real — distinguishable from input
+        frame[100] = Complex::new(500.0, 0.0); // history value for the loud bin
         h.write_hop(0, &frame);
         h.advance_after_all_channels_written();
     }
@@ -375,12 +378,12 @@ fn past_threshold_at_neutral_gain_gates_by_dbfs_not_raw_magnitude() {
     m.set_mode(PastMode::Granular);
 
     let mut bins = vec![Complex::new(0.0, 0.0); n];
-    bins[50]  = Complex::new(0.5, 0.3); // mag ≈ 0.583 → above -20 dBFS gate
-    bins[200] = Complex::new(0.01, 0.0); // mag 0.01 → -40 dBFS, below the gate
+    bins[50]  = Complex::new(0.5, 0.3);   // raw mag ≈ 0.583 → ≈ -64 dBFS calibrated → below gate
+    bins[100] = Complex::new(600.0, 0.3); // raw mag ≈ 600 → ≈ +1.4 dBFS calibrated → above gate
 
     let amount    = vec![1.0_f32; n];
     let time      = vec![0.0_f32; n]; // sample latest history frame
-    let threshold = vec![1.0_f32; n]; // curve neutral → -20 dBFS gate
+    let threshold = vec![1.0_f32; n]; // curve neutral → -20 dBFS gate (calibrated)
     let spread    = vec![0.0_f32; n];
     let mix       = vec![1.0_f32; n];
     let curves: Vec<&[f32]> = vec![&amount, &time, &threshold, &spread, &mix];
@@ -392,14 +395,11 @@ fn past_threshold_at_neutral_gain_gates_by_dbfs_not_raw_magnitude() {
     m.process(0, StereoLink::Linked, FxChannelTarget::All,
               &mut bins, None, &curves, &mut supp, None, &ctx);
 
-    // Under NEW dBFS gate: kernel ran and overwrote with history[50] = (0.5, 0.0).
-    // Under OLD raw-mag gate: kernel skipped (mag 0.583 < threshold 1.0), bin stays (0.5, 0.3).
-    // The im component changes from 0.3 to ≈ 0 only if the kernel ran.
-    assert!(bins[50].im.abs() < 1e-3,
-        "bin above -20 dBFS should be granular-replaced (im ≈ 0), got {:?}", bins[50]);
+    // bin 50: below the calibrated -20 dBFS gate → kernel skipped → input preserved.
+    assert!((bins[50].re - 0.5).abs() < 1e-4 && (bins[50].im - 0.3).abs() < 1e-4,
+        "bin below the -20 dBFS gate should pass through unchanged, got {:?}", bins[50]);
 
-    // Bin 200 was below the -20 dBFS gate; the kernel should hit `continue` before
-    // any write, so the bin must equal its input value exactly.
-    assert!((bins[200].re - 0.01).abs() < 1e-4 && bins[200].im.abs() < 1e-6,
-        "bin below gate should pass through unchanged, got {:?}", bins[200]);
+    // bin 100: above the gate → kernel ran → overwritten with history[100] = (500, 0).
+    assert!(bins[100].im.abs() < 1e-3,
+        "bin above the -20 dBFS gate should be granular-replaced (im ≈ 0), got {:?}", bins[100]);
 }

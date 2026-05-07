@@ -413,6 +413,10 @@ impl PastModule {
         let n = bins.len().min(ctx.num_bins);
         // TIME maps [0..1] to [0..capacity_frames] historic frames.
         let max_age = hist.capacity_frames() as f32;
+        // FFT bin magnitudes need the same fft_size/4 calibration the Freeze
+        // module uses so the threshold curve's dBFS values match what the user
+        // sees on the curve display.
+        let norm_factor = ctx.fft_size as f32 / 4.0;
         // BinPhysics crystallization (if present) biases AMOUNT toward 1.0 per-bin.
         let cryst = ctx.bin_physics.map(|p| &p.crystallization[..]);
         for k in 0..n {
@@ -421,7 +425,7 @@ impl PastModule {
             let effective_amount = (bin_amount + cryst_bias).clamp(0.0, 1.0);
             let mag_sq = bins[k].norm_sqr();
             let thr_gain = threshold.get(k).copied().unwrap_or(1.0);
-            let thr_lin  = curve_gain_to_threshold_lin(thr_gain);
+            let thr_lin  = curve_gain_to_threshold_lin(thr_gain) * norm_factor;
             if mag_sq < thr_lin * thr_lin { continue; }
             let age = (time.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0) * max_age).round() as usize;
             let frame = match hist.read_frame(ch, age) { Some(f) => f, None => continue };
@@ -439,9 +443,10 @@ impl PastModule {
 
     fn apply_decay_sorter(
         &mut self, ch: usize, bins: &mut [Complex<f32>], hist: &HistoryBuffer,
-        amount: &[f32], threshold: &[f32], mix: &[f32], _ctx: &ModuleContext<'_>,
+        amount: &[f32], threshold: &[f32], mix: &[f32], ctx: &ModuleContext<'_>,
     ) {
         let n = bins.len();
+        let norm_factor = ctx.fft_size as f32 / 4.0;
         // Pipeline converts Hz → bin index (per-slot Floor param). Default ≈ 230 Hz
         // at fft 2048 / 48 kHz → bin 10. Clamped to [1, num_bins - MAX_SORT_BINS] in Pipeline.
         let low_k = self.scalars.floor_bin.min(n.saturating_sub(1));
@@ -452,7 +457,7 @@ impl PastModule {
         for k in 0..n {
             let mag_sq = bins[k].norm_sqr();
             let thr_gain = threshold.get(k).copied().unwrap_or(1.0);
-            let thr_lin  = curve_gain_to_threshold_lin(thr_gain);
+            let thr_lin  = curve_gain_to_threshold_lin(thr_gain) * norm_factor;
             if mag_sq < thr_lin * thr_lin { continue; }
             if candidates.len() < MAX_SORT_BINS {
                 candidates.push((k as u32, mag_sq));
@@ -514,11 +519,12 @@ impl PastModule {
     ) {
         let n = bins.len().min(ctx.num_bins);
         let max_age = hist.capacity_frames() as f32;
+        let norm_factor = ctx.fft_size as f32 / 4.0;
         let flux = ctx.bin_physics.map(|p| &p.flux[..]);
         for k in 0..n {
             let mag_sq = bins[k].norm_sqr();
             let thr_gain = threshold.get(k).copied().unwrap_or(1.0);
-            let thr_lin  = curve_gain_to_threshold_lin(thr_gain);
+            let thr_lin  = curve_gain_to_threshold_lin(thr_gain) * norm_factor;
             if mag_sq < thr_lin * thr_lin { continue; }
             let flux_gate = flux.and_then(|f| f.get(k).copied()).unwrap_or(1.0).clamp(0.0, 1.0);
             let bin_amount = amount.get(k).copied().unwrap_or(0.0) * flux_gate;
@@ -539,6 +545,7 @@ impl PastModule {
     ) {
         let n = bins.len().min(ctx.num_bins);
         let window = self.scalars.window_frames.max(1);
+        let norm_factor = ctx.fft_size as f32 / 4.0;
 
         let st = &mut self.channels[ch];
         let age = (st.reverse_read_offset % window) as usize;
@@ -550,7 +557,7 @@ impl PastModule {
         for k in 0..n {
             let mag_sq = bins[k].norm_sqr();
             let thr_gain = threshold.get(k).copied().unwrap_or(1.0);
-            let thr_lin  = curve_gain_to_threshold_lin(thr_gain);
+            let thr_lin  = curve_gain_to_threshold_lin(thr_gain) * norm_factor;
             if mag_sq < thr_lin * thr_lin { continue; }
             if k >= frame.len() { continue; }
             let bin_amount = amount.get(k).copied().unwrap_or(0.0).clamp(0.0, 1.0);
