@@ -638,6 +638,12 @@ pub fn gain_to_display(
     total_history_seconds: f32,
 ) -> f32 {
     // UI parameter contract: see docs/superpowers/specs/2026-04-23-ui-parameter-spec-design.md
+    //
+    // The upper clamps were removed (D-2 follow-up): values above the curve's
+    // y_max produce display values above the y_max grid line so the response
+    // curve can flow into the HEADROOM_PX strip when offset/tilt push it
+    // there. Floor clamps stay so below-axis values still pin to the bottom
+    // edge (no negative dB / negative %).
     match curve_idx {
         0 => {
             // Piecewise slopes anchored to (db_min, -20, db_max): WYSIWYG for any db range.
@@ -646,17 +652,17 @@ pub fn gain_to_display(
             let slope_neg = (-20.0 - db_min) / 18.0;
             let slope_pos = (db_max - (-20.0)) / 18.0;
             let v = if t_db <= 0.0 { -20.0 + slope_neg * t_db } else { -20.0 + slope_pos * t_db };
-            v.clamp(db_min, db_max)
+            v.max(db_min)
         }
-        1 => gain.clamp(1.0, 20.0),
-        2 => (global_attack_ms  * gain.max(0.0)).clamp(1.0, 1024.0),
-        3 => (global_release_ms * gain.max(0.0)).clamp(1.0, 1024.0),
-        4 => (gain * 6.0).clamp(0.0, 48.0),
+        1 => gain.max(1.0),
+        2 => (global_attack_ms  * gain.max(0.0)).max(1.0),
+        3 => (global_release_ms * gain.max(0.0)).max(1.0),
+        4 => (gain * 6.0).max(0.0),
         5 | 12 => if gain > 1e-6 { 20.0 * gain.log10() } else { -60.0 },
-        6 => (gain * 100.0).clamp(0.0, 100.0),
+        6 => (gain * 100.0).max(0.0),
         // Effects curves — tilt/offset not used (passed as 0.0/0.0 from UI)
-        7 => gain.clamp(0.0, 2.0) * 100.0,                  // Phase Amount: 0-200%
-        8 => (gain * 500.0).clamp(0.0, 4000.0),             // Freeze Length: 0-4000ms (neutral=500ms)
+        7 => gain.max(0.0) * 100.0,                          // Phase Amount: 0-200% (top unbounded for headroom)
+        8 => (gain * 500.0).max(0.0),                        // Freeze Length: ms (top unbounded for headroom)
         9 => {                                               // Freeze/Past Threshold: dBFS
             // Same piecewise-anchored formula as idx=0; anchors (db_min, -20, db_max).
             // In production db_min=-160 → matches freeze.rs curve_to_threshold_db.
@@ -664,11 +670,11 @@ pub fn gain_to_display(
             let slope_neg = (-20.0 - db_min) / 18.0;
             let slope_pos = (db_max - (-20.0)) / 18.0;
             let v = if t_db <= 0.0 { -20.0 + slope_neg * t_db } else { -20.0 + slope_pos * t_db };
-            v.clamp(db_min, db_max)
+            v.max(db_min)
         }
-        10 => (gain * 200.0).clamp(0.0, 1000.0),            // Portamento/SC Smooth: 0-1000ms (neutral=200ms)
-        11 => gain.clamp(0.0, 2.0),                          // Resistance: 0-2 (normalised excess)
-        13 => (gain * total_history_seconds).clamp(0.0, total_history_seconds),
+        10 => (gain * 200.0).max(0.0),                       // Portamento/SC Smooth: ms (top unbounded for headroom)
+        11 => gain.max(0.0),                                  // Resistance: 0-2 (top unbounded for headroom)
+        13 => (gain * total_history_seconds).max(0.0),
         // PEAK HOLD ms — matches the DSP-side `peak_hold_curve_to_ms` helper
         // (log-piecewise: gain 0→1 ms, 1→50 ms, 2→500 ms). Used by
         // PhaseSmear PEAK HOLD and Gain PEAK HOLD; replaces the prior

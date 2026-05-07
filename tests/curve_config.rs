@@ -79,17 +79,19 @@ fn off_amount_norm_clamps_and_passes_zero() {
 #[test]
 fn gain_to_display_index_13_returns_history_relative_seconds() {
     use spectral_forge::editor::curve::gain_to_display;
-    // gain * total_history_seconds, clamped to [0, total]
+    // gain * total_history_seconds. Floor clamped at 0; ceiling unbounded
+    // post-D-2 so curves can flow into the headroom strip when offset/tilt
+    // pushes them above y_max.
     let v = gain_to_display(13, 0.5, 0.0, 0.0, 0.0, 0.0, /* total */ 4.0);
     assert!((v - 2.0).abs() < 1e-6, "expected 2.0, got {v}");
     let v = gain_to_display(13, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0);
     assert_eq!(v, 0.0);
     let v = gain_to_display(13, 1.0, 0.0, 0.0, 0.0, 0.0, 4.0);
     assert!((v - 4.0).abs() < 1e-6);
-    // Clamp above total
+    // Above total: now allowed to overshoot for headroom rendering.
     let v = gain_to_display(13, 2.0, 0.0, 0.0, 0.0, 0.0, 4.0);
-    assert_eq!(v, 4.0);
-    // Clamp below zero
+    assert!((v - 8.0).abs() < 1e-6);
+    // Floor still clamped below zero.
     let v = gain_to_display(13, -1.0, 0.0, 0.0, 0.0, 0.0, 4.0);
     assert_eq!(v, 0.0);
 }
