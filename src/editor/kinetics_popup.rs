@@ -95,6 +95,7 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
                     let selected = current_mode == mode;
                     let resp = ui.selectable_label(selected, label)
                         .on_hover_text(hint);
+                    crate::editor::help_box::track_help_strings(ui, &resp, label, hint);
                     if resp.clicked() && !selected {
                         params.slot_kinetics_mode.lock()[slot] = mode;
                         // Do NOT close: user may also want to set the sub-source

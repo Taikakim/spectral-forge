@@ -123,21 +123,30 @@ pub fn default_nodes_for_module_curve(
 ) -> [CurveNode; 6] {
     use crate::dsp::modules::ModuleType;
 
-    // PAST Age (curve 1) and Smear (curve 3) get truly neutral defaults so the
-    // displayed curve is a flat horizontal line at gain=1.0 (matching every
-    // other module's flat default). Bells at y=0 short-circuit to a 1.0
-    // multiplier so the curve is straight; the offset slider modulates from
-    // there exactly like other curves. (`default_nodes_for_curve(1)` would
-    // route through the RATIO fallback and produce a non-flat baseline.)
+    // The legacy `default_nodes_for_curve(curve_idx)` fallback returns RATIO-
+    // specific defaults for curve_idx == 1 (Dynamics' 1:2 high-shelf preset).
+    // For every OTHER module that happens to have a curve at index 1 — Mid-Side
+    // EXPANSION, Future TIME, Punch WIDTH, Rhythm DIVISION, Geometry MODE_CAP,
+    // Kinetics MASS, Harmony THRESHOLD, etc. — those RATIO defaults add a
+    // hidden ~2× boost to the baseline curve gain via the y=0.334 high shelf
+    // at 20 Hz, which is what was producing the "graph parks at 200% / slider
+    // shows 100%" desync ("100% offset bug"). Routing every non-Dynamics
+    // module through the flat `default_nodes()` keeps the baseline at gain=1.0
+    // so the displayed curve sits at the curve's natural value.
     //
-    // Earlier code used `flat_at_y(-0.334)` here to seed a centred 50% display
-    // for an "equal headroom" intent, but bells are bandwidth-limited and
-    // don't sum to a flat non-neutral curve — the result was a comb of bumps.
-    // The non-neutral baseline can't be expressed in the current bell+shelf
-    // math; the right fix would be a global-gain parameter, not per-bell offsets.
-    match (module_type, curve_idx) {
-        (ModuleType::Past, 1) | (ModuleType::Past, 3) => default_nodes(),
-        _ => default_nodes_for_curve(curve_idx),
+    // PAST Age (curve 1) and Smear (curve 3) had this fix already; the special
+    // case below is now subsumed by the general "Dynamics-only RATIO" rule.
+    //
+    // Earlier code used `flat_at_y(-0.334)` for some cases to seed a centred
+    // 50% display for an "equal headroom" intent, but bells are bandwidth-
+    // limited and don't sum to a flat non-neutral curve — the result was a
+    // comb of bumps. The non-neutral baseline can't be expressed in the
+    // current bell+shelf math; the right fix would be a global-gain
+    // parameter, not per-bell offsets.
+    if module_type == ModuleType::Dynamics {
+        default_nodes_for_curve(curve_idx)
+    } else {
+        default_nodes()
     }
 }
 

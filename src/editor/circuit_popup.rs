@@ -81,6 +81,7 @@ pub fn show_popup(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) -> bool
                     let selected = current == mode;
                     let resp = ui.selectable_label(selected, label)
                         .on_hover_text(hint);
+                    crate::editor::help_box::track_help_strings(ui, &resp, label, hint);
                     if resp.clicked() && !selected {
                         params.slot_circuit_mode.lock()[slot] = mode;
                         new_state.open = false;
