@@ -272,6 +272,11 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
                 let body_color = th::HELP_BOX_BODY;
                 let yellow     = egui::Color32::from_rgb(0xff, 0xc8, 0x40);
                 let mut job = egui::text::LayoutJob::default();
+                // Set the wrap width on the LayoutJob itself; Label::wrap()
+                // doesn't override the inner job's wrap config, so without
+                // this the layout breaks at every character.
+                job.wrap.max_width      = ui.available_width();
+                job.wrap.break_anywhere = false;
                 job.append(
                     &format!("{} ", prefix),
                     0.0,
@@ -290,7 +295,7 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
                         ..Default::default()
                     },
                 );
-                ui.add(egui::Label::new(job).wrap());
+                ui.add(egui::Label::new(job));
             } else {
                 ui.add(
                     egui::Label::new(
