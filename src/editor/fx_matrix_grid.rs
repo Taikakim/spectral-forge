@@ -20,6 +20,50 @@ pub fn slot_name_str(bytes: &[u8; 32]) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
+/// Format `Slot N: Module` for one matrix endpoint, falling back to "Master"
+/// for the master slot and the user-set slot name when present.
+fn endpoint_label(slot_idx: usize, ty: ModuleType, slot_name: &[u8; 32]) -> String {
+    if slot_idx == 8 {
+        return "Master".to_string();
+    }
+    let custom = slot_name_str(slot_name);
+    let module = if ty == ModuleType::Empty { "Empty" } else { module_spec(ty).display_name };
+    if custom.is_empty() {
+        format!("Slot {}: {}", slot_idx + 1, module)
+    } else {
+        format!("Slot {}: {} ({})", slot_idx + 1, module, custom)
+    }
+}
+
+/// Build the dynamic help-box body for a routing-matrix send cell.
+fn build_cell_help_body(
+    row:           usize,
+    col:           usize,
+    src_ty:        ModuleType,
+    dst_ty:        ModuleType,
+    src_name:      &[u8; 32],
+    dst_name:      &[u8; 32],
+    amp_mode:      AmpMode,
+    is_feedback:   bool,
+    disconnected:  bool,
+) -> String {
+    let mut body = String::new();
+    body.push_str("Routing matrix send. Drag to set the amplitude (0 = off, 1 = unity, up to 2). Right-click for the amp filter popup.\n\n");
+    body.push_str(amp_mode.hint());
+    body.push_str("\n\nFlow: ");
+    body.push_str(&endpoint_label(row, src_ty, src_name));
+    body.push_str(" \u{2192} ");
+    body.push_str(&endpoint_label(col, dst_ty, dst_name));
+    if is_feedback {
+        body.push_str("\n\nFeedback routing (output of a later slot feeds an earlier one). Negative gain.");
+    }
+    if disconnected {
+        body.push_str("\n\nDisconnected — one endpoint is Empty, so no audio flows through this send.");
+    }
+    let _ = (row, col);
+    body
+}
+
 /// Paint the 9×9 routing matrix grid, with optional virtual half-height rows for T/S Split slots.
 ///
 /// Returns `MatrixInteraction` describing any clicks this frame.
@@ -225,9 +269,18 @@ pub fn paint_fx_matrix_grid(
                             // happen for valid in-range cells).
                             let p = params.matrix_cell(col, row);
                             let mut send_val: f32 = p.map(|fp| fp.value()).unwrap_or(0.0);
+                            // Disconnected cell: configured send level but one side
+                            // missing. Render the DragValue with dimmed text so the
+                            // user can see at a glance that the send isn't audible.
+                            let active = send_val >= 0.005;
+                            let disconnected = active && (src_ty == ModuleType::Empty || dst_ty == ModuleType::Empty);
                             let inner = ui.allocate_new_ui(
                                 UiBuilder::new().max_rect(cell_rect.shrink(3.0)),
                                 |ui| {
+                                    if disconnected {
+                                        let v = &mut ui.style_mut().visuals;
+                                        v.override_text_color = Some(th::LABEL_DIM);
+                                    }
                                     let resp = ui.add(
                                         egui::DragValue::new(&mut send_val)
                                             .range(0.0..=2.0)
@@ -260,11 +313,21 @@ pub fn paint_fx_matrix_grid(
                                 format!("Slot {} \u{2192} Slot {} send", row + 1, col + 1));
                             // Amp-mode indicator dot (top-right corner) when non-Linear.
                             let amp_mode = route_matrix.amp_mode[row][col];
-                            // Hover help: show the current amp mode's description so
-                            // matrix filter types are discoverable from the cell, not
-                            // just inside the right-click popup.
+                            // Build a dynamic help body for this cell so the user
+                            // sees the active filter's description plus the from/to
+                            // module names — and a "Negative gain" note for feedback
+                            // routings (col > row, output of a later slot feeding an
+                            // earlier slot). Disconnected sends call this out too.
+                            let head = format!(
+                                "Slot {} \u{2192} Slot {}  ({})",
+                                row + 1, col + 1, amp_mode.label(),
+                            );
+                            let body = build_cell_help_body(
+                                row, col, src_ty, dst_ty, &slot_names[row], &slot_names[col],
+                                amp_mode, is_feedback, disconnected,
+                            );
                             crate::editor::help_box::track_help_strings(
-                                ui, &inner.inner, amp_mode.label(), amp_mode.hint(),
+                                ui, &inner.inner, head.clone(), body.clone(),
                             );
                             if amp_mode != AmpMode::Linear {
                                 let dot_pos = egui::pos2(cell_rect.right() - 4.0, cell_rect.top() + 4.0);
@@ -281,10 +344,9 @@ pub fn paint_fx_matrix_grid(
                                 egui::Sense::click(),
                             );
                             // Hovering anywhere on the cell (including the corner
-                            // dot, outside the inner DragValue) shows the active
-                            // amp filter's help.
+                            // dot, outside the inner DragValue) shows the same help.
                             crate::editor::help_box::track_help_strings(
-                                ui, &amp_resp, amp_mode.label(), amp_mode.hint(),
+                                ui, &amp_resp, head, body,
                             );
                             if amp_resp.secondary_clicked() {
                                 let p = amp_resp.interact_pointer_pos().unwrap_or(cell_rect.center());
@@ -386,8 +448,28 @@ pub fn paint_fx_matrix_grid(
                         crate::editor::delayed_tooltip(ui, &vinner.inner,
                             format!("{} \u{2192} Slot {} send", vrow_label, col + 1));
                         let amp_mode = route_matrix.amp_mode[*vrow_src][col];
+                        let dst_ty   = module_types[col];
+                        let stream   = match kind {
+                            VirtualRowKind::Transient => "transient stream",
+                            VirtualRowKind::Sustained => "sustained stream",
+                        };
+                        let head = format!(
+                            "{} \u{2192} Slot {}  ({})",
+                            vrow_label, col + 1, amp_mode.label(),
+                        );
+                        let mut body = String::new();
+                        body.push_str("T/S Split virtual row. Drag to set send amplitude for the ");
+                        body.push_str(stream);
+                        body.push_str(" feeding this slot. Right-click for the amp filter popup.\n\n");
+                        body.push_str(amp_mode.hint());
+                        body.push_str("\n\nFlow: ");
+                        body.push_str(&endpoint_label(*parent_slot, ModuleType::TransientSustainedSplit, &slot_names[*parent_slot]));
+                        body.push_str(" (");
+                        body.push_str(stream);
+                        body.push_str(") \u{2192} ");
+                        body.push_str(&endpoint_label(col, dst_ty, &slot_names[col]));
                         crate::editor::help_box::track_help_strings(
-                            ui, &vinner.inner, amp_mode.label(), amp_mode.hint(),
+                            ui, &vinner.inner, head.clone(), body.clone(),
                         );
                         if amp_mode != AmpMode::Linear {
                             let dot_pos = egui::pos2(cell_rect.right() - 4.0, cell_rect.top() + 3.0);
@@ -403,7 +485,7 @@ pub fn paint_fx_matrix_grid(
                             egui::Sense::click(),
                         );
                         crate::editor::help_box::track_help_strings(
-                            ui, &amp_resp, amp_mode.label(), amp_mode.hint(),
+                            ui, &amp_resp, head, body,
                         );
                         if amp_resp.secondary_clicked() {
                             let p = amp_resp.interact_pointer_pos().unwrap_or(cell_rect.center());

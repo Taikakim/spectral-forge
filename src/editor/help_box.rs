@@ -126,12 +126,14 @@ const HELP_TOPIC_KEY: &str = "spectral_forge::help_topic";
 fn topic_id() -> egui::Id { egui::Id::new(HELP_TOPIC_KEY) }
 
 /// Per-frame help focus claim.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HelpFocus {
     /// Lookup by enum (static head + body via topic_head / topic_help_text).
     Topic(HelpTopic),
-    /// Free-form head and body, e.g. for per-mode hints whose text varies.
-    Custom { head: &'static str, body: &'static str },
+    /// Free-form head and body. Owned `String` so the same code path serves
+    /// both static literals (cheap `to_string()`) and per-frame dynamic text
+    /// (e.g. matrix cell `Slot 1: Punch → Slot 5: Freeze` summaries).
+    Custom { head: String, body: String },
 }
 
 /// Track that `response` is being hovered/dragged/focused. If so, claim the
@@ -141,21 +143,35 @@ pub fn track_help(ui: &egui::Ui, response: &egui::Response, topic: HelpTopic) {
     set_focus_if_active(ui, response, HelpFocus::Topic(topic));
 }
 
-/// Track free-form help text for `response`. Use when no fixed `HelpTopic`
-/// fits — typically per-mode buttons whose head/body change per item.
+/// Track free-form help text for `response`. Accepts anything `Into<String>`
+/// so static literals and dynamic `format!(...)` summaries share the path.
 pub fn track_help_strings(
     ui: &egui::Ui,
     response: &egui::Response,
-    head: &'static str,
-    body: &'static str,
+    head: impl Into<String>,
+    body: impl Into<String>,
 ) {
-    set_focus_if_active(ui, response, HelpFocus::Custom { head, body });
+    if response.hovered() || response.dragged() || response.has_focus() {
+        let focus = HelpFocus::Custom { head: head.into(), body: body.into() };
+        ui.ctx().data_mut(|d| d.insert_temp::<Option<HelpFocus>>(topic_id(), Some(focus)));
+    }
 }
 
 fn set_focus_if_active(ui: &egui::Ui, response: &egui::Response, focus: HelpFocus) {
     if response.hovered() || response.dragged() || response.has_focus() {
         ui.ctx().data_mut(|d| d.insert_temp::<Option<HelpFocus>>(topic_id(), Some(focus)));
     }
+}
+
+/// Resolve per-curve help for any module/mode/curve triple. Used by widgets
+/// that want to preview a curve's help while the user is browsing curve
+/// tabs or other module-aware controls.
+pub fn curve_help_text(ty: ModuleType, mode_byte: u8, curve_idx: usize) -> &'static str {
+    let s = multi_mode_curve_help(ty, mode_byte, curve_idx);
+    if !s.is_empty() {
+        return s;
+    }
+    single_mode_curve_help(ty, curve_idx)
 }
 
 /// Clear the per-frame help focus. Call once at the very top of the editor
@@ -185,16 +201,17 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
     let help_on = params.help_enabled.value();
     let focus   = current_focus(ui.ctx());
 
-    let (head, body): (&str, Cow<'static, str>) = if !help_on {
-        ("Help (off)", Cow::Borrowed("Toggle the HELP button in the top bar to bring help back."))
+    let (head, body): (Cow<'static, str>, Cow<'static, str>) = if !help_on {
+        (Cow::Borrowed("Help (off)"),
+         Cow::Borrowed("Toggle the HELP button in the top bar to bring help back."))
     } else {
         match focus {
             Some(HelpFocus::Topic(t)) =>
-                (topic_head(t), Cow::Borrowed(topic_help_text(t))),
+                (Cow::Borrowed(topic_head(t)), Cow::Borrowed(topic_help_text(t))),
             Some(HelpFocus::Custom { head, body }) =>
-                (head, Cow::Borrowed(body)),
+                (Cow::Owned(head), Cow::Owned(body)),
             None => {
-                let h = spec.display_name;
+                let h = Cow::Borrowed(spec.display_name);
                 let b = body_text(layout.as_ref(), mode_byte, editing_type, editing_curve, spec.curve_labels);
                 (h, b)
             }
@@ -210,7 +227,7 @@ pub fn draw(ui: &mut Ui, params: &SpectralForgeParams, scale: f32) {
             ui.set_width(th::scaled(th::HELP_BOX_WIDTH, scale));
             ui.add(
                 egui::Label::new(
-                    RichText::new(head)
+                    RichText::new(head.as_ref())
                         .color(th::HELP_BOX_HEAD)
                         .font(FontId::proportional(th::scaled(th::FONT_SIZE_HELP_HEAD, scale))),
                 ).wrap(),

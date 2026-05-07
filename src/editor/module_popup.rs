@@ -89,6 +89,9 @@ pub fn show_popup(
                             );
                             ui.painter().rect_filled(rect, 2.0, spec.color_lit);
                             let resp = ui.button(spec.display_name);
+                            crate::editor::help_box::track_help_strings(
+                                ui, &resp, spec.display_name, module_browse_help(ty),
+                            );
                             if resp.clicked() {
                                 assign_module(params, slot, ty);
                                 new_state.open = false;
@@ -106,7 +109,12 @@ pub fn show_popup(
                 }
 
                 ui.separator();
-                if ui.button("Remove module").clicked() {
+                let remove_resp = ui.button("Remove module");
+                crate::editor::help_box::track_help_strings(
+                    ui, &remove_resp, "Remove module",
+                    "Set this slot to Empty. Curves and transforms reset, the slot's audio passes through unchanged, and any sends from/to it stop carrying signal.",
+                );
+                if remove_resp.clicked() {
                     assign_module(params, slot, ModuleType::Empty);
                     new_state.open = false;
                     assigned_slot = Some(slot);
@@ -211,5 +219,33 @@ fn assign_module(params: &SpectralForgeParams, slot: usize, ty: ModuleType) {
     let mut ec = params.editing_curve.lock();
     if (*ec as usize) >= num_c && num_c > 0 {
         *ec = 0;
+    }
+}
+
+/// One-paragraph "what does this module do" help shown when the user is
+/// browsing the module-selector popup. Intentionally short — once a module
+/// is assigned, the help-box's per-curve text takes over.
+fn module_browse_help(ty: ModuleType) -> &'static str {
+    match ty {
+        ModuleType::Dynamics                => "Dynamics — per-bin compressor/expander. Each FFT bin has its own threshold, ratio, attack, release, and knee, all curve-driven. Sidechain: yes.",
+        ModuleType::Freeze                  => "Freeze — capture a moment of the spectrum and hold it. Per-bin length, threshold, portamento, resistance. Sidechain: yes.",
+        ModuleType::PhaseSmear              => "Phase Smear — per-bin phase randomization. Dissolves transients into smear; turns percussion into pads. Sidechain: yes.",
+        ModuleType::Contrast                => "Contrast — sharpens spectral peaks and deepens valleys via per-bin upward expansion / downward compression. Sidechain: no.",
+        ModuleType::Gain                    => "Gain — per-bin spectral gain shaping. Add / Subtract / Pull / Match modes change how the GAIN curve is applied. Sidechain: yes (Pull/Match).",
+        ModuleType::MidSide                 => "Mid/Side — per-bin balance, expansion, decorrelation, transient steering, and pan. Sidechain: no.",
+        ModuleType::TransientSustainedSplit => "T/S Split — splits the slot's input into transient and sustained streams that feed virtual rows in the routing matrix. Max 2 active. Sidechain: no.",
+        ModuleType::Harmonic                => "Harmonic — pass-through that computes harmonic-grouping data for downstream Harmony slots. No curves. Sidechain: no.",
+        ModuleType::Future                  => "Future — print-through and pre-echo from spectral history. Curve-driven leak/echo amplitudes. Sidechain: no.",
+        ModuleType::Punch                   => "Punch — sidechain-driven spectral carving with neighbour fill. Direct mode carves at SC peaks; Inverse at troughs. Sidechain: yes (required).",
+        ModuleType::Rhythm                  => "Rhythm — host-tempo-locked spectral gating. Euclidean / Arpeggiator / Phase Reset modes. Sidechain: no.",
+        ModuleType::Geometry                => "Geometry — physical-resonator carving. Chladni nodal lines or a Helmholtz cavity. Sidechain: no.",
+        ModuleType::Modulate                => "Modulate — bin modulators. Phase Phaser, Bin Swapper, RM/FM, Diode RM, Ground Loop, Gravity, PLL Tear, FM Network. Sidechain: yes (RM/FM, Diode RM, etc.).",
+        ModuleType::Circuit                 => "Circuit — analog-component-modelled per-bin nonlinearities. Vactrol, Schmitt, BBD, transformer, sag, drift, crosstalk, slew, bias fuzz, crossover. Sidechain: no.",
+        ModuleType::Life                    => "Life — physics-of-matter spectral effects. Viscosity, surface tension, crystallization, Archimedes' principle, non-Newtonian fluid, stiction, yield, capillary, sandpaper, Brownian motion. Sidechain: no.",
+        ModuleType::Past                    => "Past — read-only access to a rolling spectral history buffer. Granular freeze, decay-sorter, convolution, reverse, stretch. Sidechain: no.",
+        ModuleType::Kinetics                => "Kinetics — physical motion models. Hooke springs, gravity wells, inertial mass, orbital phase, ferromagnetism, thermal expansion, tuning fork, diamagnetism. Sidechain: yes (Gravity Well, Inertial Mass with SC source).",
+        ModuleType::Harmony                 => "Harmony — pitch-class and partial restructuring. Chordification, undertone, companding, formant rotation, lifter, inharmonic, harmonic generator, shuffler. Sidechain: no.",
+        ModuleType::Empty                   => "Empty — no module assigned. The slot passes through unchanged.",
+        ModuleType::Master                  => "Master — output sum stage; cannot be reassigned.",
     }
 }

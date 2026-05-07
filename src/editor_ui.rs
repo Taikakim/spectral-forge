@@ -181,7 +181,34 @@ pub fn create_editor(
                                 egui::Sense::click()
                             };
                             let resp = ui.add(btn.sense(sense));
-                            track_help(ui, &resp, HelpTopic::CurveTab);
+                            // Hovering a curve-tab button previews that curve's
+                            // help text in the help-box (resolves through the
+                            // multi-mode + single-mode help tables). When the
+                            // tables don't have an entry, fall back to the
+                            // generic CurveTab topic.
+                            let mode_byte_for_help: u8 = match editing_type {
+                                crate::dsp::modules::ModuleType::Past     => params.slot_past_mode.lock()[editing_slot]     as u8,
+                                crate::dsp::modules::ModuleType::Future   => params.slot_future_mode.lock()[editing_slot]   as u8,
+                                crate::dsp::modules::ModuleType::Circuit  => params.slot_circuit_mode.lock()[editing_slot]  as u8,
+                                crate::dsp::modules::ModuleType::Life     => params.slot_life_mode.lock()[editing_slot]     as u8,
+                                crate::dsp::modules::ModuleType::Modulate => params.slot_modulate_mode.lock()[editing_slot] as u8,
+                                crate::dsp::modules::ModuleType::Rhythm   => params.slot_rhythm_mode.lock()[editing_slot]   as u8,
+                                crate::dsp::modules::ModuleType::Punch    => params.slot_punch_mode.lock()[editing_slot]    as u8,
+                                crate::dsp::modules::ModuleType::Harmony  => params.slot_harmony_mode.lock()[editing_slot]  as u8,
+                                crate::dsp::modules::ModuleType::Geometry => params.slot_geometry_mode.lock()[editing_slot] as u8,
+                                crate::dsp::modules::ModuleType::Kinetics => params.slot_kinetics_mode.lock()[editing_slot] as u8,
+                                _ => 0,
+                            };
+                            let preview = crate::editor::help_box::curve_help_text(
+                                editing_type, mode_byte_for_help, i,
+                            );
+                            if !preview.is_empty() {
+                                crate::editor::help_box::track_help_strings(
+                                    ui, &resp, label.to_string(), preview.to_string(),
+                                );
+                            } else {
+                                track_help(ui, &resp, HelpTopic::CurveTab);
+                            }
                             if !gain_disabled && resp.clicked() {
                                 *params.editing_curve.lock() = i as u8;
                             }
