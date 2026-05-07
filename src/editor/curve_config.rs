@@ -25,6 +25,11 @@ pub struct CurveDisplayConfig {
     /// is zero-cost and safe to call on the audio thread.
     /// Contract: offset_fn(g, 0.0) == g for all g.
     pub offset_fn:  fn(f32, f32, (f32, f32, f32)) -> f32,
+    /// True when `y_natural == y_max` — i.e. the curve's neutral value is already at the top
+    /// of the display range. The offset FloatParam for such curves defaults to `+1.0` so the
+    /// user loads at `y_max` (e.g. 100% wet for MIX) and slides down toward `y_min`.
+    /// The slider mechanism stays universal `−1..+1`.
+    pub natural_at_max: bool,
     // NOTE: gain_to_phys is intentionally absent — unit conversion requires context
     // (db_min/db_max, global_attack_ms etc.) that a bare fn(f32)->f32 cannot carry.
     // Conversion logic lives in gain_to_display() / screen_y_to_physical() in curve.rs.
@@ -73,6 +78,7 @@ fn dynamics_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(-20.0, "-20"), (-60.0, "-60"), (-100.0, "-100"), (-140.0, "-140")],
             y_natural: -20.0,
             offset_fn: off_thresh,
+            natural_at_max: false,
         },
         1 => CurveDisplayConfig {
             y_label: "ratio", y_min: 1.0, y_max: 20.0, y_log: true,
@@ -80,6 +86,7 @@ fn dynamics_config(i: usize) -> CurveDisplayConfig {
             // gain=1.0 → ratio 1:1 (no compression); off=+1 → g=20.0 → ratio 20:1
             y_natural: 1.0,
             offset_fn: off_ratio,
+            natural_at_max: false,
         },
         2 | 3 => CurveDisplayConfig {
             y_label: "ms", y_min: 1.0, y_max: 1024.0, y_log: true,
@@ -88,6 +95,7 @@ fn dynamics_config(i: usize) -> CurveDisplayConfig {
             // Geometric lerp (off_atk_rel uses runtime y_natural, see curve_config.rs).
             y_natural: 1.0,
             offset_fn: off_atk_rel,
+            natural_at_max: false,
         },
         4 => CurveDisplayConfig {
             y_label: "dB", y_min: 0.0, y_max: 48.0, y_log: false,
@@ -95,6 +103,7 @@ fn dynamics_config(i: usize) -> CurveDisplayConfig {
             // gain=1.0 → 6 dB knee; off=+1 → g=8.0 → 48 dB; off=-1 → g=0.0 → 0 dB
             y_natural: 6.0,
             offset_fn: off_knee,
+            natural_at_max: false,
         },
         5 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
@@ -102,6 +111,7 @@ fn dynamics_config(i: usize) -> CurveDisplayConfig {
             // gain=1.0 → 100% wet (already at y_max); off=-1 → g=0.0 → 0%
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -117,6 +127,7 @@ fn freeze_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(10.0, "10ms"), (100.0, "100ms"), (1000.0, "1s"), (4000.0, "4s")],
             y_natural: 500.0,
             offset_fn: off_freeze_length,
+            natural_at_max: false,
         },
         // THRESHOLD: same formula as dynamics threshold (off_thresh/off_freeze_thresh are identical)
         1 => CurveDisplayConfig {
@@ -124,6 +135,7 @@ fn freeze_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(-20.0, "-20"), (-60.0, "-60"), (-100.0, "-100"), (-140.0, "-140")],
             y_natural: -20.0,
             offset_fn: off_freeze_thresh,
+            natural_at_max: false,
         },
         // PORTAMENTO: gain=1.0 → 200 ms; multiplicative with factor = 1000/200 = 5.0
         // y_min matches off_portamento(1.0, -1.0) * 200 = 40 ms
@@ -132,6 +144,7 @@ fn freeze_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(40.0, "40ms"), (100.0, "100ms"), (500.0, "500ms"), (1000.0, "1s")],
             y_natural: 200.0,
             offset_fn: off_portamento,
+            natural_at_max: false,
         },
         // RESISTANCE: gain=1.0 → 1.0 (dimensionless); linear 0–2; additive, pos_span=1.0, neg_span=1.0
         3 => CurveDisplayConfig {
@@ -139,6 +152,7 @@ fn freeze_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(0.5, "0.5"), (1.0, "1.0"), (1.5, "1.5"), (2.0, "2.0")],
             y_natural: 1.0,
             offset_fn: off_resistance,
+            natural_at_max: false,
         },
         // MIX: same as dynamics mix
         4 => CurveDisplayConfig {
@@ -146,6 +160,7 @@ fn freeze_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -160,6 +175,7 @@ fn phase_smear_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         // PEAK HOLD: driven by shared `peak_hold_curve_to_ms` helper (log-piecewise,
         // clamps curve input to 0..=2 and maps to 1..50..500 ms). With
@@ -173,6 +189,7 @@ fn phase_smear_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(5.0, "5ms"), (50.0, "50ms"), (200.0, "200ms"), (500.0, "500ms")],
             y_natural: 50.0,
             offset_fn: off_portamento,
+            natural_at_max: false,
         },
         // MIX: same as dynamics mix
         2 => CurveDisplayConfig {
@@ -180,6 +197,7 @@ fn phase_smear_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -193,6 +211,7 @@ fn contrast_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(1.25, "1:1.25"), (2.5, "1:2.5"), (5.0, "1:5"), (10.0, "1:10")],
             y_natural: 1.0,
             offset_fn: off_ratio,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -207,6 +226,7 @@ fn gain_config(i: usize, gain_mode: GainMode) -> CurveDisplayConfig {
                 // gain=1.0 → 100% dry (wet/dry at y_max; off=-1 pulls it to 0%)
                 y_natural: 100.0,
                 offset_fn: off_gain_pct,
+                natural_at_max: true,
             },
             _ => CurveDisplayConfig {
                 y_label: "dB", y_min: -18.0, y_max: 18.0, y_log: false,
@@ -214,6 +234,7 @@ fn gain_config(i: usize, gain_mode: GainMode) -> CurveDisplayConfig {
                 // gain=1.0 → 0 dB; multiplicative with factor 7.943 (10^(18/20))
                 y_natural: 0.0,
                 offset_fn: off_gain_db,
+                natural_at_max: false,
             },
         },
         // PEAK HOLD: same as phase smear peak hold — driven by shared
@@ -227,6 +248,7 @@ fn gain_config(i: usize, gain_mode: GainMode) -> CurveDisplayConfig {
             grid_lines: &[(5.0, "5ms"), (50.0, "50ms"), (200.0, "200ms"), (500.0, "500ms")],
             y_natural: 50.0,
             offset_fn: off_portamento,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -240,6 +262,7 @@ fn mid_side_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         // DECORREL / TRANSIENT / PAN: gain=1.0 → 100% (at y_max); off=-1 → 0%
         _ => CurveDisplayConfig {
@@ -247,6 +270,7 @@ fn mid_side_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
     }
 }
@@ -259,6 +283,7 @@ fn ts_split_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -271,30 +296,35 @@ fn geometry_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         1 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         2 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         3 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 200.0, y_log: false,
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         4 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -308,6 +338,7 @@ fn circuit_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         // THRESH: normalised trigger level 0–100 % (gain=1.0 → max threshold → no trigger)
         1 => CurveDisplayConfig {
@@ -315,6 +346,7 @@ fn circuit_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         // RELEASE: dimensionless time-constant scalar 0–2, neutral = 1.0
         3 => CurveDisplayConfig {
@@ -322,6 +354,7 @@ fn circuit_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(0.5, "0.5"), (1.0, "1.0"), (1.5, "1.5"), (2.0, "2.0")],
             y_natural: 1.0,
             offset_fn: off_resistance,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -335,6 +368,7 @@ fn life_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -348,6 +382,7 @@ fn kinetics_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         // MIX: 0–100 %
         4 => CurveDisplayConfig {
@@ -355,6 +390,7 @@ fn kinetics_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -368,6 +404,7 @@ fn harmony_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         // COEFFICIENT: mode-specific weighting 0–200 %, neutral = 100 %
         4 => CurveDisplayConfig {
@@ -375,6 +412,7 @@ fn harmony_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -388,6 +426,7 @@ fn modulate_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -401,6 +440,7 @@ fn rhythm_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         // DIVISION: step-count scalar 0–200 % (gain=1.0 → 100% → 16 steps base)
         1 => CurveDisplayConfig {
@@ -408,6 +448,7 @@ fn rhythm_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -421,6 +462,7 @@ fn future_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         // TIME: lookahead scaling 0–200 % (gain=1.0 → 100% → 1 FFT-hop of lookahead)
         1 => CurveDisplayConfig {
@@ -428,6 +470,7 @@ fn future_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -441,6 +484,7 @@ fn punch_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         // WIDTH, AMP_FILL: 0–200 %, neutral = 100 %
         1 | 3 => CurveDisplayConfig {
@@ -448,6 +492,7 @@ fn punch_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(50.0, "50%"), (100.0, "100%"), (150.0, "150%"), (200.0, "200%")],
             y_natural: 100.0,
             offset_fn: off_amount_200,
+            natural_at_max: false,
         },
         // HEAL: release time displayed as ms via portamento scale
         // display_curve_idx=10: gain_to_display = gain*200 ms; physical_to_y: log 40–1000 ms
@@ -457,6 +502,7 @@ fn punch_config(i: usize) -> CurveDisplayConfig {
             grid_lines: &[(40.0, "40ms"), (100.0, "100ms"), (250.0, "250ms"), (1000.0, "1s")],
             y_natural: 200.0,
             offset_fn: off_portamento,
+            natural_at_max: false,
         },
         _ => default_config(),
     }
@@ -477,6 +523,7 @@ pub fn past_config(curve_idx: usize, _mode: u8) -> CurveDisplayConfig {
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         1 => CurveDisplayConfig {
             // Display index 13 (Past Age/Delay) treats these anchors as
@@ -489,24 +536,28 @@ pub fn past_config(curve_idx: usize, _mode: u8) -> CurveDisplayConfig {
             grid_lines: &[(0.25, "25%"), (0.5, "50%"), (0.75, "75%"), (1.0, "100%")],
             y_natural: 0.5,
             offset_fn: off_amount_norm,
+            natural_at_max: false,
         },
         2 => CurveDisplayConfig {
             y_label: "dBFS", y_min: -160.0, y_max: 0.0, y_log: false,
             grid_lines: &[(-20.0, "-20"), (-60.0, "-60"), (-100.0, "-100"), (-140.0, "-140")],
             y_natural: -20.0,
             offset_fn: off_freeze_thresh,
+            natural_at_max: false,
         },
         3 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         4 => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
+            natural_at_max: true,
         },
         _ => default_config(),
     }
@@ -524,8 +575,12 @@ fn default_config() -> CurveDisplayConfig {
     CurveDisplayConfig {
         y_label: "", y_min: 0.0, y_max: 1.0, y_log: false,
         grid_lines: &[(0.25, ""), (0.5, ""), (0.75, ""), (1.0, "")],
-        y_natural: 1.0,
+        // y_natural intentionally not at y_max (0.5 ≠ 1.0) so natural_at_max=false
+        // is mathematically consistent. The identity offset_fn makes this inert for
+        // uncalibrated curves.
+        y_natural: 0.5,
         offset_fn: off_identity,
+        natural_at_max: false,
     }
 }
 

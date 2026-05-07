@@ -192,15 +192,43 @@ fn graph_node_defaults(node: usize, field: char) -> (f32, f32, f32) {
     }
 }
 
+/// Return `true` when the curve at `(slot, curve)` — evaluated for the *default*
+/// module type of that slot with `GainMode::Add` — has `y_natural == y_max`
+/// (natural-at-max).  These curves default their offset FloatParam to `+1.0`
+/// so the user loads at `y_max` (e.g. 100% wet for MIX) and slides down.
+///
+/// Default module assignment (mirrors `params::Default::default()`):
+///   slot 0 = Dynamics, slot 1 = Gain (Add mode), slots 2-7 = Empty, slot 8 = Master.
+///
+/// This is an explicit lookup table because build.rs cannot import the crate.
+/// Keep in sync with `curve_config::curve_display_config()`.
+fn offset_default_for_slot_curve(slot: usize, curve: usize) -> f32 {
+    // Dynamics (slot 0): MIX at local curve index 5 is natural-at-max
+    //   (y_natural = 100.0 == y_max = 100.0).
+    // All other Dynamics curves: not natural-at-max.
+    // Gain/Add (slot 1): curve 0 y_natural=0.0 ≠ y_max=18.0; curve 1 y_natural=50 ≠ y_max=500.
+    // Empty / Master (slots 2-8): default_config y_natural=0.5 ≠ y_max=1.0.
+    if slot == 0 && curve == 5 {
+        1.0_f32
+    } else {
+        0.0_f32
+    }
+}
+
 fn emit_tilt_offset_inits(f: &mut File) {
     for s in 0..NUM_SLOTS {
         for c in 0..NUM_CURVES {
             for kind in ["tilt", "offset"] {
                 let id = format!("s{}c{}{}", s, c, kind);
                 let rust_name = format!("s{}c{}_{}", s, c, kind);
+                let default = if kind == "offset" {
+                    offset_default_for_slot_curve(s, c)
+                } else {
+                    0.0_f32
+                };
                 writeln!(
                     f,
-                    "            {rust_name}: FloatParam::new(\"{id}\", 0.0f32, \
+                    "            {rust_name}: FloatParam::new(\"{id}\", {default}f32, \
                      FloatRange::Linear {{ min: -1.0f32, max: 1.0f32 }})\
                      .with_smoother(SmoothingStyle::Linear(2.0))\
                      .hide_in_generic_ui(),"
