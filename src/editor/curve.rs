@@ -1073,7 +1073,12 @@ pub fn curve_widget(
                     Pos2::new(sx + half,   edge_y - half),
                 ]
             };
-            ui.painter().add(Shape::convex_polygon(
+            // Extend clip rect vertically to avoid culling the triangle which is drawn
+            // ~9px outside the curve rect bounds (above rect.top() or below rect.bottom()).
+            let expansion_px = th::NODE_OFFRECT_OFFSET_PX + th::NODE_OFFRECT_SIZE_PX + 2.0;
+            let extended_clip = rect.expand2(Vec2::new(0.0, expansion_px));
+            let painter = ui.painter_at(extended_clip);
+            painter.add(Shape::convex_polygon(
                 triangle,
                 th::NODE_OFFRECT_COLOR,
                 Stroke::NONE,
