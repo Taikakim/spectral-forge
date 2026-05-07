@@ -1024,16 +1024,40 @@ pub fn create_editor(
                                     }
                                 } else if is_past {
                                     let cur_mode = params.slot_past_mode.lock()[edit_slot];
-                                    let label = crate::editor::past_popup::mode_label(cur_mode);
-                                    let btn_text = format!("Mode: {}", label);
-                                    let btn = egui::Button::new(
-                                        egui::RichText::new(btn_text).color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale))
-                                    )
-                                    .fill(th::BG)
-                                    .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
-                                    let resp = ui.add(btn);
-                                    if resp.clicked() {
-                                        crate::editor::past_popup::open_at(ui, edit_slot, resp.rect.right_top());
+                                    ui.horizontal(|ui| {
+                                        for &(mode, label, hint) in crate::editor::past_popup::MODES {
+                                            let selected = cur_mode == mode;
+                                            let resp = ui.selectable_label(selected,
+                                                egui::RichText::new(label)
+                                                    .color(if selected { th::MODULE_COLOR_LIT } else { th::LABEL_DIM })
+                                                    .size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                            ).on_hover_text(hint);
+                                            if resp.clicked() && !selected {
+                                                params.slot_past_mode.lock()[edit_slot] = mode;
+                                            }
+                                        }
+                                    });
+                                    let mode_now = params.slot_past_mode.lock()[edit_slot];
+                                    if mode_now == crate::dsp::modules::past::PastMode::DecaySorter {
+                                        let cur_key = params.slot_past_sort_key.lock()[edit_slot];
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new("Sort:")
+                                                    .color(th::LABEL_DIM)
+                                                    .size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                            );
+                                            for &(sort_key, sort_label) in crate::editor::past_popup::SORT_KEYS {
+                                                let selected = cur_key == sort_key;
+                                                let resp = ui.selectable_label(selected,
+                                                    egui::RichText::new(sort_label)
+                                                        .color(if selected { th::MODULE_COLOR_LIT } else { th::LABEL_DIM })
+                                                        .size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                                );
+                                                if resp.clicked() && !selected {
+                                                    params.slot_past_sort_key.lock()[edit_slot] = sort_key;
+                                                }
+                                            }
+                                        });
                                     }
                                 } else if is_kinetics {
                                     let cur_mode = params.slot_kinetics_mode.lock()[edit_slot];
@@ -1404,7 +1428,6 @@ pub fn create_editor(
                     let _ = crate::editor::amp_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::circuit_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::life_popup::show_popup(ui, &params, scale);
-                    let _ = crate::editor::past_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::kinetics_popup::show_popup(ui, &params, scale);
                     let _ = crate::editor::harmony_popup::show_popup(ui, &params, scale);
 
