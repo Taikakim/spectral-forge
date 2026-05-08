@@ -137,7 +137,85 @@ audit did not flag and which we are not exposing here.
 
 2 scalars × 9 slots = **18 new FloatParams**.
 
-## 5. PhaseSmear — `PHASE_RANGE` curve
+## 5. Contrast — modes + scalars
+
+The current Contrast module sounds underwhelming because it has only one
+sound (per-bin spatial-mean deviation), the spatial-mean window is fixed
+to a near-bin-width minimum, and THRESHOLD is plumbed as a curve but
+never read by the engine. This section reworks Contrast into a
+mode-dispatched module with three musically distinct flavours plus
+two slot scalars, and wires THRESHOLD as a real bypass floor.
+
+### Modes
+
+```rust
+#[derive(Default, Clone, Copy, ...)]
+pub enum ContrastMode {
+    #[default]
+    Spatial,   // current behaviour: per-bin deviation from log-freq spatial mean
+    Temporal,  // per-bin deviation from each bin's own long-running mean
+    Tilt,      // per-bin deviation from a fitted 1/f^α reference slope
+}
+```
+
+| Mode | What it does | Best for |
+|---|---|---|
+| **Spatial** (default) | Each bin compared against the magnitude-mean of its log-frequency neighbours; boost or cut the deviation. Current code, kept verbatim. | Spectral sharpening / whitening of broadband content. |
+| **Temporal** | Each bin compared against its own long-running per-bin magnitude average (time constant from RELEASE curve). Boosts bins that are atypical right now relative to their own history. | Highlighting transients sitting on sustained tones; "what's new" emphasiser. |
+| **Tilt** | Each bin compared against `expected_db = baseline_db + slope_db_per_oct × log2(freq/1000)`. The slope is set by the `tilt_slope_db_per_oct` scalar (default 0 = flat). Negative slope (e.g. -3) gives a pink reference; bins above it are "too bright", cut/boosted accordingly. | Pink-aware mastering, restoring tonal balance, exaggerating away from a reference slope. |
+
+### Scalars
+
+`ContrastScalars` per slot:
+
+| Field | Default | Range | Used by | Notes |
+|---|---|---|---|---|
+| `mean_window_st` | 1.0 | 0.1..24.0 (semitones, linear) | Spatial | Width of the log-frequency neighbourhood. Currently hardcoded to `params.smoothing_semitones.max(1.0)`; this scalar replaces the `.max(1.0)` floor and the global engine knob. Wider = smoother, narrower = sharper. |
+| `tilt_slope_db_per_oct` | 0.0 | -6.0..+6.0 (linear, dB/oct) | Tilt | Reference spectral slope. 0 = flat (white reference). -3 = pink reference. Negative slopes treat treble as "too bright" and cut, bass as "too quiet" and boost. |
+
+For Temporal mode, the time constant comes from the existing RELEASE
+curve — no extra scalar. The ATTACK curve continues to control how
+quickly the engine tracks rising magnitudes (same as Spatial mode).
+
+### THRESHOLD wiring (bug fix bundled here)
+
+The Contrast module sets `bp_threshold[k]` from the THRESHOLD curve but
+the engine never reads it. Wire it as a per-bin **bypass floor**:
+
+```rust
+// In SpectralContrastEngine::process_bins, after computing total_db / linear_gain:
+let mag_db   = 20.0 * bins[k].norm().max(1e-10).log10();
+let bypass_t = if mag_db < params.threshold_db[k] { 1.0 } else { 0.0 };
+let mix      = params.mix[k].clamp(0.0, 1.0) * (1.0 - bypass_t);
+// then use this mix for the dry/wet blend
+```
+
+At default THRESHOLD (curve gain 1.0 = -20 dBFS): bins below -20 dBFS
+bypass. At THRESHOLD curve gain 0 (curve drawn at axis floor): nothing
+bypasses; full effect. At curve gain 2 (max, axis ceiling): everything
+bypasses; no effect. This makes THRESHOLD an upward-bypass — useful for
+keeping the noise floor untouched while contrast still acts on louder
+content.
+
+### Wire-in summary
+
+- `ContrastModule` gets a `mode: ContrastMode` field and dispatches to
+  3 kernel paths in `process()`. Two new kernels live in
+  `src/dsp/modules/contrast.rs` (or `src/dsp/engines/spectral_contrast.rs`
+  alongside the existing one — kernel families fit better there).
+- `ContrastScalars` follows the same `set_contrast_scalars` /
+  `test_contrast_scalars` pattern as PastScalars.
+- New per-slot params: `s{s}_contrast_mode` (3-variant EnumParam) +
+  `s{s}_contrast_mean_window_st` + `s{s}_contrast_tilt_slope`. Total 3
+  per slot × 9 = 27.
+- Panel widget `src/editor/contrast_panel.rs`, gated behind
+  `dev-build` like the others.
+- THRESHOLD wiring is **not** dev-gated — that's a real bug fix that
+  ships in production.
+
+3 per-slot params × 9 slots = **27 new params** (1 EnumParam + 2 FloatParams per slot).
+
+## 6. PhaseSmear — `PHASE_RANGE` curve
 
 PhaseSmear extends from 3 curves to **4**. New curve at index 3:
 
@@ -160,7 +238,7 @@ already exists — it's the calibration used for `AMOUNT 0..200%`.
 No scalars, no panel widget, no build.rs change. Just an additional
 curve channel that fits into the existing curve machinery.
 
-## 6. Visibility / dev-build gating
+## 7. Visibility / dev-build gating
 
 The pattern: **params always exist; UI controls only render in dev-build.**
 
@@ -195,7 +273,7 @@ PhaseSmear's `PHASE_RANGE` curve is **not** gated. It's a real per-bin
 musical control, not a tuning knob; it makes sense to ship it as a
 permanent curve.
 
-## 7. Default-correctness invariant
+## 8. Default-correctness invariant
 
 For each module M, this property MUST hold:
 
@@ -207,7 +285,7 @@ The implementation pattern guarantees this if every per-mode kernel
 multiplies in the new scalar (default 1.0 for multipliers, default =
 hardcoded for direct values) at exactly the spot where the literal lived.
 
-## 8. Test strategy
+## 9. Test strategy
 
 For each new scalar set:
 
@@ -236,26 +314,31 @@ For each new scalar set:
    catches per-block allocations. Don't add separate alloc tests; rely
    on the existing infrastructure.
 
-## 9. Implementation staging
+## 10. Implementation staging
 
-**Each module is independent.** Recommended order matches audit ROI:
+**Each module is independent.** Recommended order:
 
-1. **Life** (highest ROI, ~10 scalars). Establishes the pattern in the
+1. **Life** (highest ROI, 8 scalars). Establishes the pattern in the
    richest case. Once Life lands cleanly, the rest are mechanical
    copies.
 2. **Kinetics** (7 scalars across modes — exercises the mode-conditional
    panel).
 3. **Circuit Vactrol** (2 scalars — the simplest non-PhaseSmear case).
 4. **Modulate** (2 scalars).
-5. **PhaseSmear PHASE_RANGE** (curve, no panel scaffolding — completely
-   different code path).
+5. **Contrast** (mode dispatch + 2 scalars + THRESHOLD wiring fix).
+   Higher complexity — 2 new DSP kernels — so deferred to after the
+   pattern is established by 1-4. The THRESHOLD fix can be done as
+   its own first commit, before mode dispatch lands, so production
+   benefits even if mode work stalls.
+6. **PhaseSmear PHASE_RANGE** (curve, no panel scaffolding — completely
+   different code path; depends on nothing).
 
 Each lands as its own commit (or its own small set of commits — define
 struct, wire pipeline, add panel, add tests).
 
-## 10. Param count budget
+## 11. Param count budget
 
-New FloatParams added: 72 + 63 + 18 + 18 = **171**.
+New params added: 72 (Life) + 63 (Kinetics) + 18 (Circuit) + 18 (Modulate) + 27 (Contrast: 9 EnumParam + 18 FloatParam) = **198**.
 
 Plus PhaseSmear gets one more curve channel (uses existing `slot_curve_cache[s][3]`,
 no new params).
@@ -267,27 +350,30 @@ limits but visibly increases the host's param list. This is acceptable
 during prototyping; the cleanup pass post-prototyping removes the unused
 ones (or demotes them to inert constants).
 
-## 11. Files to create or modify
+## 12. Files to create or modify
 
 **Create:**
 - `src/editor/life_panel.rs`
 - `src/editor/kinetics_panel.rs`
 - `src/editor/circuit_panel.rs`
 - `src/editor/modulate_panel.rs`
+- `src/editor/contrast_panel.rs`
 
 **Modify:**
 - `src/dsp/modules/life.rs` (struct + reads)
 - `src/dsp/modules/kinetics.rs` (struct + reads)
 - `src/dsp/modules/circuit.rs` (struct + reads)
 - `src/dsp/modules/modulate.rs` (struct + reads)
+- `src/dsp/modules/contrast.rs` (mode dispatch + struct + reads)
+- `src/dsp/engines/spectral_contrast.rs` (THRESHOLD wiring; new Temporal + Tilt kernels alongside the current Spatial one)
 - `src/dsp/modules/phase_smear.rs` (curve count → 4, read curve idx 3)
 - `src/dsp/modules/mod.rs` (trait method defaults + ModuleSpec wiring)
-- `src/dsp/fx_matrix.rs` (4 × set_<m>_scalars dispatchers + 4 × test_<m>_scalars helpers)
-- `src/dsp/pipeline.rs` (4 × per-block gather + dispatch)
-- `src/params.rs` (4 × accessor helpers)
+- `src/dsp/fx_matrix.rs` (5 × set_<m>_scalars dispatchers + 5 × test_<m>_scalars helpers)
+- `src/dsp/pipeline.rs` (5 × per-block gather + dispatch)
+- `src/params.rs` (5 × accessor helpers)
 - `src/editor/mod.rs` (add panel modules)
 - `src/editor/curve_config.rs` (PhaseSmear curve_idx=3 entry)
-- `build.rs` (codegen for new params)
+- `build.rs` (codegen for new params, including `s{s}_contrast_mode` EnumParam)
 - `tests/module_trait.rs` or new `tests/scalar_*.rs` files for default-correctness + plumbing tests
 - `tests/curve_config.rs` (PhaseSmear 4th-curve assertions)
 
@@ -295,7 +381,7 @@ ones (or demotes them to inert constants).
 at the file level. The dispatch in `module_spec(M).panel_widget` is
 `#[cfg]`-gated to either `Some(...)` or `None`.
 
-## 12. Open issues / future work (NOT addressed here)
+## 13. Open issues / future work (NOT addressed here)
 
 - Hiding the new params from the host post-prototyping. Will need a
   `nih_plug` mechanism for "internal-only" params or a doc-only convention.
