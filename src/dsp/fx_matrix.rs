@@ -384,6 +384,26 @@ impl FxMatrix {
         self.slots.get(slot)?.as_ref()?.test_kinetics_scalars()
     }
 
+    /// Propagate per-slot Circuit scalars from params to CircuitModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_circuit_scalars(&mut self, scalars: &[crate::dsp::modules::circuit::CircuitScalars; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_circuit_scalars(scalars[s]);
+            }
+        }
+    }
+
+    /// Test-only accessor: read back the scalars currently held by a Circuit slot.
+    /// Returns `None` for empty slots or non-Circuit modules.
+    #[cfg(any(test, feature = "probe"))]
+    pub fn test_circuit_scalars(
+        &self,
+        slot: usize,
+    ) -> Option<crate::dsp::modules::circuit::CircuitScalars> {
+        self.slots.get(slot)?.as_ref()?.test_circuit_scalars()
+    }
+
     /// Propagate per-slot KineticsMode from params to KineticsModule instances.
     /// Called once per audio block (before process_hop).
     pub fn set_kinetics_modes(&mut self, modes: &[crate::dsp::modules::kinetics::KineticsMode; 9]) {

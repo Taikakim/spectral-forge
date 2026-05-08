@@ -865,6 +865,20 @@ impl SpectralForgeParams {
         Some(kinetics_sc_well_threshold_frac_dispatch!(self, slot))
     }
 
+    /// Per-slot Circuit Vactrol fast time constant (ms).
+    pub fn circuit_vactrol_fast_ms_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(circuit_vactrol_fast_ms_dispatch!(self, slot))
+    }
+
+    /// Per-slot Circuit Vactrol slow time constant (ms).
+    pub fn circuit_vactrol_slow_ms_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(circuit_vactrol_slow_ms_dispatch!(self, slot))
+    }
+
     /// Reset every automatable Param to its nih-plug default via the ParamSetter.
     ///
     /// Iterates `param_map()` using the raw GuiContext API so host automation is properly

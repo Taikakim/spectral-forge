@@ -162,10 +162,6 @@ fn apply_crossover(bins: &mut [Complex<f32>], curves: &[&[f32]]) {
 
 // ── Vactrol helpers ────────────────────────────────────────────────────────
 
-/// Nominal time constants for the opto-coupler photocell model (seconds).
-const VACTROL_TAU_FAST: f32 = 0.008;  // 8 ms
-const VACTROL_TAU_SLOW: f32 = 0.250;  // 250 ms
-
 /// Cascaded 2-pole vactrol-style photocell per-bin.
 ///
 /// Drive charges the fast cap; the fast cap drives the slow cap. Cell gain
@@ -183,6 +179,8 @@ fn apply_vactrol(
     curves: &[&[f32]],
     hop_dt: f32,
     flux: Option<&[f32]>,
+    tau_fast_s: f32,
+    tau_slow_s: f32,
 ) {
     use crate::dsp::circuit_kernels::lp_step;
 
@@ -199,8 +197,8 @@ fn apply_vactrol(
         let rel_scl = release_c[k].clamp(0.01, 4.0);   // user scale on both τ
         let mix     = mix_c[k].clamp(0.0, 1.0);
 
-        let tau_fast = VACTROL_TAU_FAST * rel_scl;
-        let tau_slow = VACTROL_TAU_SLOW * rel_scl;
+        let tau_fast = tau_fast_s * rel_scl;
+        let tau_slow = tau_slow_s * rel_scl;
 
         // α = hop_dt / τ, clamped to [0, 1].
         let alpha_fast = (hop_dt / tau_fast).min(1.0);
@@ -740,6 +738,32 @@ fn apply_bias_fuzz(
     }
 }
 
+// ── CircuitScalars ─────────────────────────────────────────────────────────
+
+/// Vactrol-mode tuning scalars exposed for prototyping. Stored in ms so the host
+/// automation lane shows musical units; the Vactrol kernel reads `* 1e-3` to
+/// convert back to seconds.
+///
+/// See docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §3.
+#[derive(Clone, Copy, Debug)]
+pub struct CircuitScalars {
+    pub vactrol_fast_ms: f32,
+    pub vactrol_slow_ms: f32,
+}
+
+impl CircuitScalars {
+    pub fn safe_default() -> Self {
+        Self {
+            vactrol_fast_ms: 8.0,
+            vactrol_slow_ms: 250.0,
+        }
+    }
+}
+
+impl Default for CircuitScalars {
+    fn default() -> Self { Self::safe_default() }
+}
+
 // ── CircuitMode ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -795,6 +819,8 @@ pub struct CircuitModule {
     bias_lp: [Vec<f32>; 2],
     sample_rate: f32,
     fft_size: usize,
+    /// Vactrol-mode tuning scalars (ms, converted to seconds at use site).
+    scalars: CircuitScalars,
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
 }
@@ -830,6 +856,7 @@ impl CircuitModule {
             bias_lp: [Vec::new(), Vec::new()],
             sample_rate: 48_000.0,
             fft_size: 2048,
+            scalars: CircuitScalars::safe_default(),
             #[cfg(any(test, feature = "probe"))]
             last_probe: crate::dsp::modules::ProbeSnapshot::default(),
         }
@@ -936,7 +963,9 @@ impl SpectralModule for CircuitModule {
                 });
                 let fast = &mut self.vactrol_fast[channel];
                 let slow = &mut self.vactrol_slow[channel];
-                apply_vactrol(bins, fast, slow, curves, hop_dt, flux);
+                let tau_fast_s = self.scalars.vactrol_fast_ms * 1e-3;
+                let tau_slow_s = self.scalars.vactrol_slow_ms * 1e-3;
+                apply_vactrol(bins, fast, slow, curves, hop_dt, flux, tau_fast_s, tau_slow_s);
             }
             CircuitMode::TransformerSaturation => {
                 // As a writer slot, `physics = Some(&mut mix_phys)` from FxMatrix;
@@ -1105,6 +1134,15 @@ impl SpectralModule for CircuitModule {
 
     fn set_circuit_mode(&mut self, mode: CircuitMode) {
         self.set_mode(mode);
+    }
+
+    fn set_circuit_scalars(&mut self, scalars: crate::dsp::modules::circuit::CircuitScalars) {
+        self.scalars = scalars;
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn test_circuit_scalars(&self) -> Option<crate::dsp::modules::circuit::CircuitScalars> {
+        Some(self.scalars)
     }
 
     fn num_curves(&self) -> usize {

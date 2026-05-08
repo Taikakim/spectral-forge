@@ -362,6 +362,16 @@ pub trait SpectralModule: Send {
     #[cfg(any(test, feature = "probe"))]
     fn test_kinetics_scalars(&self) -> Option<crate::dsp::modules::kinetics::KineticsScalars> { None }
 
+    /// Apply per-slot Circuit Vactrol time-constant scalars. Default no-op — only
+    /// `CircuitModule` overrides this.
+    /// See spec docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §3.
+    fn set_circuit_scalars(&mut self, _: crate::dsp::modules::circuit::CircuitScalars) {}
+
+    /// Test-only echo of currently-applied Circuit scalars. Default `None` —
+    /// `CircuitModule` overrides to return `Some(self.scalars)`.
+    #[cfg(any(test, feature = "probe"))]
+    fn test_circuit_scalars(&self) -> Option<crate::dsp::modules::circuit::CircuitScalars> { None }
+
     /// Update the operating mode for Kinetics modules. Default no-op for all other types.
     fn set_kinetics_mode(&mut self, _: crate::dsp::modules::kinetics::KineticsMode) {}
     /// Update the WellSource for Kinetics-GravityWell mode. Default no-op for all other types.
@@ -758,6 +768,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         curve_labels: &["AMOUNT", "THRESH", "SPREAD", "RELEASE", "MIX"],
         supports_sidechain: false,
         wants_sidechain: false,
+        #[cfg(feature = "dev-build")]
+        panel_widget: Some(crate::editor::circuit_panel::draw as PanelWidgetFn),
+        #[cfg(not(feature = "dev-build"))]
         panel_widget: None,
         // Opt-in ahead of Phases 5c.4–5c.10 (Vactrol/Transformer/Sag/Drift/Slew/BiasFuzz).
         // v1 BBD/Schmitt/Crossover kernels do not yet write any BinPhysics field.
