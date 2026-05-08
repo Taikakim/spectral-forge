@@ -753,8 +753,9 @@ fn single_mode_curve_help(ty: ModuleType, curve_idx: usize) -> &'static str {
         (ModuleType::MidSide, 3) => "Mid/Side · TRANSIENT — per-bin transient bias toward mid. Useful for keeping kicks/snares mono while widening the surrounding pads.",
         (ModuleType::MidSide, 4) => "Mid/Side · PAN — per-bin pan offset. v=0 centres; v=±1 pans fully L/R for that bin only.",
 
-        // TsSplit — 1 curve. SC: no.
+        // TsSplit — 2 curves (2026-05-08). SC: no.
         (ModuleType::TransientSustainedSplit, 0) => "T/S Split · SENSITIVITY — per-bin transient/sustained discriminator sensitivity. Higher = bins are more readily classed as transient. The split feeds two virtual rows in the routing matrix (look for the slot's 'T' and 'S' rows beneath it).",
+        (ModuleType::TransientSustainedSplit, 1) => "T/S Split · SMOOTHNESS — per-bin envelope-follower time constant. Neutral (1.0) reproduces the historical hardcoded value (~0.98 slow_coeff); higher = slower follower (only sustained changes count as transient); lower = faster follower (more bins read as transient).",
 
         _ => "",
     }

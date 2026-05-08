@@ -323,6 +323,16 @@ fn ts_split_config(i: usize) -> CurveDisplayConfig {
             offset_fn: off_mix,
             natural_at_max: true,
         },
+        // SMOOTHNESS (2026-05-08): per-bin envelope-follower coefficient.
+        // Curve gain 0..2, neutral 1.0 → slow_coeff 0.98 (the historical
+        // hardcoded value). Uses the 0..2 dimensionless axis.
+        1 => CurveDisplayConfig {
+            y_label: "", y_min: 0.0, y_max: 2.0, y_log: false,
+            grid_lines: &[(0.5, "0.5"), (1.0, "1.0"), (1.5, "1.5"), (2.0, "2.0")],
+            y_natural: 1.0,
+            offset_fn: off_resistance,
+            natural_at_max: false,
+        },
         _ => default_config(),
     }
 }

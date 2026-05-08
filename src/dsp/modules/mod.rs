@@ -608,8 +608,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         display_name: "T/S Split",
         color_lit: Color32::from_rgb(0x80, 0xb0, 0x60),
         color_dim: Color32::from_rgb(0x28, 0x38, 0x20),
-        num_curves: 1,
-        curve_labels: &["SENSITIVITY"],
+        // 2026-05-08: SMOOTHNESS exposed (was hardcoded slow_coeff = 0.98).
+        num_curves: 2,
+        curve_labels: &["SENSITIVITY", "SMOOTHNESS"],
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,

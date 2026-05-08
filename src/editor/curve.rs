@@ -313,6 +313,7 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
         },
         ModuleType::TransientSustainedSplit => match curve_idx {
             0 => 6,             // SENSITIVITY → 0–100 %
+            1 => 11,            // SMOOTHNESS → 0–2 dimensionless (idx 11 = Resistance scale)
             _ => curve_idx,
         },
         ModuleType::Past => match curve_idx {
