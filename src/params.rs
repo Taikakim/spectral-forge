@@ -816,6 +816,55 @@ impl SpectralForgeParams {
         Some(life_brownian_scale_dispatch!(self, slot))
     }
 
+    /// Per-slot Kinetics sidechain envelope tau (hops).
+    pub fn kinetics_sc_envelope_tau_hops_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_sc_envelope_tau_hops_dispatch!(self, slot))
+    }
+
+    /// Per-slot Kinetics sidechain mass rate scale.
+    pub fn kinetics_sc_mass_rate_scale_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_sc_mass_rate_scale_dispatch!(self, slot))
+    }
+
+    /// Per-slot Kinetics tuning fork minimum bin separation (integer-valued f32).
+    pub fn kinetics_tuning_fork_min_sep_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_tuning_fork_min_sep_dispatch!(self, slot))
+    }
+
+    /// Per-slot Kinetics orbital phase half-window in bins (integer-valued f32).
+    pub fn kinetics_orbital_sat_half_window_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_orbital_sat_half_window_dispatch!(self, slot))
+    }
+
+    /// Per-slot Kinetics orbital peak threshold factor.
+    pub fn kinetics_orbital_peak_threshold_factor_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_orbital_peak_threshold_factor_dispatch!(self, slot))
+    }
+
+    /// Per-slot Kinetics static well baseline.
+    pub fn kinetics_static_well_baseline_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_static_well_baseline_dispatch!(self, slot))
+    }
+
+    /// Per-slot Kinetics sidechain well threshold fraction.
+    pub fn kinetics_sc_well_threshold_frac_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(kinetics_sc_well_threshold_frac_dispatch!(self, slot))
+    }
+
     /// Reset every automatable Param to its nih-plug default via the ParamSetter.
     ///
     /// Iterates `param_map()` using the raw GuiContext API so host automation is properly

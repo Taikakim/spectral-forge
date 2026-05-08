@@ -364,6 +364,26 @@ impl FxMatrix {
         self.slots.get(slot)?.as_ref()?.test_life_scalars()
     }
 
+    /// Propagate per-slot Kinetics scalars from params to KineticsModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_kinetics_scalars(&mut self, scalars: &[crate::dsp::modules::kinetics::KineticsScalars; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_kinetics_scalars(scalars[s]);
+            }
+        }
+    }
+
+    /// Test-only accessor: read back the scalars currently held by a Kinetics slot.
+    /// Returns `None` for empty slots or non-Kinetics modules.
+    #[cfg(any(test, feature = "probe"))]
+    pub fn test_kinetics_scalars(
+        &self,
+        slot: usize,
+    ) -> Option<crate::dsp::modules::kinetics::KineticsScalars> {
+        self.slots.get(slot)?.as_ref()?.test_kinetics_scalars()
+    }
+
     /// Propagate per-slot KineticsMode from params to KineticsModule instances.
     /// Called once per audio block (before process_hop).
     pub fn set_kinetics_modes(&mut self, modes: &[crate::dsp::modules::kinetics::KineticsMode; 9]) {

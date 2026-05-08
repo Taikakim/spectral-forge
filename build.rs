@@ -61,6 +61,7 @@ fn main() {
     emit_matrix_fields(&mut f);
     emit_past_scalar_fields(&mut f);
     emit_life_scalar_fields(&mut f);
+    emit_kinetics_scalar_fields(&mut f);
     writeln!(f, "}}").unwrap();
     writeln!(f).unwrap();
 
@@ -74,6 +75,7 @@ fn main() {
     emit_matrix_inits(&mut f);
     emit_past_scalar_inits(&mut f);
     emit_life_scalar_inits(&mut f);
+    emit_kinetics_scalar_inits(&mut f);
     writeln!(f, "        }}").unwrap();
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
@@ -97,6 +99,7 @@ fn main() {
     emit_matrix_map_entries(&mut f);
     emit_past_scalar_map_entries(&mut f);
     emit_life_scalar_map_entries(&mut f);
+    emit_kinetics_scalar_map_entries(&mut f);
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -115,6 +118,8 @@ fn main() {
     emit_past_scalar_dispatch(&mut f);
     writeln!(f).unwrap();
     emit_life_scalar_dispatch(&mut f);
+    writeln!(f).unwrap();
+    emit_kinetics_scalar_dispatch(&mut f);
 }
 
 // ── Field declarations (bare, no initializers) ──────────────────────────────
@@ -606,6 +611,94 @@ fn emit_life_scalar_dispatch(f: &mut File) {
         writeln!(f, "        match $s {{").unwrap();
         for s in 0..NUM_SLOTS {
             writeln!(f, "            {s} => &$self.generated.s{s}_life_{suffix},").unwrap();
+        }
+        writeln!(f, "            _ => unreachable!(),").unwrap();
+        writeln!(f, "        }}").unwrap();
+        writeln!(f, "    }};").unwrap();
+        writeln!(f, "}}").unwrap();
+        writeln!(f).unwrap();
+    }
+}
+
+// ── Kinetics Scalars: per-slot mode-specific tuning params ─────────────────
+//
+// Seven new per-slot params for Kinetics mode-specific scalars (7 × 9 = 63 fields):
+//   - kinetics_sc_envelope_tau_hops          Linear 0.5..4.0,  default 1.0
+//   - kinetics_sc_mass_rate_scale            Linear 0.5..10.0, default 5.0
+//   - kinetics_tuning_fork_min_sep           Linear 1.0..16.0, default 4.0  (used as usize)
+//   - kinetics_orbital_sat_half_window       Linear 4.0..32.0, default 16.0 (used as usize)
+//   - kinetics_orbital_peak_threshold_factor Linear 1.0..5.0,  default 2.0
+//   - kinetics_static_well_baseline          Linear 1.0..2.0,  default 1.05
+//   - kinetics_sc_well_threshold_frac        Linear 0.1..0.9,  default 0.4
+//
+// See docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §2.
+
+struct KineticsScalarSpec {
+    suffix:  &'static str,
+    default: f32,
+    min:     f32,
+    max:     f32,
+}
+
+const KINETICS_SCALAR_SPECS: &[KineticsScalarSpec] = &[
+    KineticsScalarSpec { suffix: "sc_envelope_tau_hops",          default: 1.0,  min: 0.5, max: 4.0  },
+    KineticsScalarSpec { suffix: "sc_mass_rate_scale",            default: 5.0,  min: 0.5, max: 10.0 },
+    KineticsScalarSpec { suffix: "tuning_fork_min_sep",           default: 4.0,  min: 1.0, max: 16.0 },
+    KineticsScalarSpec { suffix: "orbital_sat_half_window",       default: 16.0, min: 4.0, max: 32.0 },
+    KineticsScalarSpec { suffix: "orbital_peak_threshold_factor", default: 2.0,  min: 1.0, max: 5.0  },
+    KineticsScalarSpec { suffix: "static_well_baseline",          default: 1.05, min: 1.0, max: 2.0  },
+    KineticsScalarSpec { suffix: "sc_well_threshold_frac",        default: 0.4,  min: 0.1, max: 0.9  },
+];
+
+fn emit_kinetics_scalar_fields(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for spec in KINETICS_SCALAR_SPECS {
+            let suffix = spec.suffix;
+            writeln!(f, "    pub s{s}_kinetics_{suffix}: FloatParam,").unwrap();
+        }
+    }
+}
+
+fn emit_kinetics_scalar_inits(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for spec in KINETICS_SCALAR_SPECS {
+            let suffix  = spec.suffix;
+            let default = spec.default;
+            let min     = spec.min;
+            let max     = spec.max;
+            writeln!(
+                f,
+                "            s{s}_kinetics_{suffix}: FloatParam::new(\"s{s}kinetics_{suffix}\", {default}f32, \
+                 FloatRange::Linear {{ min: {min}f32, max: {max}f32 }})\
+                 .with_smoother(SmoothingStyle::Linear(50.0))\
+                 .hide_in_generic_ui(),"
+            ).unwrap();
+        }
+    }
+}
+
+fn emit_kinetics_scalar_map_entries(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for spec in KINETICS_SCALAR_SPECS {
+            let suffix    = spec.suffix;
+            let id        = format!("s{s}kinetics_{suffix}");
+            let rust_name = format!("s{s}_kinetics_{suffix}");
+            writeln!(
+                f,
+                "        out.push(({id:?}.to_string(), self.{rust_name}.as_ptr(), String::new()));"
+            ).unwrap();
+        }
+    }
+}
+
+fn emit_kinetics_scalar_dispatch(f: &mut File) {
+    for spec in KINETICS_SCALAR_SPECS {
+        let suffix = spec.suffix;
+        writeln!(f, "macro_rules! kinetics_{suffix}_dispatch {{").unwrap();
+        writeln!(f, "    ($self:expr, $s:expr) => {{").unwrap();
+        writeln!(f, "        match $s {{").unwrap();
+        for s in 0..NUM_SLOTS {
+            writeln!(f, "            {s} => &$self.generated.s{s}_kinetics_{suffix},").unwrap();
         }
         writeln!(f, "            _ => unreachable!(),").unwrap();
         writeln!(f, "        }}").unwrap();

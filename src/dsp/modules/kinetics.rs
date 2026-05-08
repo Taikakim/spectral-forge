@@ -61,33 +61,47 @@ pub enum MassSource {
     Sidechain,
 }
 
+// ── KineticsScalars ────────────────────────────────────────────────────────
+
+/// Per-slot tuning scalars exposed for prototyping. Each field's safe_default
+/// reproduces the current hardcoded constant exactly. Mode-conditional —
+/// each scalar only matters in specific KineticsMode + sub-source combinations.
+///
+/// See docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §2.
+#[derive(Clone, Copy, Debug)]
+pub struct KineticsScalars {
+    pub sc_envelope_tau_hops:          f32,
+    pub sc_mass_rate_scale:            f32,
+    pub tuning_fork_min_sep:           f32,
+    pub orbital_sat_half_window:       f32,
+    pub orbital_peak_threshold_factor: f32,
+    pub static_well_baseline:          f32,
+    pub sc_well_threshold_frac:        f32,
+}
+
+impl KineticsScalars {
+    pub fn safe_default() -> Self {
+        Self {
+            sc_envelope_tau_hops:          1.0,
+            sc_mass_rate_scale:            5.0,
+            tuning_fork_min_sep:           4.0,
+            orbital_sat_half_window:       16.0,
+            orbital_peak_threshold_factor: 2.0,
+            static_well_baseline:          1.05,
+            sc_well_threshold_frac:        0.4,
+        }
+    }
+}
+
+impl Default for KineticsScalars {
+    fn default() -> Self { Self::safe_default() }
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MAX_TUNING_FORKS: usize = 16;
 const MAX_HARMONIC_SPRINGS: usize = 8;
-/// Sidechain envelope smoother time constant in hops.
-/// `alpha = 1 - exp(-1 / SC_ENVELOPE_TAU_HOPS)`, so at 1.0 hops the envelope
-/// follows the sidechain within ~1 hop (very fast). The rate-of-change derived
-/// from this envelope is divided by `dt`, so the effective rate scales with
-/// sample rate / hop size; `SC_MASS_RATE_SCALE` was tuned for the default
-/// hop dt (fft=2048, sr=48k → dt ≈ 10.7 ms). If hop changes substantially,
-/// the scale may need re-tuning to keep the audible response consistent.
-const SC_ENVELOPE_TAU_HOPS: f32 = 1.0;
-/// Sidechain rate-of-change → mass multiplier scale.
-/// `mass = (1.0 + SC_MASS_RATE_SCALE * rate) * MASS_curve[k]`. Tuned for the
-/// default hop dt; if hop changes substantially this may need re-tuning.
-const SC_MASS_RATE_SCALE: f32 = 5.0;
-const TUNING_FORK_MIN_SEP: usize = 4;
 const MAX_PEAKS: usize = 16;
-const ORBITAL_SAT_HALF_WINDOW: usize = 16;
-/// OrbitalPhase peak detection: a bin counts as a "peak" only if its magnitude
-/// exceeds this factor times the local-window mean (window half-width =
-/// `ORBITAL_SAT_HALF_WINDOW`). Higher values reject more micro-peaks.
-const ORBITAL_PEAK_THRESHOLD_FACTOR: f32 = 2.0;
-/// Strength curve must exceed this baseline to register as a static gravity well.
-const STATIC_WELL_BASELINE: f32 = 1.05;
-/// Sidechain peak must reach this fraction of the per-hop max to register as a well.
-const SC_WELL_THRESHOLD_FRAC: f32 = 0.4;
 
 // ── Ferromagnetism kernel constants ──────────────────────────────────────────
 
@@ -169,6 +183,7 @@ pub struct KineticsModule {
     mode:        KineticsMode,
     well_source: WellSource,
     mass_source: MassSource,
+    scalars:     KineticsScalars,
 
     /// Per-channel integrator displacement state.
     displacement: [Vec<f32>; 2],
@@ -258,6 +273,7 @@ impl KineticsModule {
             mode:        KineticsMode::default(),
             well_source: WellSource::default(),
             mass_source: MassSource::default(),
+            scalars:     KineticsScalars::safe_default(),
             displacement:       [Vec::new(), Vec::new()],
             velocity:           [Vec::new(), Vec::new()],
             temperature_local:  [Vec::new(), Vec::new()],
@@ -427,9 +443,10 @@ impl KineticsModule {
         let mut wells: SmallVec<[(usize, f32); MAX_PEAKS]> = SmallVec::new();
         match self.well_source {
             WellSource::Static => {
-                // Local maxima of the STRENGTH curve above the 1.05 baseline become wells.
+                // Local maxima of the STRENGTH curve above the baseline become wells.
+                let static_well_baseline = self.scalars.static_well_baseline;
                 for k in 1..(num_bins - 1) {
-                    if s_strength[k] > STATIC_WELL_BASELINE
+                    if s_strength[k] > static_well_baseline
                         && s_strength[k] > s_strength[k - 1]
                         && s_strength[k] > s_strength[k + 1]
                     {
@@ -443,7 +460,7 @@ impl KineticsModule {
             WellSource::Sidechain => {
                 if let Some(sc) = sidechain {
                     let sc_max = sc.iter().fold(0.0_f32, |a, &b| a.max(b));
-                    let thresh = sc_max * SC_WELL_THRESHOLD_FRAC;
+                    let thresh = sc_max * self.scalars.sc_well_threshold_frac;
                     if sc_max > 1e-6 {
                         let sc_len = sc.len().min(num_bins);
                         for k in 1..(sc_len.saturating_sub(1)) {
@@ -614,7 +631,7 @@ impl KineticsModule {
                 // alpha = 1 - exp(-1 / tau_hops). Read → compute → write, so the
                 // immutable borrow of mass_curve/mix_curve and the mutable physics write
                 // below use only local scalars, not self-borrows.
-                let alpha_env = 1.0 - (-(1.0 / SC_ENVELOPE_TAU_HOPS)).exp();
+                let alpha_env = 1.0 - (-(1.0 / self.scalars.sc_envelope_tau_hops)).exp();
                 let env_prev  = self.sc_env_smoothed[channel];
                 let env       = env_prev + alpha_env * (sc_now - env_prev);
                 self.sc_env_smoothed[channel] = env;
@@ -631,7 +648,7 @@ impl KineticsModule {
                     // reserve dynamic range for the rate term.
                     // `1.0 +` baseline: at zero rate, target = MASS_curve (mass never drops below
                     // MASS_curve); rate × scale lifts it higher when SC is changing fast.
-                    let target = ((1.0 + SC_MASS_RATE_SCALE * rate) * mass_curve[k].clamp(0.01, 100.0))
+                    let target = ((1.0 + self.scalars.sc_mass_rate_scale * rate) * mass_curve[k].clamp(0.01, 100.0))
                         .clamp(0.01, 1000.0);
                     let mix    = mix_curve[k].clamp(0.0, 1.0);
                     let cur    = physics.mass[k];
@@ -668,10 +685,13 @@ impl KineticsModule {
         let strength_curve = &self.smoothed_curves[channel][0][..num_bins];
         let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
 
+        let orbital_sat_half_window       = self.scalars.orbital_sat_half_window as usize;
+        let orbital_peak_threshold_factor = self.scalars.orbital_peak_threshold_factor;
+
         // -- Pass A: Find peaks. --
         // A bin qualifies as a master peak if:
         //   1. magnitude > both immediate neighbours (local maximum)
-        //   2. magnitude > 2× the mean over the local ORBITAL_SAT_HALF_WINDOW window
+        //   2. magnitude > orbital_peak_threshold_factor× the mean over the local window
         // SmallVec stays stack-allocated up to MAX_PEAKS = 16 entries; no heap allocation.
         let mut peaks: SmallVec<[(usize, f32); MAX_PEAKS]> = SmallVec::new();
         for k in 1..(num_bins - 1) {
@@ -681,10 +701,10 @@ impl KineticsModule {
             let right = bins[k + 1].norm();
             if m > left && m > right {
                 // Window-mean check: allocation-free iterator sum, compiles to a plain loop.
-                let lo   = k.saturating_sub(ORBITAL_SAT_HALF_WINDOW);
-                let hi   = (k + ORBITAL_SAT_HALF_WINDOW).min(num_bins - 1);
+                let lo   = k.saturating_sub(orbital_sat_half_window);
+                let hi   = (k + orbital_sat_half_window).min(num_bins - 1);
                 let mean = (lo..=hi).map(|i| bins[i].norm()).sum::<f32>() / (hi - lo + 1) as f32;
-                if m > ORBITAL_PEAK_THRESHOLD_FACTOR * mean {
+                if m > orbital_peak_threshold_factor * mean {
                     if peaks.len() < MAX_PEAKS {
                         peaks.push((k, m));
                     }
@@ -698,10 +718,10 @@ impl KineticsModule {
         // no conflict between the read of bins[k].norm() above and the write below.
         for &(km, m_amp) in peaks.iter() {
             let alpha = 0.5 * strength_curve[km] * dt;
-            // Upper bound for d: stay within the array AND respect ORBITAL_SAT_HALF_WINDOW.
+            // Upper bound for d: stay within the array AND respect orbital_sat_half_window.
             // d_max derivation guarantees kp = km + d ≤ num_bins - 1, so no bounds guard is
             // needed on the +d satellite block.
-            let d_max = ORBITAL_SAT_HALF_WINDOW.min(
+            let d_max = orbital_sat_half_window.min(
                 num_bins.saturating_sub(km).max(1) - 1
             );
             for d in 1..=d_max {
@@ -775,10 +795,12 @@ impl KineticsModule {
         let damping_curve  = &self.smoothed_curves[channel][3][..num_bins];
         let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
 
+        let ferro_peak_threshold_factor = self.scalars.orbital_peak_threshold_factor;
+
         // -- Pass A: Find peaks. --
         // A bin qualifies as a master peak if:
         //   1. magnitude > both immediate neighbours (local maximum)
-        //   2. magnitude > ORBITAL_PEAK_THRESHOLD_FACTOR × the mean over the local
+        //   2. magnitude > orbital_peak_threshold_factor × the mean over the local
         //      FERRO_PEAK_WINDOW_HALF window
         // SmallVec stays stack-allocated up to MAX_PEAKS = 16 entries; no heap allocation.
         // Tuple: (bin_index, magnitude, phase)
@@ -793,7 +815,7 @@ impl KineticsModule {
                 let lo   = k.saturating_sub(FERRO_PEAK_WINDOW_HALF);
                 let hi   = (k + FERRO_PEAK_WINDOW_HALF).min(num_bins - 1);
                 let mean = (lo..=hi).map(|i| bins[i].norm()).sum::<f32>() / (hi - lo + 1) as f32;
-                if m > ORBITAL_PEAK_THRESHOLD_FACTOR * mean {
+                if m > ferro_peak_threshold_factor * mean {
                     if peaks.len() < MAX_PEAKS {
                         peaks.push((k, m, bins[k].arg()));
                     }
@@ -930,16 +952,18 @@ impl KineticsModule {
         let reach_curve    = &self.smoothed_curves[channel][2][..num_bins];
         let mix_curve      = &self.smoothed_curves[channel][4][..num_bins];
 
+        let tuning_fork_min_sep = self.scalars.tuning_fork_min_sep as usize;
+
         // -- 1. Re-detect forks each hop: loud peaks above threshold, with min separation. --
         self.tuning_forks[channel].clear();
-        let mut last_pick: isize = -(TUNING_FORK_MIN_SEP as isize) - 1;
+        let mut last_pick: isize = -(tuning_fork_min_sep as isize) - 1;
         for k in 1..(num_bins - 1) {
             let m = bins[k].norm();
             if m < TUNING_FORK_MIN_MAG { continue; }
             // STRENGTH-curve gating: only bins where STRENGTH is elevated register as forks.
             if strength_curve[k] < TUNING_FORK_STRENGTH_THRESHOLD { continue; }
             if m > bins[k - 1].norm() && m > bins[k + 1].norm()
-                && (k as isize - last_pick) >= TUNING_FORK_MIN_SEP as isize
+                && (k as isize - last_pick) >= tuning_fork_min_sep as isize
             {
                 // Convert bin index to Hz using actual sample rate / fft size.
                 let freq = (k as f32) * (self.sample_rate / self.fft_size as f32);
@@ -1318,6 +1342,15 @@ impl SpectralModule for KineticsModule {
     }
     fn set_kinetics_mass_source(&mut self, src: crate::dsp::modules::kinetics::MassSource) {
         self.set_mass_source(src);
+    }
+
+    fn set_kinetics_scalars(&mut self, scalars: crate::dsp::modules::kinetics::KineticsScalars) {
+        self.scalars = scalars;
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn test_kinetics_scalars(&self) -> Option<crate::dsp::modules::kinetics::KineticsScalars> {
+        Some(self.scalars)
     }
 
     #[cfg(any(test, feature = "probe"))]

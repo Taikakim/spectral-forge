@@ -19,6 +19,8 @@ pub mod rhythm_panel;
 pub mod past_panel;
 #[cfg(feature = "dev-build")]
 pub mod life_panel;
+#[cfg(feature = "dev-build")]
+pub mod kinetics_panel;
 pub mod help_box;
 
 /// Show a tooltip for `response` only after the pointer has been stationary

@@ -352,6 +352,16 @@ pub trait SpectralModule: Send {
     #[cfg(any(test, feature = "probe"))]
     fn test_life_scalars(&self) -> Option<crate::dsp::modules::life::LifeScalars> { None }
 
+    /// Apply per-slot Kinetics mode-specific tuning scalars. Default no-op — only
+    /// `KineticsModule` overrides this.
+    /// See spec docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §2.
+    fn set_kinetics_scalars(&mut self, _: crate::dsp::modules::kinetics::KineticsScalars) {}
+
+    /// Test-only echo of currently-applied Kinetics scalars. Default `None` —
+    /// `KineticsModule` overrides to return `Some(self.scalars)`.
+    #[cfg(any(test, feature = "probe"))]
+    fn test_kinetics_scalars(&self) -> Option<crate::dsp::modules::kinetics::KineticsScalars> { None }
+
     /// Update the operating mode for Kinetics modules. Default no-op for all other types.
     fn set_kinetics_mode(&mut self, _: crate::dsp::modules::kinetics::KineticsMode) {}
     /// Update the WellSource for Kinetics-GravityWell mode. Default no-op for all other types.
@@ -804,6 +814,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         curve_labels: &["STRENGTH", "MASS", "REACH", "DAMPING", "MIX"],
         supports_sidechain: true,
         wants_sidechain: false,
+        #[cfg(feature = "dev-build")]
+        panel_widget: Some(crate::editor::kinetics_panel::draw as PanelWidgetFn),
+        #[cfg(not(feature = "dev-build"))]
         panel_widget: None,
         writes_bin_physics: true,
         needs_instantaneous_freq: false,

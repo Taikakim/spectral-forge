@@ -916,6 +916,24 @@ impl Pipeline {
             self.fx_matrix.set_life_scalars(&life_scalars);
         }
 
+        // Propagate Kinetics scalars each block.
+        {
+            let mut kinetics_scalars: [crate::dsp::modules::kinetics::KineticsScalars; 9] =
+                std::array::from_fn(|_| crate::dsp::modules::kinetics::KineticsScalars::safe_default());
+            for s in 0..9 {
+                kinetics_scalars[s] = crate::dsp::modules::kinetics::KineticsScalars {
+                    sc_envelope_tau_hops:          params.kinetics_sc_envelope_tau_hops_param(s).map(|p| p.smoothed.next()).unwrap_or(1.0),
+                    sc_mass_rate_scale:            params.kinetics_sc_mass_rate_scale_param(s).map(|p| p.smoothed.next()).unwrap_or(5.0),
+                    tuning_fork_min_sep:           params.kinetics_tuning_fork_min_sep_param(s).map(|p| p.smoothed.next()).unwrap_or(4.0),
+                    orbital_sat_half_window:       params.kinetics_orbital_sat_half_window_param(s).map(|p| p.smoothed.next()).unwrap_or(16.0),
+                    orbital_peak_threshold_factor: params.kinetics_orbital_peak_threshold_factor_param(s).map(|p| p.smoothed.next()).unwrap_or(2.0),
+                    static_well_baseline:          params.kinetics_static_well_baseline_param(s).map(|p| p.smoothed.next()).unwrap_or(1.05),
+                    sc_well_threshold_frac:        params.kinetics_sc_well_threshold_frac_param(s).map(|p| p.smoothed.next()).unwrap_or(0.4),
+                };
+            }
+            self.fx_matrix.set_kinetics_scalars(&kinetics_scalars);
+        }
+
         // Propagate kinetics modes + sources each block (try_lock is non-blocking; skipped if GUI holds lock).
         if let Some(modes) = params.slot_kinetics_mode.try_lock() {
             self.fx_matrix.set_kinetics_modes(&*modes);
