@@ -879,6 +879,20 @@ impl SpectralForgeParams {
         Some(circuit_vactrol_slow_ms_dispatch!(self, slot))
     }
 
+    /// Per-slot Modulate PllTear damping factor.
+    pub fn modulate_damping_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(modulate_damping_dispatch!(self, slot))
+    }
+
+    /// Per-slot Modulate PllTear tear angle (radians).
+    pub fn modulate_tear_angle_rad_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(modulate_tear_angle_rad_dispatch!(self, slot))
+    }
+
     /// Reset every automatable Param to its nih-plug default via the ParamSetter.
     ///
     /// Iterates `param_map()` using the raw GuiContext API so host automation is properly

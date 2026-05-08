@@ -442,6 +442,8 @@ fn apply_pll_tear(
     pll_relock: &mut [u8],
     rng_state: &mut u32,
     phase_momentum: &mut [f32],
+    damping: f32,
+    tear_angle_rad: f32,
 ) {
     use crate::dsp::physics_helpers::pll_bank_step;
     use std::f32::consts::PI;
@@ -459,16 +461,16 @@ fn apply_pll_tear(
     //
     // Loop natural frequency ωₙ from RATE curve (0..2 → 0..0.2 cycles/hop).
     let omega_n = rate_c.first().copied().unwrap_or(1.0).clamp(0.0, 2.0) * 0.1;
-    let zeta    = 0.707_f32;
+    let zeta    = damping;
     let alpha   = 2.0 * zeta * omega_n;
     let beta    = omega_n * omega_n;
 
-    // Tear threshold scales with THRESH curve (1.0 → π/2 default). The user-facing
+    // Tear threshold scales with THRESH curve (1.0 → tear_angle_rad default). The user-facing
     // clamp is 0.1..4.0, then we apply a hard cap of 2× so tear_thresh never
     // exceeds π — beyond that, "phase error above threshold" is unreachable since
     // wrap_phase folds errors into [-π, π].
     let thresh_scale = thresh_c.first().copied().unwrap_or(1.0).clamp(0.1, 4.0);
-    let tear_thresh  = PLL_TEAR_THRESHOLD * thresh_scale.min(2.0);
+    let tear_thresh  = tear_angle_rad * thresh_scale.min(2.0);
 
     // REACH defines bin range upper bound (0..2 → 0..num_bins).
     let reach_norm = reach_c.first().copied().unwrap_or(1.0).clamp(0.0, 1.0);
@@ -554,6 +556,35 @@ fn unwrap_phase_local(unwrap_local: &mut [f32], prev_phase: &mut [f32], cur_phas
     prev_phase.copy_from_slice(cur_phase);
 }
 
+// ── ModulateScalars ────────────────────────────────────────────────────────
+
+/// PllTear-mode tuning scalars exposed for prototyping. Each field's safe_default
+/// reproduces the current hardcoded constant exactly.
+///
+/// `damping`: PLL critical-damping factor. 0.707 is critically damped; lower =
+/// more ringing, higher = more sluggish.
+/// `tear_angle_rad`: phase-error threshold for PLL tear events; π/2 = 90°.
+///
+/// See docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §4.
+#[derive(Clone, Copy, Debug)]
+pub struct ModulateScalars {
+    pub damping:        f32,
+    pub tear_angle_rad: f32,
+}
+
+impl ModulateScalars {
+    pub fn safe_default() -> Self {
+        Self {
+            damping:        0.707,
+            tear_angle_rad: std::f32::consts::FRAC_PI_2,
+        }
+    }
+}
+
+impl Default for ModulateScalars {
+    fn default() -> Self { Self::safe_default() }
+}
+
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
@@ -567,6 +598,8 @@ const PLL_MIN_BIN: usize = 16;
 /// Number of consecutive hops with |err| < PLL_RELOCK_THRESHOLD required to re-lock.
 const PLL_RELOCK_HOPS: u8 = 4;
 /// Phase error above which lock is declared lost (π/2 rad).
+/// Kept as a documentation anchor; the live value is now `ModulateScalars::tear_angle_rad`.
+#[allow(dead_code)]
 const PLL_TEAR_THRESHOLD: f32 = std::f32::consts::FRAC_PI_2;
 /// Phase error below which re-lock count increments (π/8 rad).
 const PLL_RELOCK_THRESHOLD: f32 = std::f32::consts::FRAC_PI_4 * 0.5; // π/8
@@ -646,6 +679,8 @@ pub struct ModulateModule {
     fm_partial_count: usize,
     sample_rate: f32,
     fft_size: usize,
+    /// PllTear-mode tuning scalars (damping + tear_angle_rad).
+    scalars: ModulateScalars,
     #[cfg(any(test, feature = "probe"))]
     last_probe: crate::dsp::modules::ProbeSnapshot,
 }
@@ -681,6 +716,7 @@ impl ModulateModule {
             fm_partial_count: 0,
             sample_rate:  48_000.0,
             fft_size:     2048,
+            scalars:      ModulateScalars::safe_default(),
             #[cfg(any(test, feature = "probe"))]
             last_probe:   crate::dsp::modules::ProbeSnapshot::default(),
         }
@@ -990,6 +1026,8 @@ impl SpectralModule for ModulateModule {
                         &mut self.pll_relock_count[channel][..num_bins],
                         &mut self.tear_rng[channel],
                         momentum,
+                        self.scalars.damping,
+                        self.scalars.tear_angle_rad,
                     );
                 } else {
                     debug_assert!(false,
@@ -1097,6 +1135,15 @@ impl SpectralModule for ModulateModule {
 
     fn set_modulate_sc_positioned(&mut self, enabled: bool) {
         self.sc_positioned = enabled;
+    }
+
+    fn set_modulate_scalars(&mut self, scalars: crate::dsp::modules::modulate::ModulateScalars) {
+        self.scalars = scalars;
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn test_modulate_scalars(&self) -> Option<crate::dsp::modules::modulate::ModulateScalars> {
+        Some(self.scalars)
     }
 
     #[cfg(any(test, feature = "probe"))]

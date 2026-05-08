@@ -947,6 +947,19 @@ impl Pipeline {
             self.fx_matrix.set_circuit_scalars(&circuit_scalars);
         }
 
+        // Propagate Modulate scalars each block.
+        {
+            let mut modulate_scalars: [crate::dsp::modules::modulate::ModulateScalars; 9] =
+                std::array::from_fn(|_| crate::dsp::modules::modulate::ModulateScalars::safe_default());
+            for s in 0..9 {
+                modulate_scalars[s] = crate::dsp::modules::modulate::ModulateScalars {
+                    damping:        params.modulate_damping_param(s).map(|p| p.smoothed.next()).unwrap_or(0.707),
+                    tear_angle_rad: params.modulate_tear_angle_rad_param(s).map(|p| p.smoothed.next()).unwrap_or(std::f32::consts::FRAC_PI_2),
+                };
+            }
+            self.fx_matrix.set_modulate_scalars(&modulate_scalars);
+        }
+
         // Propagate kinetics modes + sources each block (try_lock is non-blocking; skipped if GUI holds lock).
         if let Some(modes) = params.slot_kinetics_mode.try_lock() {
             self.fx_matrix.set_kinetics_modes(&*modes);

@@ -372,6 +372,16 @@ pub trait SpectralModule: Send {
     #[cfg(any(test, feature = "probe"))]
     fn test_circuit_scalars(&self) -> Option<crate::dsp::modules::circuit::CircuitScalars> { None }
 
+    /// Apply per-slot Modulate PllTear tuning scalars (damping + tear_angle_rad).
+    /// Default no-op — only `ModulateModule` overrides this.
+    /// See spec docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §4.
+    fn set_modulate_scalars(&mut self, _: crate::dsp::modules::modulate::ModulateScalars) {}
+
+    /// Test-only echo of currently-applied Modulate scalars. Default `None` —
+    /// `ModulateModule` overrides to return `Some(self.scalars)`.
+    #[cfg(any(test, feature = "probe"))]
+    fn test_modulate_scalars(&self) -> Option<crate::dsp::modules::modulate::ModulateScalars> { None }
+
     /// Update the operating mode for Kinetics modules. Default no-op for all other types.
     fn set_kinetics_mode(&mut self, _: crate::dsp::modules::kinetics::KineticsMode) {}
     /// Update the WellSource for Kinetics-GravityWell mode. Default no-op for all other types.
@@ -751,6 +761,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         curve_labels: &["AMOUNT", "REACH", "RATE", "THRESH", "AMPGATE", "MIX"],
         supports_sidechain: true,
         wants_sidechain: true,
+        #[cfg(feature = "dev-build")]
+        panel_widget: Some(crate::editor::modulate_panel::draw as PanelWidgetFn),
+        #[cfg(not(feature = "dev-build"))]
         panel_widget: None,
         writes_bin_physics: true,
         needs_instantaneous_freq: true,
