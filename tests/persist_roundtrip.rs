@@ -49,6 +49,7 @@ fn persist_roundtrip_all_keys_present() {
         "slot_targets", "slot_gain_mode", "slot_future_mode", "slot_punch_mode",
         "slot_rhythm_mode", "slot_geometry_mode", "slot_modulate_mode",
         "slot_modulate_repel", "slot_modulate_sc_positioned",
+        "slot_contrast_mode",
         "slot_circuit_mode", "slot_life_mode",
         "slot_past_mode", "slot_past_sort_key",
         "slot_kinetics_mode", "slot_kinetics_well_source", "slot_kinetics_mass_source",

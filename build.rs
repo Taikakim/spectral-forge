@@ -64,6 +64,7 @@ fn main() {
     emit_kinetics_scalar_fields(&mut f);
     emit_circuit_scalar_fields(&mut f);
     emit_modulate_scalar_fields(&mut f);
+    emit_contrast_scalar_fields(&mut f);
     writeln!(f, "}}").unwrap();
     writeln!(f).unwrap();
 
@@ -80,6 +81,7 @@ fn main() {
     emit_kinetics_scalar_inits(&mut f);
     emit_circuit_scalar_inits(&mut f);
     emit_modulate_scalar_inits(&mut f);
+    emit_contrast_scalar_inits(&mut f);
     writeln!(f, "        }}").unwrap();
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
@@ -106,6 +108,7 @@ fn main() {
     emit_kinetics_scalar_map_entries(&mut f);
     emit_circuit_scalar_map_entries(&mut f);
     emit_modulate_scalar_map_entries(&mut f);
+    emit_contrast_scalar_map_entries(&mut f);
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -130,6 +133,8 @@ fn main() {
     emit_circuit_scalar_dispatch(&mut f);
     writeln!(f).unwrap();
     emit_modulate_scalar_dispatch(&mut f);
+    writeln!(f).unwrap();
+    emit_contrast_scalar_dispatch(&mut f);
 }
 
 // ── Field declarations (bare, no initializers) ──────────────────────────────
@@ -871,6 +876,87 @@ fn emit_modulate_scalar_dispatch(f: &mut File) {
         writeln!(f, "        match $s {{").unwrap();
         for s in 0..NUM_SLOTS {
             writeln!(f, "            {s} => &$self.generated.s{s}_modulate_{suffix},").unwrap();
+        }
+        writeln!(f, "            _ => unreachable!(),").unwrap();
+        writeln!(f, "        }}").unwrap();
+        writeln!(f, "    }};").unwrap();
+        writeln!(f, "}}").unwrap();
+        writeln!(f).unwrap();
+    }
+}
+
+// ── Contrast Scalars: per-slot Spatial/Tilt tuning params ─────────────────
+//
+// Two new per-slot params for Contrast mode-specific scalars (2 × 9 = 18 fields):
+//   - contrast_mean_window_st        Linear 0.1..24.0, default 1.0  (Spatial only)
+//   - contrast_tilt_slope_db_per_oct Linear -6.0..6.0, default 0.0  (Tilt only)
+//
+// See docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §5.
+
+struct ContrastScalarSpec {
+    suffix:  &'static str,
+    default: f32,
+    min:     f32,
+    max:     f32,
+    unit:    &'static str,
+}
+
+const CONTRAST_SCALAR_SPECS: &[ContrastScalarSpec] = &[
+    ContrastScalarSpec { suffix: "mean_window_st",        default: 1.0, min: 0.1,  max: 24.0, unit: " st" },
+    ContrastScalarSpec { suffix: "tilt_slope_db_per_oct", default: 0.0, min: -6.0, max: 6.0,  unit: " dB/oct" },
+];
+
+fn emit_contrast_scalar_fields(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for spec in CONTRAST_SCALAR_SPECS {
+            let suffix = spec.suffix;
+            writeln!(f, "    pub s{s}_contrast_{suffix}: FloatParam,").unwrap();
+        }
+    }
+}
+
+fn emit_contrast_scalar_inits(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for spec in CONTRAST_SCALAR_SPECS {
+            let suffix  = spec.suffix;
+            let default = spec.default;
+            let min     = spec.min;
+            let max     = spec.max;
+            let unit    = spec.unit;
+            writeln!(
+                f,
+                "            s{s}_contrast_{suffix}: FloatParam::new(\"s{s}contrast_{suffix}\", {default}f32, \
+                 FloatRange::Linear {{ min: {min}f32, max: {max}f32 }})\
+                 .with_smoother(SmoothingStyle::Linear(50.0))\
+                 .with_unit({unit:?})\
+                 .hide_in_generic_ui(),"
+            ).unwrap();
+        }
+    }
+}
+
+fn emit_contrast_scalar_map_entries(f: &mut File) {
+    for s in 0..NUM_SLOTS {
+        for spec in CONTRAST_SCALAR_SPECS {
+            let suffix    = spec.suffix;
+            let id        = format!("s{s}contrast_{suffix}");
+            let rust_name = format!("s{s}_contrast_{suffix}");
+            writeln!(
+                f,
+                "        out.push(({id:?}.to_string(), self.{rust_name}.as_ptr(), String::new()));"
+            ).unwrap();
+        }
+    }
+}
+
+fn emit_contrast_scalar_dispatch(f: &mut File) {
+    for spec in CONTRAST_SCALAR_SPECS {
+        let suffix = spec.suffix;
+        writeln!(f, "macro_rules! contrast_{suffix}_dispatch {{").unwrap();
+        writeln!(f, "    ($self:expr, $s:expr) => {{").unwrap();
+        writeln!(f, "        match $s {{").unwrap();
+        for s in 0..NUM_SLOTS {
+            writeln!(f, "            {s} => &$self.generated.s{s}_contrast_{suffix},").unwrap();
         }
         writeln!(f, "            _ => unreachable!(),").unwrap();
         writeln!(f, "        }}").unwrap();

@@ -12,6 +12,7 @@ use crate::dsp::modules::circuit::CircuitMode;
 use crate::dsp::modules::life::LifeMode;
 use crate::dsp::modules::past::{PastMode, SortKey};
 use crate::dsp::modules::modulate::ModulateMode;
+use crate::dsp::modules::contrast::ContrastMode;
 use crate::dsp::modules::punch::PunchMode;
 use crate::dsp::modules::rhythm::{ArpGrid, ArpTriggerSource, RhythmMode};
 
@@ -220,6 +221,10 @@ pub struct SpectralForgeParams {
     /// Per-slot Decay / Stability / Area sort key for `PastModule`'s DecaySorter sub-mode.
     /// Single mutex over the array so audio thread takes one lock per block.
     pub slot_past_sort_key: Arc<Mutex<[SortKey; 9]>>,
+
+    /// ContrastMode per slot (Spatial / Temporal / Tilt) for `ContrastModule`.
+    /// Single mutex over the array so audio thread takes one lock per block.
+    pub slot_contrast_mode: Arc<Mutex<[ContrastMode; 9]>>,
 
     /// KineticsMode per slot (only meaningful for Kinetics module slots).
     /// Single mutex over the array (matches `slot_past_mode`) so audio thread takes one lock per block.
@@ -448,6 +453,7 @@ impl Default for SpectralForgeParams {
             slot_life_mode:    Arc::new(Mutex::new([LifeMode::default();    9])),
             slot_past_mode:     Arc::new(Mutex::new([PastMode::default(); 9])),
             slot_past_sort_key: Arc::new(Mutex::new([SortKey::default();  9])),
+            slot_contrast_mode: Arc::new(Mutex::new([ContrastMode::default(); 9])),
             slot_kinetics_mode:        Arc::new(Mutex::new([crate::dsp::modules::kinetics::KineticsMode::default(); 9])),
             slot_kinetics_well_source: Arc::new(Mutex::new([crate::dsp::modules::kinetics::WellSource::default();   9])),
             slot_kinetics_mass_source: Arc::new(Mutex::new([crate::dsp::modules::kinetics::MassSource::default();   9])),
@@ -893,6 +899,20 @@ impl SpectralForgeParams {
         Some(modulate_tear_angle_rad_dispatch!(self, slot))
     }
 
+    /// Per-slot Contrast mean window width (semitones, Spatial mode).
+    pub fn contrast_mean_window_st_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(contrast_mean_window_st_dispatch!(self, slot))
+    }
+
+    /// Per-slot Contrast tilt slope (dB/octave, Tilt mode).
+    pub fn contrast_tilt_slope_db_per_oct_param(&self, slot: usize) -> Option<&FloatParam> {
+        use crate::param_ids::NUM_SLOTS;
+        if slot >= NUM_SLOTS { return None; }
+        Some(contrast_tilt_slope_db_per_oct_dispatch!(self, slot))
+    }
+
     /// Reset every automatable Param to its nih-plug default via the ParamSetter.
     ///
     /// Iterates `param_map()` using the raw GuiContext API so host automation is properly
@@ -1145,6 +1165,7 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_life_mode",     slot_life_mode);
         persist_out!("slot_past_mode",     slot_past_mode);
         persist_out!("slot_past_sort_key", slot_past_sort_key);
+        persist_out!("slot_contrast_mode",          slot_contrast_mode);
         persist_out!("slot_kinetics_mode",         slot_kinetics_mode);
         persist_out!("slot_kinetics_well_source",  slot_kinetics_well_source);
         persist_out!("slot_kinetics_mass_source",  slot_kinetics_mass_source);
@@ -1210,6 +1231,7 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_life_mode"      => persist_in!("slot_life_mode",      slot_life_mode,      data),
                 "slot_past_mode"      => persist_in!("slot_past_mode",      slot_past_mode,      data),
                 "slot_past_sort_key"  => persist_in!("slot_past_sort_key",  slot_past_sort_key,  data),
+                "slot_contrast_mode"          => persist_in!("slot_contrast_mode",          slot_contrast_mode,          data),
                 "slot_kinetics_mode"         => persist_in!("slot_kinetics_mode",         slot_kinetics_mode,         data),
                 "slot_kinetics_well_source"  => persist_in!("slot_kinetics_well_source",  slot_kinetics_well_source,  data),
                 "slot_kinetics_mass_source"  => persist_in!("slot_kinetics_mass_source",  slot_kinetics_mass_source,  data),

@@ -382,6 +382,20 @@ pub trait SpectralModule: Send {
     #[cfg(any(test, feature = "probe"))]
     fn test_modulate_scalars(&self) -> Option<crate::dsp::modules::modulate::ModulateScalars> { None }
 
+    /// Update the operating mode for Contrast modules (Spatial/Temporal/Tilt).
+    /// Default no-op for all other types.
+    fn set_contrast_mode(&mut self, _: crate::dsp::modules::contrast::ContrastMode) {}
+
+    /// Apply per-slot Contrast scalars (mean_window_st, tilt_slope_db_per_oct).
+    /// Default no-op — only `ContrastModule` overrides this.
+    /// See spec docs/superpowers/specs/2026-05-09-prototyping-exposable-scalars-design.md §5.
+    fn set_contrast_scalars(&mut self, _: crate::dsp::modules::contrast::ContrastScalars) {}
+
+    /// Test-only echo of currently-applied Contrast scalars. Default `None` —
+    /// `ContrastModule` overrides to return `Some(self.scalars)`.
+    #[cfg(any(test, feature = "probe"))]
+    fn test_contrast_scalars(&self) -> Option<crate::dsp::modules::contrast::ContrastScalars> { None }
+
     /// Update the operating mode for Kinetics modules. Default no-op for all other types.
     fn set_kinetics_mode(&mut self, _: crate::dsp::modules::kinetics::KineticsMode) {}
     /// Update the WellSource for Kinetics-GravityWell mode. Default no-op for all other types.
@@ -601,6 +615,9 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         curve_labels: &["THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE", "MIX"],
         supports_sidechain: false,
         wants_sidechain: false,
+        #[cfg(feature = "dev-build")]
+        panel_widget: Some(crate::editor::contrast_panel::draw as PanelWidgetFn),
+        #[cfg(not(feature = "dev-build"))]
         panel_widget: None,
         writes_bin_physics: false,
         needs_instantaneous_freq: false,

@@ -21,10 +21,21 @@ fn all_shipped_modules_have_panel_widget_none() {
         // Rhythm is the first module to opt in to a panel widget (Phase 2d.7);
         // every other shipped module still defers its panel work.
         if ty == ModuleType::Rhythm { continue; }
+        // Contrast gains a dev-build-only mode picker + scalar knobs panel.
+        // In release builds panel_widget is still None; in dev-build it is Some.
+        #[cfg(not(feature = "dev-build"))]
         assert!(
             module_spec(ty).panel_widget.is_none(),
             "{ty:?} should have panel_widget = None until its panel is implemented",
         );
+        // Under dev-build, Contrast is allowed to have Some(panel_widget).
+        #[cfg(feature = "dev-build")]
+        if ty != ModuleType::Contrast {
+            assert!(
+                module_spec(ty).panel_widget.is_none(),
+                "{ty:?} should have panel_widget = None until its panel is implemented",
+            );
+        }
     }
 }
 

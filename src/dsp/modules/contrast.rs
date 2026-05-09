@@ -1,10 +1,43 @@
 use num_complex::Complex;
-use crate::dsp::engines::{BinParams, SpectralEngine, create_engine, EngineSelection};
+use crate::dsp::engines::{BinParams, SpectralEngine};
+use crate::dsp::engines::spectral_contrast::SpectralContrastEngine;
 use crate::params::{FxChannelTarget, StereoLink};
 use super::{ModuleContext, ModuleType, SpectralModule};
 
+// ── ContrastMode ──────────────────────────────────────────────────────────
+
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ContrastMode {
+    #[default]
+    Spatial,
+    Temporal,
+    Tilt,
+}
+
+// ── ContrastScalars ───────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug)]
+pub struct ContrastScalars {
+    pub mean_window_st:        f32,  // Spatial only
+    pub tilt_slope_db_per_oct: f32,  // Tilt only
+}
+
+impl ContrastScalars {
+    pub fn safe_default() -> Self {
+        Self { mean_window_st: 1.0, tilt_slope_db_per_oct: 0.0 }
+    }
+}
+
+impl Default for ContrastScalars {
+    fn default() -> Self { Self::safe_default() }
+}
+
+// ── ContrastModule ────────────────────────────────────────────────────────
+
 pub struct ContrastModule {
-    engine:       Box<dyn SpectralEngine>,
+    engine:       SpectralContrastEngine,
+    mode:         ContrastMode,
+    scalars:      ContrastScalars,
     bp_threshold: Vec<f32>,
     bp_ratio:     Vec<f32>,
     bp_attack:    Vec<f32>,
@@ -21,7 +54,9 @@ pub struct ContrastModule {
 impl ContrastModule {
     pub fn new() -> Self {
         Self {
-            engine:       create_engine(EngineSelection::SpectralContrast),
+            engine:       SpectralContrastEngine::new(),
+            mode:         ContrastMode::default(),
+            scalars:      ContrastScalars::safe_default(),
             bp_threshold: Vec::new(),
             bp_ratio:     Vec::new(),
             bp_attack:    Vec::new(),
@@ -34,6 +69,19 @@ impl ContrastModule {
             #[cfg(any(test, feature = "probe"))]
             last_probe: Default::default(),
         }
+    }
+
+    pub fn set_mode(&mut self, mode: ContrastMode) {
+        self.mode = mode;
+    }
+
+    pub fn set_contrast_scalars(&mut self, scalars: ContrastScalars) {
+        self.scalars = scalars;
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    pub fn test_contrast_scalars(&self) -> ContrastScalars {
+        self.scalars
     }
 }
 
@@ -62,7 +110,7 @@ impl SpectralModule for ContrastModule {
         _stereo_link: StereoLink,
         _target: FxChannelTarget,
         bins: &mut [Complex<f32>],
-        sidechain: Option<&[f32]>,
+        _sidechain: Option<&[f32]>,
         curves: &[&[f32]],
         suppression_out: &mut [f32],
         _physics: Option<&mut crate::dsp::bin_physics::BinPhysics>,
@@ -105,7 +153,29 @@ impl SpectralModule for ContrastModule {
             peaks:                 None,
             plpv_dynamics_enabled: false,
         };
-        self.engine.process_bins(bins, sidechain, &params, self.sample_rate, suppression_out);
+
+        // Mode dispatch — Spatial / Temporal / Tilt kernels.
+        match self.mode {
+            ContrastMode::Spatial => {
+                self.engine.process_bins_spatial(
+                    bins, &params, self.sample_rate,
+                    self.scalars.mean_window_st,
+                    suppression_out,
+                );
+            }
+            ContrastMode::Temporal => {
+                self.engine.process_bins_temporal(
+                    bins, &params, self.sample_rate, suppression_out,
+                );
+            }
+            ContrastMode::Tilt => {
+                self.engine.process_bins_tilt(
+                    bins, &params, ctx.fft_size, self.sample_rate,
+                    self.scalars.tilt_slope_db_per_oct,
+                    suppression_out,
+                );
+            }
+        }
 
         #[cfg(any(test, feature = "probe"))]
         {
@@ -130,6 +200,19 @@ impl SpectralModule for ContrastModule {
 
     fn module_type(&self) -> ModuleType { ModuleType::Contrast }
     fn num_curves(&self) -> usize { 6 }
+
+    fn set_contrast_mode(&mut self, mode: crate::dsp::modules::contrast::ContrastMode) {
+        self.set_mode(mode);
+    }
+
+    fn set_contrast_scalars(&mut self, scalars: crate::dsp::modules::contrast::ContrastScalars) {
+        ContrastModule::set_contrast_scalars(self, scalars);
+    }
+
+    #[cfg(any(test, feature = "probe"))]
+    fn test_contrast_scalars(&self) -> Option<crate::dsp::modules::contrast::ContrastScalars> {
+        Some(ContrastModule::test_contrast_scalars(self))
+    }
 
     #[cfg(any(test, feature = "probe"))]
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
