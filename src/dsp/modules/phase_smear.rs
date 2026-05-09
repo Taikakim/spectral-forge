@@ -104,7 +104,9 @@ impl SpectralModule for PhaseSmearModule {
             let amount_curve = curves.get(0).and_then(|c| c.get(k))
                                .copied().unwrap_or(1.0).clamp(0.0, 2.0);
             let per_bin    = (amount_curve * (1.0 + sc_mod)).clamp(0.0, 2.0);
-            let scale      = per_bin * std::f32::consts::PI;
+            let phase_range_g = curves.get(3).and_then(|c| c.get(k)).copied().unwrap_or(1.0);
+            let max_phase  = phase_range_g * std::f32::consts::PI;
+            let scale      = per_bin * max_phase;
             let rand_phase = (rand as f32 / u64::MAX as f32 * 2.0 - 1.0) * scale;
             let mix = curves.get(2).and_then(|c| c.get(k))
                             .copied().unwrap_or(1.0).clamp(0.0, 1.0);
@@ -161,7 +163,7 @@ impl SpectralModule for PhaseSmearModule {
     }
 
     fn module_type(&self) -> ModuleType { ModuleType::PhaseSmear }
-    fn num_curves(&self) -> usize { 3 }
+    fn num_curves(&self) -> usize { 4 }
 
     /// Phase 4.3b — propagated each block by `FxMatrix::set_plpv_phase_smear_enable`.
     fn set_plpv_phase_smear_enabled(&mut self, enabled: bool) {

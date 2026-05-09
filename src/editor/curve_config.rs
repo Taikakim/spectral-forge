@@ -199,6 +199,16 @@ fn phase_smear_config(i: usize) -> CurveDisplayConfig {
             offset_fn: off_mix,
             natural_at_max: true,
         },
+        // PHASE_RANGE: per-bin maximum random-phase scale as multiples of π.
+        // gain=1.0 → 1×π (matches legacy hardcoded behaviour); gain=2.0 → 2π
+        // (full rotation); gain=0.0 → no smearing for that bin.
+        3 => CurveDisplayConfig {
+            y_label: "× π", y_min: 0.0, y_max: 2.0, y_log: false,
+            grid_lines: &[(0.5, "0.5×π"), (1.0, "π"), (1.5, "1.5×π"), (2.0, "2×π")],
+            y_natural: 1.0,
+            offset_fn: off_amount_200,
+            natural_at_max: false,
+        },
         _ => default_config(),
     }
 }

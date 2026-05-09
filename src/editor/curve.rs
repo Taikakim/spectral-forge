@@ -280,6 +280,7 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
             0 => 7,             // AMOUNT → 0–200 %
             1 => 14,            // PEAK HOLD → ms via peak_hold_curve_to_ms (was 10, misused Portamento mapping)
             2 => 6,             // MIX → %
+            3 => 11,            // PHASE_RANGE → 0–2 dimensionless (× π; same scale as Resistance)
             _ => curve_idx,
         },
         ModuleType::Contrast => match curve_idx {
