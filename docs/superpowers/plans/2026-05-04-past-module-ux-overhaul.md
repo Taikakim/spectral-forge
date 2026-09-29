@@ -1,5 +1,7 @@
 # Past Module UX Overhaul Implementation Plan
 
+> **Status:** IMPLEMENTED — all 17 tasks landed in commits `94208ed`..`99e03f4`. Later changes: the module-wide Soft Clip toggle (Tasks 11, 15) was removed from Past DSP in `f53dfa6` and moved to the master stage (plan [`2026-05-06-stabilization-sweep.md`](2026-05-06-stabilization-sweep.md)); the Past mode popup was replaced by inline slot-row buttons in `5d6f3b4` (plan [`2026-05-07-stabilization-sweep-bc.md`](2026-05-07-stabilization-sweep-bc.md)). The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement [`2026-05-04-past-module-ux-design.md`](../specs/2026-05-04-past-module-ux-design.md) — make Past show only the curves the active mode reads per-bin, replace TIME/SPREAD averaging in Reverse/Stretch with proper scalar sliders, add a module-wide Soft Clip toggle, surface DecaySorter's `low_k` floor as a slider, and render a help-box right of the matrix that explains the module/curve. Also lands the foundation `CurveLayout` infrastructure (UI spec §8) consumed by every future per-module UX overhaul.

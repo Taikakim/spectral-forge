@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics + instantaneous-frequency infrastructure (both DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-09-29): IMPLEMENTED** — implemented by plan [`2026-04-27-phase-6.5-harmony-module.md`](../plans/2026-04-27-phase-6.5-harmony-module.md) on top of the Phase 6.1–6.4 infrastructure (instantaneous frequency, chromagram, MIDI input, cepstrum). The shipped module diverges from this design (8 modes: adds Lifter, Inharmonic, Harmonic Generator and Shuffler to the 4 described here); read the plan + code, not this spec, for current behaviour. Source of truth for runtime behaviour: source code (`src/dsp/modules/harmony.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
 
 # Harmony Module — Design Spec
 

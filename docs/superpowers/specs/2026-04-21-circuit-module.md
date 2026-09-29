@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics infrastructure (also DEFERRED). Not yet implemented. Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-09-29): IMPLEMENTED** — implemented by plans [`2026-04-27-phase-2g-circuit-light.md`](../plans/2026-04-27-phase-2g-circuit-light.md) (3 modes) and [`2026-04-27-phase-5c-full-circuit.md`](../plans/2026-04-27-phase-5c-full-circuit.md) (10 modes total). The shipped module diverges from this design (adds Crossover Distortion and Bias Fuzz; 5 curves `[AMOUNT, THRESHOLD, SPREAD, RELEASE, MIX]` instead of 4); read the plans + code, not this spec, for current behaviour. Source of truth for runtime behaviour: source code (`src/dsp/modules/circuit.rs`, `src/dsp/circuit_kernels.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
 
 # Circuit Module — Design Spec
 

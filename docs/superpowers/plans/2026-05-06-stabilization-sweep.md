@@ -1,5 +1,7 @@
 # Stabilization Sweep Implementation Plan
 
+> **Status:** IMPLEMENTED (sub-project A) — routing-matrix fix (`f3d7d53`), soft clipper moved from Past to `MasterModule` (`1ae696b`, `f53dfa6`), PLPV smearing fix (`f26c3ac`), Empty-slot wet-path transparency; closed in tracker (`5649285`). Sub-projects B + C continue in [`2026-05-07-stabilization-sweep-bc.md`](2026-05-07-stabilization-sweep-bc.md). The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix four entangled audio-path bugs — routing matrix non-functional, soft clipper at wrong layer (PAST→Master with toggle), smearing-over-time accumulating across blocks, and Empty-slot wet path opaqueness.

@@ -1,5 +1,7 @@
 # Graph Display Audit Table (2026-05-05)
 
+> **Status:** IMPLEMENTED — frozen snapshot; the live regression guard is `tests/curve_calibration_matrix.rs`. See [../STATUS.md](../STATUS.md).
+
 Generated after Tasks 1–16 of `2026-05-05-graph-display-correctness.md`.
 The `tests/curve_calibration_matrix.rs` matrix test is the live regression
 guard; this table is a frozen snapshot of the current calibration state

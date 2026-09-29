@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics infrastructure (DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-09-29): IMPLEMENTED** — implemented by plan [`2026-04-27-phase-5b3-kinetics.md`](../plans/2026-04-27-phase-5b3-kinetics.md). The shipped module diverges from this design (8 modes: adds Tuning Fork and Diamagnet to the 6 described here); read the plan + code, not this spec, for current behaviour. Source of truth for runtime behaviour: source code (`src/dsp/modules/kinetics.rs`, `src/dsp/physics_helpers.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
 
 # Kinetics Module — Design Spec
 

@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics + instantaneous-frequency infrastructure (both DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-09-29): IMPLEMENTED** — implemented by plans [`2026-04-27-phase-2f-modulate-light.md`](../plans/2026-04-27-phase-2f-modulate-light.md) (5 modes), [`2026-04-27-phase-5b4-modulate-retrofit.md`](../plans/2026-04-27-phase-5b4-modulate-retrofit.md) (+ Gravity Phaser, PLL Tear) and [`2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md`](../plans/2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md) (+ FM Network) = 8 modes. The shipped module diverges from this design (adds Diode RM and Ground Loop); read the plans + code, not this spec, for current behaviour. Source of truth for runtime behaviour: source code (`src/dsp/modules/modulate.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
 
 # Modulate Module — Design Spec
 

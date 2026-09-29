@@ -13,11 +13,20 @@ src/editor/
                         THE only file you need to touch for a full reskin.
   curve.rs              CurveNode type, compute_curve_response(), paint_response_curve(),
                         curve_widget() — the per-bin spectral EQ drawing and interaction.
+  curve_config.rs       CurveDisplayConfig — the only place per-curve display ranges,
+                        grid lines, and unit labels are defined.
   spectrum_display.rs   paint_spectrum_and_suppression() — pre/post-FX spectrum gradient.
-  suppression_display.rs  (legacy, kept for reference; not called from main UI)
   fx_matrix_grid.rs     The 9×9 slot routing matrix widget.
   module_popup.rs       Right-click module assignment popup.
-  mod.rs                pub use for the above.
+  amp_popup.rs          Routing-matrix cell (send amplitude) popup.
+  help_box.rs           Help-box widget rendered right of the routing matrix.
+  preset_menu.rs        preset_menu_ui() — preset picker.
+  mod_ring.rs           Modulation Ring overlay (S/H, Sync, Legato).
+  *_popup.rs, *_panel.rs  Per-module mode popups and panels (circuit, harmony, kinetics,
+                        life, past, rhythm, modulate, contrast). The circuit, contrast,
+                        kinetics, life, and modulate panels compile only with the
+                        dev-build feature.
+  mod.rs                Module declarations and re-exports for the above.
 
 src/editor_ui.rs        Top-level egui frame: assembles all widgets, reads params,
                         applies ui_scale, wires interaction to triple-buffer publish.

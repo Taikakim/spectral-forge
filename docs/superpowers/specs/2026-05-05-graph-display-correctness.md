@@ -1,6 +1,6 @@
 # Graph Display Correctness — Audit & Recalibration
 
-**Status:** SPEC (2026-05-05)
+**Status:** IMPLEMENTED (spec dated 2026-05-05) — delivered by plan [`2026-05-05-graph-display-correctness.md`](../plans/2026-05-05-graph-display-correctness.md); regression guard `tests/curve_calibration_matrix.rs`. The code is the source of truth. See [../STATUS.md](../STATUS.md).
 
 **Goal:** Bring every curve in every module onto the global config-driven UI
 system, fix the WYSIWYG calibration mismatch in the offset slider ↔ curve

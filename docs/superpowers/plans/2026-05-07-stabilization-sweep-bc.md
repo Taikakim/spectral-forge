@@ -1,5 +1,7 @@
 # Stabilization Sweep B+C Implementation Plan
 
+> **Status:** IMPLEMENTED — module-switch tilt/offset/curvature reset (`1496f12`), inline Past mode UI replacing the popup (`5d6f3b4`), offset default +1 for natural-at-max curves (`d67fd91`, `1d2b706`), off-rect node indicators (`8801840`, `590d41c`); closed in tracker (`242e8f6`). The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close residual module-switch state hygiene (#13), inline PAST mode UI (#14), fix the offset slider's dead-half problem on natural-at-max curves (#3, #5, #7), and add off-rect indicators to the existing virtual node y-range (#17, #18).

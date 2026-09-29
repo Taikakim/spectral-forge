@@ -1,5 +1,7 @@
 # Curve Display Axis-Config Wiring + Threshold Formula Fix Implementation Plan
 
+> **Status:** IMPLEMENTED — log gain→dBFS threshold formula at display index 9 (`2efcb52`) and config-driven Y-axis rendering from each module's `CurveDisplayConfig` landed on master. The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the broken Freeze/PAST threshold-curve display floor at display

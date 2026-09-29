@@ -1,6 +1,6 @@
 # Spectral Forge — Stabilization Sweep (Sub-project A)
 
-**Status:** SPEC (2026-05-06)
+**Status:** IMPLEMENTED (spec dated 2026-05-06) — delivered by plan [`2026-05-06-stabilization-sweep.md`](../plans/2026-05-06-stabilization-sweep.md); closed in tracker (`5649285`). The code is the source of truth. See [../STATUS.md](../STATUS.md).
 
 **Goal:** Fix four entangled audio-path bugs in the Spectral Forge plugin: routing matrix non-functional, soft clipper at wrong layer, all-modules-disabled wet path not transparent, and smearing-over-time accumulating across blocks even with no modules loaded.
 

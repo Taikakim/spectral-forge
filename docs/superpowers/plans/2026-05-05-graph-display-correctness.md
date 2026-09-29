@@ -1,5 +1,7 @@
 # Graph Display Correctness Implementation Plan
 
+> **Status:** IMPLEMENTED — axis-aware `offset_fn` anchors and WYSIWYG offset-slider recalibration across all modules landed on master; regression guard `tests/curve_calibration_matrix.rs` (`13fb69a`); post-Tasks 1–16 snapshot in spec [`2026-05-05-graph-display-audit-table.md`](../specs/2026-05-05-graph-display-audit-table.md). The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring every curve in every module onto the global config-driven UI

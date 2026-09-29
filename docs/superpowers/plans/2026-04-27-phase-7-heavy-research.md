@@ -1,6 +1,6 @@
 # Phase 7 — Heavy / Research-Grade (Umbrella)
 
-> **STATUS:** PLANNED, RESEARCH-BLOCKED. Authoritative status: `docs/superpowers/STATUS.md`.
+> **STATUS:** DEFERRED (research-blocked) — no sub-plans written, no code on master. Authoritative status: `docs/superpowers/STATUS.md`.
 
 > **For agentic workers:** This is an **index document, not an implementable plan.**
 > Each sub-phase below is gated on a research deliverable (research prompts in

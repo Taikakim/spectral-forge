@@ -1,5 +1,16 @@
 # Technical Specification: Modular Rust Spectral Processor Plugin
 
+> **STATUS: SUPERSEDED (historical).** This is the original 0.1.0 design spec,
+> written before the modular architecture. The single-engine pipeline, single
+> Catmull-Rom curve, top-level `editor.rs`, and CLAP-only / Linux-only
+> targeting it describes were replaced in the 0.15 cycle by the modular
+> `FxMatrix` (9 slots of typed `SpectralModule`s wired through a `RouteMatrix`,
+> up to 7 curves per slot), exported as CLAP + VST3 for Linux and Windows.
+> `SpectralEngine` survives only as an internal engine inside the Dynamics and
+> Contrast modules, and invariants I-3, I-4 and I-6 no longer hold. Do not
+> follow this spec; see `CLAUDE.md`, `ARCHITECTURE.md`,
+> `docs/superpowers/STATUS.md`, and the code.
+
 **Codename:** `spectral_forge`
 **Version:** 0.1.0-spec
 **Format:** CLAP (exclusively)

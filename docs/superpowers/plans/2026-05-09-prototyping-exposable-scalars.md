@@ -1,5 +1,7 @@
 # Prototyping-Exposable Scalars Implementation Plan
 
+> **Status:** IMPLEMENTED — all 7 tasks landed (`e1357aa` … `e71954e`) and merged to master via PR #3 (`bb646c3`). The code is the source of truth; this plan is kept for history. See [../STATUS.md](../STATUS.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expose hardcoded musical constants in Life, Kinetics, Circuit, Modulate, Contrast, and PhaseSmear as host-automatable per-slot params; rework Contrast into a 3-mode dispatcher with a THRESHOLD bypass-floor fix; gate the curated tuning UI behind the `dev-build` feature flag.

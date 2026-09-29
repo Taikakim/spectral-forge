@@ -1,6 +1,6 @@
-> **Status (2026-05-04): SUPERSEDED in part.**  
-> DSP implemented by plan `2026-04-27-phase-5b2-past.md`. UX design **superseded** by [`2026-05-04-past-module-ux-design.md`](2026-05-04-past-module-ux-design.md), which re-architects the curve set per mode, adds mode-specific scalar controls (Floor / Window / Rate / Dither), a module-wide Soft Clip toggle, and the help-box copy.  
-> The shipped DSP from Phase 5b2 differs from this spec in places (5 modes instead of every variant explored here; UI uses a single Mode-button popup rather than the spec's separate UX). Read the plan + code + UX spec, not this document, for current behaviour. Source of truth index: [../STATUS.md](../STATUS.md).
+> **Status (2026-09-29): IMPLEMENTED — UX superseded in part.**  
+> DSP implemented by plan `2026-04-27-phase-5b2-past.md`. UX design **superseded** by [`2026-05-04-past-module-ux-design.md`](2026-05-04-past-module-ux-design.md), which re-architects the curve set per mode, adds mode-specific scalar controls (Floor / Window / Rate / Dither) and the help-box copy. (Its module-wide Soft Clip toggle was later removed from Past in `f53dfa6`; clipping now lives in the master stage.)  
+> The shipped DSP from Phase 5b2 differs from this spec in places (5 modes instead of every variant explored here). Mode selection is 5 inline buttons in the slot row (plus an inline SortKey row for Decay Sorter) since `5d6f3b4`; the original Mode-button popup was removed. Read the plan + code + UX spec, not this document, for current behaviour. Source of truth index: [../STATUS.md](../STATUS.md).
 
 # Past Module — Design Spec
 

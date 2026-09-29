@@ -5,8 +5,9 @@
 > (reads/writes `BinPhysics::phase_momentum`, with per-slot Repel and
 > SidechainPositioned toggles) and **PLL Tear** (consumes
 > `ctx.unwrapped_phase`, lock-loss tear emission with hysteresis). Shared
-> `physics_helpers.rs` gained `pll_bank_step` + `wrap_phase`. FM Network +
-> Slew Lag remain deferred to Phase 6+.
+> `physics_helpers.rs` gained `pll_bank_step` + `wrap_phase`. FM Network later
+> landed in Phase 6.6 (`2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md`);
+> Slew Lag has not shipped.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task.

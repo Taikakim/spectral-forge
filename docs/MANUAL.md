@@ -1,6 +1,6 @@
 # Spectral Forge — User Manual
 
-Spectral Forge is a spectral compressor and modular effects processor for Linux/Bitwig Studio.
+Spectral Forge is a spectral compressor and modular effects processor for Linux and Windows, designed for Bitwig Studio.
 It suppresses resonances, tames harsh frequencies, and controls the spectral balance of a mix —
 similar in concept to Soothe2 — but built around a familiar parametric EQ-style drawing interface
 and a modular slot-based routing system.
@@ -15,11 +15,12 @@ and a modular slot-based routing system.
    ```
    cargo run --package xtask -- bundle spectral_forge --release
    ```
-2. Copy the bundle to Bitwig's CLAP path:
+   This produces both a `.clap` and a `.vst3` bundle in `target/bundled/`.
+2. Copy the bundle to Bitwig's CLAP path (or copy the `.vst3` bundle to your VST3 folder instead):
    ```
    cp target/bundled/spectral_forge.clap ~/.clap/
    ```
-3. Restart Bitwig and rescan plugins. The plugin appears as **Spectral Forge** under CLAP.
+3. Restart Bitwig and rescan plugins. The plugin appears as **Spectral Forge** under CLAP (or VST3).
 
 > The plugin reports its current FFT size as latency to the host. Bitwig compensates
 > automatically in timeline playback. The default FFT size is 2048 samples.
@@ -31,10 +32,13 @@ and a modular slot-based routing system.
 Where a regular compressor tracks the overall signal level, Spectral Forge compresses
 independently across up to **8193 frequency bins** depending on the chosen FFT size
 (default 1025 bins at FFT 2048). Each bin has its own envelope follower, gain computer,
-and optional makeup stage.
+and optional auto-makeup stage.
 
-The 7 **parameter curves** (threshold, ratio, attack, release, knee, makeup, mix) let you
-sculpt how compression behaves across the frequency spectrum. A flat curve applies the same
+Every slot carries its own set of **parameter curves**; how many there are and what they are
+called depends on the slot's module type (see the table under *Curve selector* below). A
+Dynamics slot has six — THRESHOLD, RATIO, ATTACK, RELEASE, KNEE and MIX — which let you
+sculpt how compression behaves across the frequency spectrum. Per-bin makeup gain is not a
+Dynamics curve; use a Gain slot (or AUTO MK) for that. A flat curve applies the same
 value everywhere. A bell dip in the threshold curve means compression engages at a lower level
 in that frequency range — so narrow resonances get caught without touching the rest of the signal.
 
@@ -48,8 +52,23 @@ freeze, phase smear, gain shaping, mid/side processing, and more.
 
 ### Curve selector (top bar)
 
-Seven buttons select which parameter curve is shown in the editor for the currently active slot.
-Each slot has its own independent set of curves — switching slots also switches to that slot's curves.
+The curve selector buttons are adaptive — they show the curves available for the **currently
+selected slot's** module type. Each slot has its own independent set of curves — switching slots
+also switches to that slot's curves.
+
+| Module type | Curves shown |
+|-------------|--------------|
+| Dynamics | THRESHOLD / RATIO / ATTACK / RELEASE / KNEE / MIX |
+| Freeze | LENGTH / THRESHOLD / PORTAMENTO / RESISTANCE / MIX |
+| Phase Smear | AMOUNT / PEAK HOLD / MIX / PHASE_RANGE |
+| Contrast | THRESHOLD / RATIO / ATTACK / RELEASE / KNEE / MIX |
+| Gain | GAIN (labelled MIX in Pull/Match mode) / PEAK HOLD (greyed out in Add/Subtract) |
+| Mid/Side | BALANCE / EXPANSION / DECORREL / TRANSIENT / PAN |
+| T/S Split | SENSITIVITY / SMOOTHNESS |
+| Harmonic | (no curves) |
+| Future / Punch / Rhythm / Geometry / Modulate / Circuit / LIFE / PAST / KINETICS / Harmony | Varies by module; the visible set changes with the selected mode |
+
+For a Dynamics slot, the curves control:
 
 | Button    | What it controls                                |
 |-----------|-------------------------------------------------|
@@ -58,12 +77,7 @@ Each slot has its own independent set of curves — switching slots also switche
 | ATTACK    | How fast gain reduction engages (ms)            |
 | RELEASE   | How fast gain reduction releases (ms)           |
 | KNEE      | Soft-knee width (0 = hard knee, wide = gentle)  |
-| MAKEUP    | Per-bin makeup gain (Gain module only)          |
 | MIX       | Dry/wet blend per bin (1.0 = fully wet)         |
-
-Which buttons are active depends on the selected slot's module type. A Dynamics slot shows
-THRESHOLD, RATIO, ATTACK, RELEASE, KNEE, and MIX. A Gain slot shows GAIN and SC SMOOTH.
-Unavailable curves are greyed out.
 
 ### Editing curves
 
@@ -74,7 +88,7 @@ parameter varies across frequency.
   same value everywhere (set by the global sliders in the control strip).
 - **Pulling a node down** in THRESHOLD lowers the threshold — more compression in that band.
 - **Pulling a node down** in RATIO lowers the ratio — less compression (more gentle) in that band.
-- **Pulling a node up** in MAKEUP (Gain slot) adds positive makeup gain to that band.
+- **Pulling a node up** in GAIN (Gain slot, Add/Subtract mode) boosts that band.
 
 **Node interaction:**
 | Action                                   | Effect                                |
@@ -105,18 +119,22 @@ shape in log-frequency space).
 | IN           | ±18 dB       | Input gain before STFT (smoothed)                            |
 | OUT          | ±18 dB       | Output gain after STFT (smoothed)                            |
 | MIX          | 0–100 %      | Global dry/wet                                               |
-| SC           | ±18 dB       | Sidechain input gain                                         |
-| **Dynamics** |              |                                                              |
-| Atk          | 0.5–200 ms   | Global attack time (scaled per band by Freq curve)           |
-| Rel          | 1–500 ms     | Global release time (scaled per band by Freq curve)          |
-| Freq         | 0–1          | Frequency-dependent time scaling strength                    |
-| Sens         | 0–1          | Sensitivity — how selectively peaks are targeted             |
-| Width        | 0–0.5 st     | Gain-reduction smoothing radius (semitones)                  |
-| **Threshold**|              |                                                              |
-| Th Off       | ±40 dB       | Uniform vertical shift of the entire threshold curve         |
-| Tilt         | ±6 dB/oct    | Spectral tilt of the threshold, pivoting at 1 kHz            |
 | AUTO MK      | on/off       | Auto makeup gain — long-term GR compensation per bin         |
 | DELTA        | on/off       | Delta monitor — hear only what is being removed              |
+| CLIP         | on/off       | Master output clipper                                        |
+| THR          | −24 to 0 dB  | Master clipper threshold                                     |
+| **Dynamics** |              | (shown for Dynamics and Contrast slots)                      |
+| Atk          | 0.5–200 ms   | Global attack time (scaled per band by the ATTACK curve)     |
+| Rel          | 1–500 ms     | Global release time (scaled per band by the RELEASE curve)   |
+| Sens         | 0–1          | Sensitivity — how selectively peaks are targeted             |
+| Width        | 0–12 st      | Gain-reduction smoothing radius (semitones each side)        |
+| **Per-curve**|              | (applies to the curve currently selected in the top bar)     |
+| Offset       | ±1           | Vertical shift of the selected curve; readout in the curve's own units |
+| Tilt         | ±1           | Spectral tilt of the selected curve, pivoting at 1 kHz (±1 = ±4 dB/oct) |
+| Curv         | 0–1          | Bends the Tilt from a straight slope (0) into an S-curve (1)  |
+
+Sidechain gain is not a global control: each sidechain-aware slot has its own SC gain and
+source selector (see *Sidechain* below).
 
 ### Attack and Release
 
@@ -124,9 +142,7 @@ The time constants determine how quickly gain reduction follows level changes in
 
 Global **Atk** and **Rel** set the baseline times. The **ATTACK** and **RELEASE** curves then
 multiply those times per frequency bin — pulling a node up slows the time in that band, pulling
-down speeds it up. The **Freq** knob adds an additional automatic scaling: at Freq=1, low
-frequencies get proportionally slower times than high frequencies (matching the longer periods of
-low-frequency content). At Freq=0, all bins use the global time unchanged.
+down speeds it up.
 
 Practical starting points:
 - **Resonance control:** Atk 1–10 ms, Rel 50–150 ms. Fast enough to catch peaks, slow enough not to pump.
@@ -168,21 +184,38 @@ individual resonances precisely. High sensitivity + wide width catches the same 
 spreads the GR into neighbouring bins — useful when you want a resonance suppressed but the
 transition to be less obvious.
 
+Width runs from 0 to 12 st. The value is the half-width on *each side* of a bin, so 12 st
+averages across one octave below to one octave above. Values below 0.01 st switch smoothing
+off entirely.
+
 Practical settings:
-- **0.0 st** — bin-exact GR; can sound phasey or grainy on pitched material. Use when you need to kill a single narrow resonance and artefacts aren't audible.
-- **0.05–0.1 st** — a small musical blur that removes per-bin graininess while keeping frequency precision high. Good default for most resonance work.
-- **0.2–0.3 st** — noticeable smoothing; adjacent semitones get similar treatment. Suitable for de-essing and taming frequency-range harshness.
-- **0.4–0.5 st** — broad smoothing approaching a half-semitone band. Useful for spectral glue and bus compression where precision is less important than smoothness.
+- **0 st** — bin-exact GR; can sound phasey or grainy on pitched material. Use when you need to kill a single narrow resonance and artefacts aren't audible.
+- **0.05–0.5 st** — a sub-semitone blur that removes per-bin graininess while keeping frequency precision high (the default is 0.05 st). Good starting range for surgical resonance work.
+- **1–3 st** — noticeable smoothing; a resonance's GR spreads over roughly a tone to a minor third either side. Suitable for de-essing and taming harshness across a frequency range.
+- **4–7 st** — broad smoothing, from about a major third to a fifth each side; GR starts to behave like a few wide bands.
+- **8–12 st** — very broad, up to an octave each side; the result is close to multiband compression. Useful for spectral glue and bus compression where smoothness matters more than precision.
 
-### Threshold Offset and Tilt
+### Threshold Offset, Tilt and Curvature
 
-**Th Off** shifts the entire threshold curve up or down without changing its shape — useful for
-quickly adjusting how much material is caught once the curve shape is dialled in.
+There are no separate threshold-only knobs. Instead, the per-curve **Offset**, **Tilt** and
+**Curv** controls act on whichever curve is selected in the top bar — select **THRESHOLD** first,
+and they shape the threshold. Each curve of each slot keeps its own Offset, Tilt and Curv values,
+and all three are host-automatable.
 
-**Tilt** rotates the threshold around 1 kHz. Positive values raise the threshold toward high
-frequencies (compress treble less and low-mids more); negative values do the opposite. This is
-a faster alternative to manually drawing a sloped threshold curve when you want frequency-
-proportional compression.
+**Offset** (±1) shifts the entire curve up or down without changing its drawn shape — useful for
+quickly adjusting how much material is caught once the curve shape is dialled in. The readout is
+in the curve's own units; for THRESHOLD it shows the resulting baseline in dBFS (0 = the neutral
+−20 dBFS, −1 = −160 dBFS, +1 = the display Ceil value, 0 dBFS by default).
+
+**Tilt** (±1, where ±1 = ±4 dB/oct) rotates the curve around 1 kHz. On THRESHOLD, positive values
+raise the threshold toward high frequencies (compress treble less and lows more); negative values
+do the opposite. This is a faster alternative to manually drawing a sloped threshold curve when
+you want frequency-proportional compression.
+
+**Curv** (0–1) bends the Tilt. At 0 the tilt is a straight line in log frequency. Towards 1 it
+blends into an S-shaped (smoothstep) slope that is steeper through the mid-range and flattens
+out toward the lowest and highest frequencies, so the extremes of the spectrum are not pushed as
+far as a straight tilt would push them. Curv has no effect while Tilt is 0.
 
 ### Auto Makeup
 
@@ -241,14 +274,18 @@ Spectral Forge accepts one stereo sidechain (SC) input. In Bitwig, route any tra
 | **Gain**        | All four modes use SC — see Gain Modes below. Pull and Match apply a per-bin peak-hold; Add and Subtract combine SC with the GAIN curve instantaneously. |
 | **Phase Smear** | Modulates per-bin smear amount by SC magnitude, smoothed by PEAK HOLD curve. |
 | **Freeze**      | Gates the freeze threshold; louder SC raises effective threshold.        |
+| **Punch**       | Required. Direct mode carves at SC spectral peaks; Inverse mode carves at SC troughs. |
+| **Modulate**    | Carrier/modulator for RM/FM and Diode RM; can position Gravity Phaser wells at SC peaks. |
+| **KINETICS**    | Optional SC source for Gravity Well (wells at SC peaks) and Inertial Mass. |
 
-Other modules (Contrast, Mid/Side, T/S Split, Harmonic) do not use the sidechain and show no SC controls.
+Other modules (Contrast, Mid/Side, T/S Split, Harmonic, Future, Rhythm, Geometry, Circuit, LIFE,
+PAST, Harmony) do not use the sidechain and show no SC controls.
 
 ### Per-module SC controls
 
 Each SC-aware module panel carries:
 
-- **SC gain** (−∞ to +18 dB) — level applied to the SC signal for *this slot only*. −∞ disables SC for the slot.
+- **SC gain** (−90 to +18 dB, default 0 dB) — level applied to the SC signal for *this slot only*. At −90 dB the readout shows −∞ and SC is disabled for the slot.
 - **SC source** — which channel of the stereo SC signal the slot keys off:
 
 | Choice    | Behaviour                                                                  |
@@ -308,7 +345,7 @@ When a Gain slot is selected for editing, a thin darker line is drawn behind eve
 
 ### Layout stability
 
-The per-module SC strip (SC gain · source selector) only has meaning for SC-aware modules (Dynamics, Freeze, Phase Smear, Gain). On other modules the strip is rendered invisibly so the tilt/offset row below keeps its vertical position; switching between modules does not shift surrounding controls.
+The per-module SC strip (SC gain · source selector) only has meaning for SC-aware modules (Dynamics, Freeze, Phase Smear, Gain, Punch, Modulate, KINETICS). On other modules the strip is rendered invisibly so the Offset/Tilt/Curv row below keeps its vertical position; switching between modules does not shift surrounding controls.
 
 ---
 
@@ -318,7 +355,7 @@ The routing matrix shows all 9 slots. Slot 8 is always the **Master** output.
 
 - **Diagonal cells** show the module type for each slot. Click to select that slot for editing.
 - **Off-diagonal cells** set the send amplitude from one slot to another (0.0 = no connection,
-  1.0 = full). The default routing is serial: slot 0 → 1 → 2 → Master.
+  1.0 = full). The default routing is Dynamics (slot 0) → Gain (slot 1) → Master (slot 8).
 - **Lower triangle** (row > column): forward sends (current hop).
 - **Upper triangle** (row < column): feedback sends (one-hop delayed).
 
@@ -331,12 +368,25 @@ Nothing is routed to Master unless explicitly connected. If no sends reach slot 
 | Dynamics          | Spectral compressor/expander with 6 parameter curves      |
 | Freeze            | Spectral freeze — holds the current FFT frame             |
 | Phase Smear       | Per-bin phase randomisation                               |
-| Contrast          | Spectral contrast enhancer — boosts peaks, cuts valleys   |
+| Contrast          | Spectral contrast enhancer — boosts peaks, cuts valleys (Spatial / Temporal / Tilt mode picker in dev builds only) |
 | Gain              | Per-bin gain shaping (Add / Subtract / Pull / Match modes) |
 | Mid/Side          | M/S balance, expansion, phase decorrelation               |
-| T/S Split         | Transient/Sustained spectral split                        |
-| Harmonic          | Harmonic emphasis                                         |
+| T/S Split         | Transient/Sustained spectral split with virtual T and S rows in the matrix (max 2 active) |
+| Harmonic          | Placeholder — passes audio through unchanged; no curves, no DSP yet |
+| Future            | Print-through and pre-echo from spectral history (Print-Through / Pre-Echo) |
+| Punch             | Sidechain-driven spectral carving with neighbour fill (Direct / Inverse) |
+| Rhythm            | Host-tempo-locked spectral gating (Euclidean / Arpeggiator / Phase Reset) |
+| Geometry          | Physical-resonator carving (Chladni / Helmholtz)          |
+| Modulate          | Bin modulators — 8 modes: Phase Phaser, Bin Swapper, RM/FM, Diode RM, Ground Loop, Gravity Phaser, PLL Tear, FM Network |
+| Circuit           | Analogue-component models — 10 modes: BBD, Schmitt, Crossover, Vactrol, Transformer, Power Sag, Component Drift, PCB Crosstalk, Slew, Bias Fuzz |
+| LIFE              | Physics-of-matter effects — 10 modes: Viscosity, Surface Tension, Crystallization, Archimedes, Non-Newtonian, Stiction, Yield, Capillary, Sandpaper, Brownian |
+| PAST              | Rolling spectral-history playback — Granular, Decay Sorter, Convolution, Reverse, Stretch |
+| KINETICS          | Physical motion models — 8 modes: Hooke, Gravity Well, Inertial Mass, Orbital Phase, Ferromagnetism, Thermal Expansion, Tuning Fork, Diamagnet |
+| Harmony           | Pitch-class and partial restructuring — 8 modes: Chordification, Undertone, Companding, Formant Rotation, Lifter, Inharmonic, Harmonic Generator, Shuffler |
 | Master            | Terminal output slot (slot 8, always present)             |
+
+Future through Harmony were added in 0.15 and are experimental: their DSP and parameter ranges
+are still being tuned.
 
 ---
 
@@ -390,10 +440,12 @@ has ~11 Hz bins, making it possible to isolate a single harmonic partial.
 ### Frequency-targeted sidechain duck
 
 1. Put Spectral Forge on a pad or synth.
-2. Route the kick or bass to aux sidechain input 1.
-3. Assign slot 0 (Dynamics) to sidechain 1 in the routing matrix.
-4. Pull down **THRESHOLD** at the frequencies that clash (e.g. 60–200 Hz).
-5. Keep other frequencies at neutral threshold — the duck only happens where the sidechain is loud.
+2. In Bitwig, route the kick or bass track to Spectral Forge's stereo sidechain input.
+3. Check that the yellow SC level indicator in the top bar lights up while the project plays.
+4. Click the Dynamics slot (slot 0 by default) on the diagonal of the routing matrix to select it for editing.
+5. In that slot's SC strip, set **SC** gain to taste (0 dB is the default; −∞ switches the sidechain off for the slot) and set **Source** to **Follow**, or to **L+R** / **L** / **R** / **M** / **S** to key off a specific part of the sidechain.
+6. Select **THRESHOLD** and pull it down at the frequencies that clash (e.g. 60–200 Hz).
+7. Keep other frequencies at neutral threshold — the duck only happens where the sidechain is loud.
 
 ### Mid/Side processing
 
@@ -498,22 +550,13 @@ useful — they partially account for local context without requiring bins to fu
 
 ---
 
-## Attack and Release — Frequency Scaling
+## Attack and Release — Curve Scaling
 
-Global attack and release times are modified per bin by two mechanisms:
+Global attack and release times are modified per bin by the ATTACK and RELEASE curves:
 
 **ATTACK/RELEASE curves:** Each bin's time = `global_time × curve_gain_at_bin`. Pulling the curve
 above centre slows that band; pulling below speeds it up. The curve gain is a linear multiplier,
-so the ATTACK curve at +18 dB (gain ≈ 8×) makes that band's attack ~8× slower than global.
-
-**Frequency scaling (Freq knob):** Adds an automatic adjustment proportional to the inverse of
-frequency. The scaling factor for bin `k` at frequency `f` is `(1000 / f)^(Freq × 0.5)`. At
-Freq=1 and 100 Hz, this gives roughly a 3× multiplier relative to 1 kHz. The choice of 0.5 as
-the exponent limits the maximum range to avoid extreme values at very low frequencies. The pivot
-at 1 kHz (1000 Hz) is arbitrary but keeps mid-range content unscaled, which matches the intuition
-that 1 kHz is "normal."
-
-Frequency scaling is applied after the curve multiplier, so both mechanisms combine multiplicatively.
+so the ATTACK curve at +18 dB (gain ≈ 8×) makes that band's attack ~8× slower than global. There is no additional automatic frequency-dependent scaling.
 
 ---
 
@@ -593,7 +636,6 @@ the user changes a slot, not every hop.
 
 ## Known Limitations
 
-- Linux and Windows, CLAP only. No macOS, VST3, or AU support (a collaborator provides signed Mac builds separately).
+- Linux and Windows, CLAP and VST3. No macOS or AU support (a collaborator provides signed Mac builds separately).
 - The lookahead parameter is reserved for a future implementation; the STFT latency itself provides effective transient anticipation.
 - The GUI requires OpenGL (egui via nih-plug-egui). Some headless environments won't open the editor.
-- The T/S Split virtual row routing is implemented in the audio engine but not yet exposed in the routing matrix GUI.

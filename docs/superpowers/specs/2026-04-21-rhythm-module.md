@@ -1,4 +1,4 @@
-> **Status (2026-04-24): DEFERRED.** Depends on BinPhysics + host-BPM-sync infrastructure (both DEFERRED). Source of truth: [../STATUS.md](../STATUS.md).
+> **Status (2026-09-29): IMPLEMENTED** — implemented by plan [`2026-04-27-phase-2d-rhythm.md`](../plans/2026-04-27-phase-2d-rhythm.md) (3 modes: Euclidean, Arpeggiator, Phase Reset — this spec's "Laser") with host-BPM sync; Arpeggiator NoteIn trigger added by [`2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md`](../plans/2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md). The shipped module diverges from this design (Bin Swing not shipped); read the plans + code, not this spec, for current behaviour. Source of truth for runtime behaviour: source code (`src/dsp/modules/rhythm.rs`). Source of truth for status: [../STATUS.md](../STATUS.md).
 
 # Rhythm Module — Design Spec
 

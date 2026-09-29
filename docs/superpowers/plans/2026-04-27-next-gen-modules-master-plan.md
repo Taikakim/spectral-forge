@@ -1,6 +1,6 @@
 # Next-Gen Modules — Master Plan Index
 
-> **STATUS:** PLANNED, NOT STARTED. Authoritative status: `docs/superpowers/STATUS.md`.
+> **STATUS:** IMPLEMENTED (Phases 1–6) — all sub-plans for Phases 1–6 merged to master; Phase 7 is DEFERRED (research-blocked, see [`2026-04-27-phase-7-heavy-research.md`](2026-04-27-phase-7-heavy-research.md)). The per-phase summaries below are the original plan and differ from what shipped in places (e.g. Phase 2e Geometry shipped Chladni Plate Nodes + Helmholtz Traps); read each sub-plan's banner + the code for current behaviour. Authoritative status: `docs/superpowers/STATUS.md`.
 
 > **For agentic workers:** This is a **navigation index**, not an implementable
 > plan. Each numbered sub-plan listed below is a self-contained TDD plan; pick

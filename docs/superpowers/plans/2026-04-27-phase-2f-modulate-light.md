@@ -3,7 +3,8 @@
 > **Status:** IMPLEMENTED — v1 (5 light modes) landed on branch
 > `feature/next-gen-modules-plans` (Phase 2f, all 11 tasks). **Retrofitted**
 > with Gravity Phaser + PLL Tear in
-> `docs/superpowers/plans/2026-04-27-phase-5b4-modulate-retrofit.md`. See
+> `docs/superpowers/plans/2026-04-27-phase-5b4-modulate-retrofit.md`, then
+> FM Network in `2026-04-27-phase-6.6-fm-network-arpeggiator-noteIn.md`. See
 > `STATUS.md` for canonical status.
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,6 +1,6 @@
 # Prototyping-Exposable Scalars — Design
 
-**Status:** APPROVED — ready for plan.
+**Status:** IMPLEMENTED — delivered by plan [`2026-05-09-prototyping-exposable-scalars.md`](../plans/2026-05-09-prototyping-exposable-scalars.md) (`e1357aa` … `e71954e`, merged via PR #3 `bb646c3`). The code is the source of truth. See [../STATUS.md](../STATUS.md).
 **Date:** 2026-05-09
 **Audit predecessor:** `docs/superpowers/2026-05-08-prototyping-exposable-params.md`
 

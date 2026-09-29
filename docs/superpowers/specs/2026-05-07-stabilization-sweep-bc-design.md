@@ -1,6 +1,6 @@
 # Stabilization Sweep B+C — Design
 
-**Status:** DESIGN (in review)
+**Status:** IMPLEMENTED — delivered by plan [`2026-05-07-stabilization-sweep-bc.md`](../plans/2026-05-07-stabilization-sweep-bc.md) (`1496f12`, `5d6f3b4`, `d67fd91`, `1d2b706`, `8801840`, `590d41c`; closed in tracker `242e8f6`). The code is the source of truth. See [../STATUS.md](../STATUS.md).
 **Date:** 2026-05-07
 **Predecessor:** [2026-05-06 stabilization sweep A](../plans/2026-05-06-stabilization-sweep.md) — complete.
 
