@@ -1,14 +1,17 @@
 //! Param generation smoke tests.
 //!
 //! Verifies that `SpectralForgeParams::default().param_map()` includes the
-//! full 1404-entry automation grid produced by `build.rs`.
+//! full 1440-entry automation grid produced by `build.rs`.
 //!
-//! Counts (from the plan):
+//! Counts (as asserted below):
 //!   - Graph nodes : 9 slots × 7 curves × 6 nodes × 3 fields (x,y,q) = 1134
 //!   - Tilt+offset : 9 slots × 7 curves × 2 kinds                    =  126
 //!   - Curvature   : 9 slots × 7 curves                               =   63
-//!   - Matrix      : 9 rows × 9 cols                                 =   81
-//!   - Total                                                         = 1404
+//!   - Matrix      : 9 dst rows × 13 src cols                         =  117
+//!   - Total                                                         = 1440
+//!
+//! `build.rs` also emits 243 per-slot module scalar params, which this file
+//! does not count.
 
 use nih_plug::prelude::Params;
 use spectral_forge::params::SpectralForgeParams;
@@ -120,7 +123,7 @@ fn param_map_contains_expected_count() {
     assert_eq!(to_count, 126, "tilt/offset ID count mismatch");
     // Curvature: 9 × 7 = 63
     assert_eq!(curv_count, 63, "curvature ID count mismatch");
-    // Matrix: 13 × 9 = 117 (9 real rows + 4 T/S Split virtual rows).
+    // Matrix: 9 dst × 13 src = 117 (9 real slot sources + 4 T/S Split virtual sources).
     assert_eq!(matrix_count, 117, "matrix ID count mismatch");
 }
 

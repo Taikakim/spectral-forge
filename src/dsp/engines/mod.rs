@@ -36,7 +36,8 @@ pub trait SpectralEngine: Send {
 
     /// Called once per STFT hop on the audio thread.
     /// Must not allocate, lock, or perform I/O.
-    /// Write |gain_reduction_db| per bin into suppression_out for GUI stalactites.
+    /// Write |gain_reduction_db| per bin into suppression_out for the GUI gain-reduction
+    /// display (`editor::spectrum_display::paint_spectrum_and_suppression`).
     ///
     /// Callers guarantee: `bins.len() == suppression_out.len() == fft_size/2+1`
     /// and `sidechain`, if present, has the same length.

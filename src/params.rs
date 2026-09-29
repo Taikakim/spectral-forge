@@ -16,7 +16,8 @@ use crate::dsp::modules::contrast::ContrastMode;
 use crate::dsp::modules::punch::PunchMode;
 use crate::dsp::modules::rhythm::{ArpGrid, ArpTriggerSource, RhythmMode};
 
-// Pulls in `pub struct GeneratedParams { ... }` (1404 FloatParam fields),
+// Pulls in `pub struct GeneratedParams { ... }` (1683 fields: 1440-param
+// automation grid + 243 per-slot module scalars; see build.rs header),
 // its `Default` impl, and `impl GeneratedParams { fn extend_param_map(...) }`
 // from the build.rs output. Defined at the top level — must sit outside any
 // struct or fn body because Rust disallows macro-expanded struct fields.
@@ -382,7 +383,9 @@ pub struct SpectralForgeParams {
 
     // ── Generated per-slot / per-curve / per-node automation params ──
     // 1134 graph-node fields (9×7×6×3), 126 tilt/offset fields (9×7×2),
-    // 63 curvature fields (9×7), and 81 matrix-send fields (9×9). Total 1404.
+    // 63 curvature fields (9×7), and 117 matrix-send fields (9 dst × 13 src).
+    // Grid total 1440, plus 243 per-slot module scalars (Past, Life, Kinetics,
+    // Circuit, Modulate, Contrast) for 1683 generated fields.
     // Nested because Rust does not allow macro-expanded field declarations
     // inside a struct. See build.rs.
     pub generated: GeneratedParams,
@@ -655,7 +658,7 @@ impl Default for SpectralForgeParams {
              .with_unit(" dB"),
 
             // Generated per-slot / per-curve / per-node FloatParam initializers.
-            // Produced by build.rs; totals 1404 fields.
+            // Produced by build.rs; totals 1683 fields (1440 grid + 243 scalars).
             generated: GeneratedParams::default(),
         }
     }
@@ -1066,7 +1069,8 @@ mod accessor_tests {
 // valid as long as `self` is live. nih-plug holds us in an `Arc`, so that holds.
 unsafe impl Params for SpectralForgeParams {
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
-        // Reserve for the ~35 hand-written globals + 1404 generated entries.
+        // Initial capacity hint only; the actual count (~45 hand-written globals
+        // + 1683 generated entries) exceeds it, so the Vec grows once.
         let mut params: Vec<(String, ParamPtr, String)> = Vec::with_capacity(1450);
 
         // Hand-written globals (same IDs and order as the previous #[id = "..."] attrs).
@@ -1122,7 +1126,8 @@ unsafe impl Params for SpectralForgeParams {
         params.push(("phase_rand_amount".to_string(),    self.phase_rand_amount.as_ptr(),    String::new()));
         params.push(("spectral_contrast_db".to_string(), self.spectral_contrast_db.as_ptr(), String::new()));
 
-        // 1404 generated entries (graph nodes + tilt/offset + curvature + matrix).
+        // 1683 generated entries (graph nodes + tilt/offset + curvature + matrix
+        // = 1440, plus 243 per-slot module scalars).
         self.generated.extend_param_map(&mut params);
 
         params

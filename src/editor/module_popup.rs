@@ -235,7 +235,7 @@ fn module_browse_help(ty: ModuleType) -> &'static str {
         ModuleType::Gain                    => "Gain — per-bin spectral gain shaping. Add / Subtract / Pull / Match modes change how the GAIN curve is applied. Sidechain: yes (Pull/Match).",
         ModuleType::MidSide                 => "Mid/Side — per-bin balance, expansion, decorrelation, transient steering, and pan. Sidechain: no.",
         ModuleType::TransientSustainedSplit => "T/S Split — splits the slot's input into transient and sustained streams that feed virtual rows in the routing matrix. Max 2 active. Sidechain: no.",
-        ModuleType::Harmonic                => "Harmonic — pass-through that computes harmonic-grouping data for downstream Harmony slots. No curves. Sidechain: no.",
+        ModuleType::Harmonic                => "Harmonic — placeholder stub, no processing yet. Audio passes through unchanged. No curves. Sidechain: no.",
         ModuleType::Future                  => "Future — print-through and pre-echo from spectral history. Curve-driven leak/echo amplitudes. Sidechain: no.",
         ModuleType::Punch                   => "Punch — sidechain-driven spectral carving with neighbour fill. Direct mode carves at SC peaks; Inverse at troughs. Sidechain: yes (required).",
         ModuleType::Rhythm                  => "Rhythm — host-tempo-locked spectral gating. Euclidean / Arpeggiator / Phase Reset modes. Sidechain: no.",

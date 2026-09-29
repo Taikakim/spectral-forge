@@ -917,10 +917,10 @@ pub fn create_editor(
                                 let cur_mode = params.slot_gain_mode.lock()[edit_slot];
                                 use crate::dsp::modules::GainMode;
                                 for (label, hint, mode) in [
-                                    ("Add",      "Add the GAIN curve to the input spectrum (additive synthesis-style boost).", GainMode::Add),
-                                    ("Subtract", "Subtract the GAIN curve from the input spectrum (carve content away).",      GainMode::Subtract),
-                                    ("Pull",     "Pull bins toward the GAIN curve over PEAK HOLD time. The PEAK HOLD curve becomes the second active curve.", GainMode::Pull),
-                                    ("Match",    "Match the input spectrum to the GAIN curve shape (spectral matcher).",       GainMode::Match),
+                                    ("Add",      "Apply the GAIN curve as per-bin gain, plus the sidechain magnitude (boosts where the sidechain is loud).", GainMode::Add),
+                                    ("Subtract", "Apply the GAIN curve as per-bin gain, minus the sidechain magnitude (ducks where the sidechain is loud).", GainMode::Subtract),
+                                    ("Pull",     "Pull each bin's magnitude toward the peak-held sidechain magnitude. GAIN (MIX) sets the blend (1 = dry); PEAK HOLD sets the hold time.", GainMode::Pull),
+                                    ("Match",    "Shift the input's broad spectral balance toward the sidechain's (max ±12 dB). GAIN (MIX) sets the blend (1 = dry); PEAK HOLD sets the hold time.", GainMode::Match),
                                 ] {
                                     let is_active = cur_mode == mode;
                                     let fill     = if is_active { th::BORDER } else { th::BG };

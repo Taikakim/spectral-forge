@@ -428,7 +428,7 @@ fn static_description(
         ModuleType::Gain       => "Gain — per-bin spectral gain shaping. The Add/Subtract/Pull/Match selector below changes how the GAIN curve is applied. Sidechain: yes (Pull/Match modes).",
         ModuleType::MidSide    => "Mid/Side — per-bin mid/side balance, M/S expansion, phase decorrelation, transient steering, and stereo pan. Sidechain: no.",
         ModuleType::TransientSustainedSplit    => "T/S Split — splits the slot's input into transient and sustained streams that feed virtual rows in the routing matrix (slot N + 'T'/'S'). Sidechain: no.",
-        ModuleType::Harmonic   => "Harmonic — placeholder slot type that passes through; the harmonic-grouping data it computes is consumed by other modules. No curves. Sidechain: no.",
+        ModuleType::Harmonic   => "Harmonic — placeholder stub slot type with no processing yet; audio passes through unchanged. No curves. Sidechain: no.",
         _ => module_spec(ty).display_name,
     };
     if let Some(label) = curve_labels.get(editing_curve) {

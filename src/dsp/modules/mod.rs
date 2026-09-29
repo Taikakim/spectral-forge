@@ -258,10 +258,21 @@ pub struct ProbeSnapshot {
 pub trait SpectralModule: Send {
     /// Process one FFT hop for one channel.
     ///
-    /// `physics`: per-hop BinPhysics state. `None` until Phase 3.5 wires the
-    /// real ref via FxMatrix. Writer modules (those that set
-    /// `ModuleSpec.writes_bin_physics = true`) get a `Some(&mut ...)` and
-    /// are scheduled before any reader modules in the same hop.
+    /// `physics`: per-hop BinPhysics state, wired by `FxMatrix::process_hop`.
+    /// When at least one slot's `ModuleSpec.writes_bin_physics` is true,
+    /// writer modules get `physics: Some(&mut ...)` (and `ctx.bin_physics:
+    /// None`); every other module gets `physics: None` and reads through
+    /// `ctx.bin_physics: Some(&...)`. When no slot is a writer, both are `None`.
+    ///
+    /// There is no writer-before-reader scheduling: slots run strictly in
+    /// numerical order (slots 0 to 7, then Master at 8). Each slot's input physics is a
+    /// send-weighted mix of `slot_phys[u]` for every source slot `u` routed to
+    /// it. For `u` lower than the current slot that is the state written in
+    /// this hop. For `u` higher (a feedback send) it is stale state from that
+    /// slot's previous `process_hop` call (the previous hop, or in stereo the
+    /// other channel's pass). So a reader in a lower-numbered slot than a
+    /// writer sees none of that writer's current-hop physics: to feed a reader, put
+    /// the writer in a lower-numbered slot and route it to the reader.
     fn process(
         &mut self,
         channel: usize,

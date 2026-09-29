@@ -16,7 +16,7 @@ fn all_param_defaults_are_finite_and_normalized() {
     let map = params.param_map();
 
     // Must have discovered at least the known hand-written globals and the
-    // 1341 generated entries — a sanity check that the param map is complete.
+    // 1683 generated entries — a loose sanity check that the param map is complete.
     assert!(
         map.len() > 1300,
         "param_map() returned only {} entries — expected 1374+",

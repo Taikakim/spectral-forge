@@ -1,6 +1,9 @@
 //! Generates `params_gen.rs` — a top-level `pub struct GeneratedParams` with
-//! 1404 `FloatParam` fields for graph nodes, tilt/offset, curvature, and matrix
-//! sends, plus a `Default` impl and an `extend_param_map` method.
+//! 1440 `FloatParam` automation-grid fields (1134 graph nodes, 126 tilt/offset,
+//! 63 curvature, 117 matrix sends as 9 dst × 13 src) plus 243 per-slot module
+//! scalar fields (Past 45, Life 72, Kinetics 63, Circuit 18, Modulate 18,
+//! Contrast 27; 9 of the Past ones are `BoolParam`), 1683 fields in all, plus a
+//! `Default` impl and an `extend_param_map` method.
 //!
 //! The generated file is `include!`d at the top of `src/params.rs`. The main
 //! `SpectralForgeParams` struct holds a `generated: GeneratedParams` field and
@@ -9,10 +12,10 @@
 //! Keep IDs in sync with src/param_ids.rs — any formatting change here
 //! that diverges from param_ids.rs breaks saved automation.
 //!
-//! NOTE: `NUM_MATRIX_ROWS = 9` here matches `src/param_ids.rs` (real slots only).
-//! The DSP-layer `dsp::modules::MAX_MATRIX_ROWS = 13` includes T/S Split virtual
-//! rows and is intentionally different; exposing virtual rows as automation
-//! targets is out of scope for this generator.
+//! NOTE: `NUM_MATRIX_ROWS = 9` (destinations, real slots only) and
+//! `NUM_MATRIX_SOURCES = 13` (9 slots + 4 T/S Split virtual rows) here match
+//! `src/param_ids.rs`. Virtual rows are exposed as matrix *sources* only; they
+//! are never destinations.
 
 use std::env;
 use std::fs::File;
@@ -42,7 +45,7 @@ fn main() {
     .unwrap();
     writeln!(
         f,
-        "// `GeneratedParams` (1404 FloatParams), its Default, and a helper"
+        "// `GeneratedParams` (1683 generated params), its Default, and a helper"
     )
     .unwrap();
     writeln!(
