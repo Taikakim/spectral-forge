@@ -58,7 +58,7 @@ fn persist_roundtrip_all_keys_present() {
         "editing_curve", "route_matrix", "fx_module_names",
         "fx_module_targets", "fx_route_matrix", "graph_db_max",
         "peak_falloff_ms", "ui_scale", "migrated_v1",
-        "midside_bipolar_v1",
+        "midside_bipolar_v1", "slot_harmonic_mode",
     ];
     for key in &expected_keys {
         assert!(serialized.contains_key(*key), "missing persist key: {}", key);

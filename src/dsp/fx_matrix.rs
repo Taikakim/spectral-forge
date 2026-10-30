@@ -1,7 +1,7 @@
 use num_complex::Complex;
 use crate::dsp::modules::{
     ModuleContext, ModuleType, RouteMatrix, GainMode, FutureMode, SpectralModule,
-    create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS, VirtualRowKind,
+    create_module, MAX_SLOTS, MAX_SPLIT_VIRTUAL_ROWS, MAX_MATRIX_ROWS,
 };
 use crate::dsp::modules::circuit::CircuitMode;
 use crate::dsp::modules::life::LifeMode;
@@ -246,6 +246,16 @@ impl FxMatrix {
         for s in 0..MAX_SLOTS {
             if let Some(ref mut m) = self.slots[s] {
                 m.set_geometry_mode(modes[s]);
+            }
+        }
+    }
+
+    /// Propagate per-slot HarmonicMode from params to HarmonicModule instances.
+    /// Called once per audio block (before process_hop).
+    pub fn set_harmonic_modes(&mut self, modes: &[crate::dsp::modules::harmonic::HarmonicMode; 9]) {
+        for s in 0..MAX_SLOTS {
+            if let Some(ref mut m) = self.slots[s] {
+                m.set_harmonic_mode(modes[s]);
             }
         }
     }
@@ -814,10 +824,7 @@ impl FxMatrix {
                     for (v, &vrow) in route_matrix.virtual_rows.iter().enumerate() {
                         if let Some((src_slot, kind)) = vrow {
                             if src_slot as usize == s {
-                                let src_buf = match kind {
-                                    VirtualRowKind::Transient => vouts[0],
-                                    VirtualRowKind::Sustained  => vouts[1],
-                                };
+                                let src_buf = vouts[kind.output_index()];
                                 let copy_len = num_bins.min(src_buf.len());
                                 self.virtual_out[v][..copy_len].copy_from_slice(&src_buf[..copy_len]);
                             }

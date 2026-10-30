@@ -51,8 +51,69 @@ pub enum GainMode {
 
 // ── VirtualRowKind ─────────────────────────────────────────────────────────
 
+/// Stream carried by a virtual matrix row. `Transient`/`Harmonic` come from a
+/// split module's first virtual output, `Sustained`/`Percussive` from its second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VirtualRowKind { Transient, Sustained }
+pub enum VirtualRowKind { Transient, Sustained, Harmonic, Percussive }
+
+impl VirtualRowKind {
+    /// Index into `SpectralModule::virtual_outputs()`.
+    pub fn output_index(self) -> usize {
+        match self {
+            VirtualRowKind::Transient | VirtualRowKind::Harmonic   => 0,
+            VirtualRowKind::Sustained | VirtualRowKind::Percussive => 1,
+        }
+    }
+
+    /// One-letter suffix for matrix row labels ("3T", "5H", …).
+    pub fn suffix(self) -> &'static str {
+        match self {
+            VirtualRowKind::Transient  => "T",
+            VirtualRowKind::Sustained  => "S",
+            VirtualRowKind::Harmonic   => "H",
+            VirtualRowKind::Percussive => "P",
+        }
+    }
+
+    pub fn stream_name(self) -> &'static str {
+        match self {
+            VirtualRowKind::Transient  => "transient stream",
+            VirtualRowKind::Sustained  => "sustained stream",
+            VirtualRowKind::Harmonic   => "harmonic stream",
+            VirtualRowKind::Percussive => "percussive stream",
+        }
+    }
+}
+
+/// Derive the virtual-row table from the slot layout. Each split module (T/S
+/// Split, or Harmonic in H/P Split mode) gets two consecutive rows, in slot
+/// order, until `MAX_SPLIT_VIRTUAL_ROWS` is used up; later splits get none.
+///
+/// Shared by the audio thread (`Pipeline::process`) and the matrix UI so both
+/// agree on which matrix source column carries which stream.
+pub fn split_virtual_rows(
+    types: &[ModuleType; 9],
+    harmonic_modes: &[harmonic::HarmonicMode; 9],
+) -> [Option<(u8, VirtualRowKind)>; MAX_SPLIT_VIRTUAL_ROWS] {
+    let mut rows = [None; MAX_SPLIT_VIRTUAL_ROWS];
+    let mut v = 0usize;
+    for s in 0..MAX_SLOTS {
+        let kinds = match types[s] {
+            ModuleType::TransientSustainedSplit =>
+                Some((VirtualRowKind::Transient, VirtualRowKind::Sustained)),
+            ModuleType::Harmonic if harmonic_modes[s] == harmonic::HarmonicMode::HpSplit =>
+                Some((VirtualRowKind::Harmonic, VirtualRowKind::Percussive)),
+            _ => None,
+        };
+        if let Some((a, b)) = kinds {
+            if v + 2 > MAX_SPLIT_VIRTUAL_ROWS { break; }
+            rows[v]     = Some((s as u8, a));
+            rows[v + 1] = Some((s as u8, b));
+            v += 2;
+        }
+    }
+    rows
+}
 
 // ── RouteMatrix ────────────────────────────────────────────────────────────
 
@@ -326,6 +387,9 @@ pub trait SpectralModule: Send {
     /// Update the operating mode for Modulate modules. Default no-op for all other types.
     fn set_modulate_mode(&mut self, _: crate::dsp::modules::modulate::ModulateMode) {}
 
+    /// Update the operating mode for Harmonic modules. Default no-op for all other types.
+    fn set_harmonic_mode(&mut self, _: crate::dsp::modules::harmonic::HarmonicMode) {}
+
     /// Update the per-slot Repel toggle for Modulate.GravityPhaser. Default no-op.
     fn set_modulate_repel(&mut self, _repel: bool) {}
 
@@ -459,8 +523,8 @@ pub trait SpectralModule: Send {
     /// MUST NOT allocate, lock, or do I/O.
     fn clear_state(&mut self) {}
 
-    /// For split modules (T/S Split), returns virtual output buffers.
-    /// Index 0 = Transient, Index 1 = Sustained.
+    /// For split modules (T/S Split, Harmonic in H/P Split mode), returns virtual
+    /// output buffers. Index 0 = Transient/Harmonic, Index 1 = Sustained/Percussive.
     /// Default: None (no virtual outputs).
     fn virtual_outputs(&self) -> Option<[&[Complex<f32>]; 2]> { None }
 }
@@ -694,18 +758,19 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         display_name: "Harmonic",
         color_lit: Color32::from_rgb(0x50, 0xc8, 0x80),
         color_dim: Color32::from_rgb(0x18, 0x42, 0x28),
-        num_curves: 0,
-        curve_labels: &[],
+        num_curves: 5,
+        curve_labels: &["AMOUNT", "BALANCE", "TILT", "REACH", "MIX"],
         supports_sidechain: false,
         wants_sidechain: false,
         panel_widget: None,
         writes_bin_physics: false,
+        // Partial EQ consumes harmonic groups (which force-enable IF).
         needs_instantaneous_freq: false,
         needs_cepstrum: false,
         needs_chromagram: false,
-        needs_harmonic_groups: false,
+        needs_harmonic_groups: true,
         needs_midi: false,
-        active_layout: None,
+        active_layout: Some(crate::dsp::modules::harmonic::active_layout),
     };
     static FUT: ModuleSpec = ModuleSpec {
         display_name: "Future",
@@ -1051,7 +1116,7 @@ pub fn create_module(
         ModuleType::Contrast               => Box::new(contrast::ContrastModule::new()),
         ModuleType::Gain                   => Box::new(gain::GainModule::new()),
         ModuleType::TransientSustainedSplit => Box::new(ts_split::TsSplitModule::new()),
-        ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule),
+        ModuleType::Harmonic               => Box::new(harmonic::HarmonicModule::new()),
         ModuleType::Future                 => Box::new(future::FutureModule::new()),
         ModuleType::Punch                  => Box::new(punch::PunchModule::new()),
         ModuleType::Rhythm                 => Box::new(rhythm::RhythmModule::new()),
@@ -1087,6 +1152,7 @@ pub mod gain;
 pub use gain::GainModule;
 pub mod ts_split;
 pub mod harmonic;
+pub use harmonic::HarmonicMode;
 pub mod master;
 pub mod mid_side;
 pub use mid_side::MidSideModule;

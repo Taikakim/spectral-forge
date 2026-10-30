@@ -142,7 +142,8 @@ src/
       mid_side.rs     — M/S balance, expansion, phase decorrelation, onset-driven side
                         level (TRANSIENT) and constant-power pan (PAN); both bipolar
       ts_split.rs     — Transient/Sustained split (exposes T and S virtual rows)
-      harmonic.rs     — Harmonic placeholder stub (no DSP; 0 curves)
+      harmonic.rs     — 3 modes: H/P Split (causal median HPSS → virtual H/P rows),
+                        Partial EQ (gain by partial number), Exciter (2nd–5th harmonics)
       future.rs       — Print-Through / Pre-Echo
       punch.rs        — Peak carving: sidechain-driven (Direct / Inverse) or self-driven (Self)
       rhythm.rs       — Tempo-synced Euclidean / Arpeggiator / Phase Reset
@@ -205,7 +206,7 @@ and a module reads only its first `num_curves()` entries. The Dynamics module us
 
 Other modules define their own indices — do not assume the Dynamics mapping elsewhere. Current
 `num_curves()`: Dynamics 6, Freeze 5, PhaseSmear 4, Contrast 6, Gain 2, MidSide 5, T/S Split 2,
-Harmonic 0, Future 5, Punch 6, Rhythm 5, Geometry 5, Modulate 6, Circuit 5, Life 5, Past 5,
+Harmonic 5, Future 5, Punch 6, Rhythm 5, Geometry 5, Modulate 6, Circuit 5, Life 5, Past 5,
 Kinetics 5, Harmony 6 (Master and Empty 0). `module_spec()` in `src/dsp/modules/mod.rs` is the
 authoritative source for counts and labels.
 

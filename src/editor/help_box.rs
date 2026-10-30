@@ -360,6 +360,7 @@ fn active_layout_for_slot(
         ModuleType::Rhythm   => params.slot_rhythm_mode.lock()[slot]   as u8,
         ModuleType::Punch    => params.slot_punch_mode.lock()[slot]    as u8,
         ModuleType::Harmony  => params.slot_harmony_mode.lock()[slot]  as u8,
+        ModuleType::Harmonic => params.slot_harmonic_mode.lock()[slot] as u8,
         ModuleType::Geometry => params.slot_geometry_mode.lock()[slot] as u8,
         ModuleType::Kinetics => params.slot_kinetics_mode.lock()[slot] as u8,
         _ => 0,
@@ -428,7 +429,7 @@ fn static_description(
         ModuleType::Gain       => "Gain — per-bin spectral gain shaping. The Add/Subtract/Pull/Match selector below changes how the GAIN curve is applied. Sidechain: yes (Pull/Match modes).",
         ModuleType::MidSide    => "Mid/Side — per-bin mid/side balance, M/S expansion, phase decorrelation, transient steering, and stereo pan. Sidechain: no.",
         ModuleType::TransientSustainedSplit    => "T/S Split — splits the slot's input into transient and sustained streams that feed virtual rows in the routing matrix (slot N + 'T'/'S'). Sidechain: no.",
-        ModuleType::Harmonic   => "Harmonic — placeholder stub slot type with no processing yet; audio passes through unchanged. No curves. Sidechain: no.",
+        ModuleType::Harmonic   => "Harmonic — harmonic-structure tools: H/P Split (harmonic/percussive separation with H and P matrix rows), Partial EQ (gain by partial number) and Exciter (adds 2nd–5th harmonics). Pick a mode in the slot row. Sidechain: no.",
         _ => module_spec(ty).display_name,
     };
     if let Some(label) = curve_labels.get(editing_curve) {
@@ -494,6 +495,25 @@ fn multi_mode_curve_help(ty: ModuleType, mode: u8, curve_idx: usize) -> &'static
         (ModuleType::Modulate, 8, 1) => "Slew Lag · REACH — how many neighbouring sidechain bins (up to ±16) are averaged when measuring sidechain movement.",
         (ModuleType::Modulate, 8, 3) => "Slew Lag · THRESH — sidechain-movement deadband. Movement below it is ignored; above it the bins get progressively slower (down to 5% of the AMOUNT rate).",
         (ModuleType::Modulate, 8, 5) => "Slew Lag · MIX — wet/dry between slew-limited and original.",
+
+        // ── Harmonic (SC: no) ──
+        // 0=HpSplit  curves: SEPARATE(0), H/P BAL(1), SIZE(3), MIX(4)
+        (ModuleType::Harmonic, 0, 0) => "H/P Split · SEPARATE — how hard the harmonic/percussive masks split. 0 = both streams get 50% of everything; 100% = full soft-mask separation.",
+        (ModuleType::Harmonic, 0, 1) => "H/P Split · H/P BAL — this slot's own output. 0 = H + P (unchanged); −100% = harmonic only; +100% = percussive only. The H and P matrix rows are unaffected.",
+        (ModuleType::Harmonic, 0, 3) => "H/P Split · SIZE — median filter size: 3–17 recent frames for the harmonic estimate, ±1–8 bins for the percussive one. Larger = cleaner split, slower to follow note changes.",
+        (ModuleType::Harmonic, 0, 4) => "H/P Split · MIX — wet/dry of the balanced output.",
+        // 1=PartialEq  curves: AMOUNT(0), ODD/EVEN(1), TILT(2), WIDTH(3), MIX(4)
+        (ModuleType::Harmonic, 1, 0) => "Partial EQ · AMOUNT — depth of the partial-number gains.",
+        (ModuleType::Harmonic, 1, 1) => "Partial EQ · ODD/EVEN — −100% keeps odd partials and removes even ones (hollow, clarinet-like); +100% the reverse. The fundamental is never changed.",
+        (ModuleType::Harmonic, 1, 2) => "Partial EQ · TILT — slope over partial number: +100% raises partial h by h× (+6 dB per doubling), −100% lowers it by 1/h. Capped at +12 dB.",
+        (ModuleType::Harmonic, 1, 3) => "Partial EQ · WIDTH — how many bins (0–±4) around each detected partial take its gain.",
+        (ModuleType::Harmonic, 1, 4) => "Partial EQ · MIX — wet/dry.",
+        // 2=Exciter  curves: DRIVE(0), ODD/EVEN(1), BRIGHT(2), SENS(3), MIX(4)
+        (ModuleType::Harmonic, 2, 0) => "Exciter · DRIVE — level of the generated harmonics, up to −12 dB relative to the source bin.",
+        (ModuleType::Harmonic, 2, 1) => "Exciter · ODD/EVEN — −100% generates only odd harmonics (3rd, 5th: edgier); +100% only even (2nd, 4th: warmer). 0 = both at half level.",
+        (ModuleType::Harmonic, 2, 2) => "Exciter · BRIGHT — falloff over harmonic order. 0 = natural 1/(h−1); +100% = flat (all orders equal); −100% = steep.",
+        (ModuleType::Harmonic, 2, 3) => "Exciter · SENS — which bins excite, relative to the loudest bin in the frame: 100% = anything within 60 dB; 0% = only the loudest.",
+        (ModuleType::Harmonic, 2, 4) => "Exciter · MIX — how much of the generated harmonics is added.",
 
         // ── Kinetics (SC: yes — Gravity Well and Inertial Mass read sidechain) ──
         // 0=Hooke  curves: STRENGTH(0), REACH(2), DAMPING(3), MIX(4)

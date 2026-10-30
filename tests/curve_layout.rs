@@ -43,7 +43,7 @@ fn default_module_specs_have_active_layout_none() {
         ModuleType::Past, ModuleType::Future, ModuleType::Circuit,
         ModuleType::Geometry, ModuleType::Punch, ModuleType::Rhythm,
         ModuleType::Modulate, ModuleType::Harmony, ModuleType::Kinetics,
-        ModuleType::Life,
+        ModuleType::Life, ModuleType::Harmonic,
     ];
     for ty in [
         ModuleType::Dynamics, ModuleType::Freeze, ModuleType::PhaseSmear,

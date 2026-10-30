@@ -12,6 +12,7 @@ use crate::dsp::modules::circuit::CircuitMode;
 use crate::dsp::modules::life::LifeMode;
 use crate::dsp::modules::past::{PastMode, SortKey};
 use crate::dsp::modules::modulate::ModulateMode;
+use crate::dsp::modules::harmonic::HarmonicMode;
 use crate::dsp::modules::contrast::ContrastMode;
 use crate::dsp::modules::punch::PunchMode;
 use crate::dsp::modules::rhythm::{ArpGrid, ArpTriggerSource, RhythmMode};
@@ -193,6 +194,10 @@ pub struct SpectralForgeParams {
     /// Per-slot Chladni / Helmholtz selector for `GeometryModule`. Single mutex over
     /// the array (matches `slot_rhythm_mode`) so audio thread takes one lock per block.
     pub slot_geometry_mode: Arc<Mutex<[GeometryMode; 9]>>,
+
+    /// Per-slot HpSplit / PartialEq / Exciter selector for `HarmonicModule`. Also
+    /// decides whether a Harmonic slot owns two virtual matrix rows (HpSplit).
+    pub slot_harmonic_mode: Arc<Mutex<[HarmonicMode; 9]>>,
 
     /// Per-slot PhasePhaser / BinSwapper / RmFmMatrix / DiodeRm / GroundLoop selector
     /// for `ModulateModule`. Single mutex over the array so audio thread takes one lock per block.
@@ -449,6 +454,7 @@ impl Default for SpectralForgeParams {
             slot_punch_mode: Arc::new(Mutex::new([PunchMode::Direct; 9])),
             slot_rhythm_mode: Arc::new(Mutex::new([RhythmMode::default(); 9])),
             slot_geometry_mode: Arc::new(Mutex::new([GeometryMode::default(); 9])),
+            slot_harmonic_mode: Arc::new(Mutex::new([HarmonicMode::default(); 9])),
             slot_modulate_mode: Arc::new(Mutex::new([ModulateMode::default(); 9])),
             slot_modulate_repel: Arc::new(Mutex::new([false; 9])),
             slot_modulate_sc_positioned: Arc::new(Mutex::new([false; 9])),
@@ -1170,6 +1176,7 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("slot_punch_mode",    slot_punch_mode);
         persist_out!("slot_rhythm_mode",   slot_rhythm_mode);
         persist_out!("slot_geometry_mode", slot_geometry_mode);
+        persist_out!("slot_harmonic_mode", slot_harmonic_mode);
         persist_out!("slot_modulate_mode", slot_modulate_mode);
         persist_out!("slot_modulate_repel", slot_modulate_repel);
         persist_out!("slot_modulate_sc_positioned", slot_modulate_sc_positioned);
@@ -1238,6 +1245,7 @@ unsafe impl Params for SpectralForgeParams {
                 "slot_punch_mode"     => persist_in!("slot_punch_mode",    slot_punch_mode,    data),
                 "slot_rhythm_mode"    => persist_in!("slot_rhythm_mode",    slot_rhythm_mode,    data),
                 "slot_geometry_mode"  => persist_in!("slot_geometry_mode",  slot_geometry_mode,  data),
+                "slot_harmonic_mode"  => persist_in!("slot_harmonic_mode",  slot_harmonic_mode,  data),
                 "slot_modulate_mode"  => persist_in!("slot_modulate_mode",  slot_modulate_mode,  data),
                 "slot_modulate_repel" => persist_in!("slot_modulate_repel", slot_modulate_repel, data),
                 "slot_modulate_sc_positioned" => persist_in!("slot_modulate_sc_positioned", slot_modulate_sc_positioned, data),

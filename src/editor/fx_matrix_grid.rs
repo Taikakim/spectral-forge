@@ -60,7 +60,8 @@ fn build_cell_help_body(
     body
 }
 
-/// Paint the 9×9 routing matrix grid, with optional virtual half-height rows for T/S Split slots.
+/// Paint the 9×9 routing matrix grid, with optional virtual half-height rows for split
+/// slots (T/S Split, Harmonic in H/P Split mode).
 ///
 /// Returns `MatrixInteraction` describing any clicks this frame.
 ///
@@ -89,14 +90,19 @@ pub fn paint_fx_matrix_grid(
         Virtual(usize, VirtualRowKind, usize), // parent_slot, kind, matrix_row_idx
     }
 
+    // Same derivation the audio thread uses, so a virtual row's matrix column
+    // always matches the stream it carries.
+    let harmonic_modes = *params.slot_harmonic_mode.lock();
+    let vrows = crate::dsp::modules::split_virtual_rows(module_types, &harmonic_modes);
     let mut rows: Vec<RowEntry> = Vec::with_capacity(13);
-    let mut vrow_idx = 0usize;
     for s in 0..9 {
         rows.push(RowEntry::Real(s));
-        if module_types[s] == ModuleType::TransientSustainedSplit {
-            rows.push(RowEntry::Virtual(s, VirtualRowKind::Transient, MAX_SLOTS + vrow_idx));
-            rows.push(RowEntry::Virtual(s, VirtualRowKind::Sustained, MAX_SLOTS + vrow_idx + 1));
-            vrow_idx += 2;
+        for (v, vrow) in vrows.iter().enumerate() {
+            if let Some((src, kind)) = *vrow {
+                if src as usize == s {
+                    rows.push(RowEntry::Virtual(s, kind, MAX_SLOTS + v));
+                }
+            }
         }
     }
 
@@ -386,8 +392,10 @@ pub fn paint_fx_matrix_grid(
             RowEntry::Virtual(parent_slot, kind, vrow_src) => {
                 let row_top = origin.y + y_offset;
                 let border_col = match kind {
-                    VirtualRowKind::Transient => egui::Color32::from_rgb(0xe0, 0x70, 0x30),
-                    VirtualRowKind::Sustained => egui::Color32::from_rgb(0x30, 0x70, 0xc0),
+                    VirtualRowKind::Transient | VirtualRowKind::Percussive =>
+                        egui::Color32::from_rgb(0xe0, 0x70, 0x30),
+                    VirtualRowKind::Sustained | VirtualRowKind::Harmonic =>
+                        egui::Color32::from_rgb(0x30, 0x70, 0xc0),
                 };
                 // Left border stripe
                 painter.rect_filled(
@@ -395,10 +403,7 @@ pub fn paint_fx_matrix_grid(
                     0.0, border_col,
                 );
                 // Row label
-                let vrow_label = format!("{}{}",
-                    parent_slot + 1,
-                    if matches!(kind, VirtualRowKind::Transient) { "T" } else { "S" }
-                );
+                let vrow_label = format!("{}{}", parent_slot + 1, kind.suffix());
                 let lbl_rect = Rect::from_min_size(
                     egui::pos2(origin.x + 3.0, row_top),
                     Vec2::new(LABEL - 5.0, HALF_CELL),
@@ -431,10 +436,7 @@ pub fn paint_fx_matrix_grid(
                         let p = params.matrix_cell(col, *vrow_src);
                         let mut send_val: f32 = p.map(|fp| fp.value())
                             .unwrap_or(route_matrix.send[*vrow_src][col]);
-                        let vrow_label = match kind {
-                            VirtualRowKind::Transient => format!("Slot {}T", parent_slot + 1),
-                            VirtualRowKind::Sustained => format!("Slot {}S", parent_slot + 1),
-                        };
+                        let vrow_label = format!("Slot {}{}", parent_slot + 1, kind.suffix());
                         let vinner = ui.allocate_new_ui(
                             UiBuilder::new().max_rect(cell_rect.shrink(2.0)),
                             |ui| {
@@ -464,19 +466,16 @@ pub fn paint_fx_matrix_grid(
                             format!("{} -> Slot {} send", vrow_label, col + 1));
                         let amp_mode = route_matrix.amp_mode[*vrow_src][col];
                         let dst_ty   = module_types[col];
-                        let stream   = match kind {
-                            VirtualRowKind::Transient => "transient stream",
-                            VirtualRowKind::Sustained => "sustained stream",
-                        };
+                        let stream   = kind.stream_name();
                         let head = format!(
                             "{} ({})  ->  {}  ({})",
-                            endpoint_label(*parent_slot, ModuleType::TransientSustainedSplit, &slot_names[*parent_slot]),
+                            endpoint_label(*parent_slot, module_types[*parent_slot], &slot_names[*parent_slot]),
                             stream,
                             endpoint_label(col, dst_ty, &slot_names[col]),
                             amp_mode.label(),
                         );
                         let mut body = String::new();
-                        body.push_str("T/S Split virtual-row send. Drag to set send amplitude for the ");
+                        body.push_str("Split virtual-row send. Drag to set send amplitude for the ");
                         body.push_str(stream);
                         body.push_str(" feeding this slot. Right-click for the amp filter popup.\n\n");
                         body.push_str(amp_mode.hint());

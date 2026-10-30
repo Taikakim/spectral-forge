@@ -62,8 +62,9 @@ pub fn curve_display_config(
         ModuleType::Past     => past_config(curve_idx, 0),
         ModuleType::Kinetics => kinetics_config(curve_idx),
         ModuleType::Harmony  => harmony_config(curve_idx),
+        ModuleType::Harmonic => harmonic_config(curve_idx),
         // Modules with no display curves:
-        ModuleType::Harmonic | ModuleType::Master | ModuleType::Empty => default_config(),
+        ModuleType::Master | ModuleType::Empty => default_config(),
     }
 }
 
@@ -327,6 +328,27 @@ fn mid_side_config(i: usize) -> CurveDisplayConfig {
         _ => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],
+            y_natural: 100.0,
+            offset_fn: off_mix,
+            natural_at_max: true,
+        },
+    }
+}
+
+fn harmonic_config(i: usize) -> CurveDisplayConfig {
+    match i {
+        // BALANCE (H/P balance, odd/even) / TILT: bipolar, gain=1.0 → 0 (neutral).
+        1 | 2 => CurveDisplayConfig {
+            y_label: "%", y_min: -100.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(-100.0, "-100"), (-50.0, "-50"), (50.0, "+50"), (100.0, "+100")],
+            y_natural: 0.0,
+            offset_fn: off_amount_200,
+            natural_at_max: false,
+        },
+        // AMOUNT / REACH / MIX: gain=1.0 → 100% (at y_max); off=-1 → 0%
+        _ => CurveDisplayConfig {
+            y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(25.0, "25%"), (50.0, "50%"), (75.0, "75%"), (100.0, "100%")],
             y_natural: 100.0,
             offset_fn: off_mix,
             natural_at_max: true,

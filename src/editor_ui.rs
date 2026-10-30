@@ -123,6 +123,7 @@ pub fn create_editor(
                                     crate::dsp::modules::ModuleType::Rhythm   => params.slot_rhythm_mode.lock()[editing_slot]   as u8,
                                     crate::dsp::modules::ModuleType::Punch    => params.slot_punch_mode.lock()[editing_slot]    as u8,
                                     crate::dsp::modules::ModuleType::Harmony  => params.slot_harmony_mode.lock()[editing_slot]  as u8,
+                                    crate::dsp::modules::ModuleType::Harmonic => params.slot_harmonic_mode.lock()[editing_slot] as u8,
                                     crate::dsp::modules::ModuleType::Geometry => params.slot_geometry_mode.lock()[editing_slot] as u8,
                                     crate::dsp::modules::ModuleType::Kinetics => params.slot_kinetics_mode.lock()[editing_slot] as u8,
                                     _ => 0u8,
@@ -199,6 +200,7 @@ pub fn create_editor(
                                 crate::dsp::modules::ModuleType::Rhythm   => params.slot_rhythm_mode.lock()[editing_slot]   as u8,
                                 crate::dsp::modules::ModuleType::Punch    => params.slot_punch_mode.lock()[editing_slot]    as u8,
                                 crate::dsp::modules::ModuleType::Harmony  => params.slot_harmony_mode.lock()[editing_slot]  as u8,
+                                crate::dsp::modules::ModuleType::Harmonic => params.slot_harmonic_mode.lock()[editing_slot] as u8,
                                 crate::dsp::modules::ModuleType::Geometry => params.slot_geometry_mode.lock()[editing_slot] as u8,
                                 crate::dsp::modules::ModuleType::Kinetics => params.slot_kinetics_mode.lock()[editing_slot] as u8,
                                 _ => 0,
@@ -574,6 +576,7 @@ pub fn create_editor(
                                     crate::dsp::modules::ModuleType::Rhythm   => params.slot_rhythm_mode.lock()[editing_slot]   as u8,
                                     crate::dsp::modules::ModuleType::Punch    => params.slot_punch_mode.lock()[editing_slot]    as u8,
                                     crate::dsp::modules::ModuleType::Harmony  => params.slot_harmony_mode.lock()[editing_slot]  as u8,
+                                    crate::dsp::modules::ModuleType::Harmonic => params.slot_harmonic_mode.lock()[editing_slot] as u8,
                                     crate::dsp::modules::ModuleType::Geometry => params.slot_geometry_mode.lock()[editing_slot] as u8,
                                     crate::dsp::modules::ModuleType::Kinetics => params.slot_kinetics_mode.lock()[editing_slot] as u8,
                                     _ => 0u8,
@@ -957,16 +960,39 @@ pub fn create_editor(
                         let is_past     = slot_type == crate::dsp::modules::ModuleType::Past;
                         let is_kinetics = slot_type == crate::dsp::modules::ModuleType::Kinetics;
                         let is_harmony  = slot_type == crate::dsp::modules::ModuleType::Harmony;
+                        let is_harmonic = slot_type == crate::dsp::modules::ModuleType::Harmonic;
 
                         let mut mode_builder = egui::UiBuilder::new();
-                        if !is_future && !is_punch && !is_rhythm && !is_geometry && !is_modulate && !is_circuit && !is_life && !is_past && !is_kinetics && !is_harmony { mode_builder = mode_builder.invisible(); }
+                        if !is_future && !is_punch && !is_rhythm && !is_geometry && !is_modulate && !is_circuit && !is_life && !is_past && !is_kinetics && !is_harmony && !is_harmonic { mode_builder = mode_builder.invisible(); }
                         ui.scope_builder(mode_builder, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
                                 ui.label(egui::RichText::new("Mode").color(th::LABEL_DIM).size(th::scaled(th::FONT_SIZE_LABEL, scale)));
                                 ui.add_space(2.0);
 
-                                if is_future {
+                                if is_harmonic {
+                                    let cur_mode = params.slot_harmonic_mode.lock()[edit_slot];
+                                    use crate::dsp::modules::harmonic::HarmonicMode;
+                                    for (label, hint, mode) in [
+                                        ("H/P Split",  "H/P Split — separates steady (harmonic) from broadband (percussive) energy; H and P appear as virtual rows in the matrix.", HarmonicMode::HpSplit),
+                                        ("Partial EQ", "Partial EQ — gain by partial number (odd/even balance, tilt over harmonic number) for each detected note.",               HarmonicMode::PartialEq),
+                                        ("Exciter",    "Exciter — adds phase-coherent 2nd–5th harmonics above each loud bin.",                                                    HarmonicMode::Exciter),
+                                    ] {
+                                        let is_active = cur_mode == mode;
+                                        let fill     = if is_active { th::BORDER } else { th::BG };
+                                        let text_col = if is_active { egui::Color32::BLACK } else { th::LABEL_DIM };
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(label).color(text_col).size(th::scaled(th::FONT_SIZE_LABEL, scale))
+                                        )
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(th::scaled_stroke(th::STROKE_BORDER, scale), th::BORDER));
+                                        let resp = ui.add(btn);
+                                        crate::editor::help_box::track_help_strings(ui, &resp, label, hint);
+                                        if resp.clicked() {
+                                            params.slot_harmonic_mode.lock()[edit_slot] = mode;
+                                        }
+                                    }
+                                } else if is_future {
                                     let cur_mode = params.slot_future_mode.lock()[edit_slot];
                                     use crate::dsp::modules::FutureMode;
                                     for (label, hint, mode) in [
@@ -1351,6 +1377,7 @@ pub fn create_editor(
                                     crate::dsp::modules::ModuleType::Rhythm   => params.slot_rhythm_mode.lock()[editing_slot]   as u8,
                                     crate::dsp::modules::ModuleType::Punch    => params.slot_punch_mode.lock()[editing_slot]    as u8,
                                     crate::dsp::modules::ModuleType::Harmony  => params.slot_harmony_mode.lock()[editing_slot]  as u8,
+                                    crate::dsp::modules::ModuleType::Harmonic => params.slot_harmonic_mode.lock()[editing_slot] as u8,
                                     crate::dsp::modules::ModuleType::Geometry => params.slot_geometry_mode.lock()[editing_slot] as u8,
                                     crate::dsp::modules::ModuleType::Kinetics => params.slot_kinetics_mode.lock()[editing_slot] as u8,
                                     _ => 0u8,

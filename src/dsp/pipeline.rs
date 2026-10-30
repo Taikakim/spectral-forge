@@ -65,6 +65,10 @@ pub struct Pipeline {
     channel_supp_buf: Vec<f32>,
     complex_buf:     Vec<Complex<f32>>,
     fx_matrix: crate::dsp::fx_matrix::FxMatrix,
+    /// Virtual-row table derived from slot types + Harmonic modes; refreshed each
+    /// block when the locks are free, otherwise last block's table is reused.
+    virtual_rows_cache: [Option<(u8, crate::dsp::modules::VirtualRowKind)>;
+                         crate::dsp::modules::MAX_SPLIT_VIRTUAL_ROWS],
     /// Ring buffer for delta monitor dry-signal delay: 2 channels × MAX_DRY_DELAY_SIZE entries.
     /// Channel c occupies [c * MAX_DRY_DELAY_SIZE .. (c+1) * MAX_DRY_DELAY_SIZE].
     /// Delayed by fft_size samples to align dry with STFT-latency-compensated wet.
@@ -250,6 +254,10 @@ impl Pipeline {
             channel_supp_buf: vec![0.0; MAX_NUM_BINS],
             complex_buf,
             fx_matrix,
+            virtual_rows_cache: crate::dsp::modules::split_virtual_rows(
+                slot_types,
+                &[crate::dsp::modules::harmonic::HarmonicMode::default(); 9],
+            ),
             dry_delay: vec![0.0f32; 2 * MAX_DRY_DELAY_SIZE],
             dry_delay_write: 0,
             slot_curve_cache,
@@ -815,6 +823,16 @@ impl Pipeline {
             self.fx_matrix.set_geometry_modes(&*modes);
         }
 
+        // Propagate harmonic modes each block, and re-derive the virtual-row table
+        // (T/S Split + Harmonic H/P Split). Only refreshed when both locks succeed;
+        // otherwise the previous block's table is reused so sends never glitch.
+        if let Some(modes) = params.slot_harmonic_mode.try_lock() {
+            self.fx_matrix.set_harmonic_modes(&*modes);
+            if let Some(types) = params.slot_module_types.try_lock() {
+                self.virtual_rows_cache = crate::dsp::modules::split_virtual_rows(&*types, &*modes);
+            }
+        }
+
         // Propagate modulate modes each block (try_lock is non-blocking; skipped if GUI holds lock).
         if let Some(modes) = params.slot_modulate_mode.try_lock() {
             self.fx_matrix.set_modulate_modes(&*modes);
@@ -1036,18 +1054,20 @@ impl Pipeline {
         self.fx_matrix.set_master_clip_threshold_db(master_clip_threshold_db);
 
         // Build route matrix from automatable params each block.
-        // virtual_rows + amp_mode + amp_params are not exposed as automation
-        // targets, so we read them from the Mutex — but never block waiting for it.
-        let (virt, amp_mode, amp_params) = params.route_matrix.try_lock()
-            .map(|g| (g.virtual_rows, g.amp_mode, g.amp_params))
+        // amp_mode + amp_params are not exposed as automation targets, so we read
+        // them from the Mutex — but never block waiting for it. virtual_rows is
+        // derived from the slot layout (see `virtual_rows_cache` above); the
+        // persisted RouteMatrix field was never populated, which left T/S Split
+        // virtual-row sends silent.
+        let (amp_mode, amp_params) = params.route_matrix.try_lock()
+            .map(|g| (g.amp_mode, g.amp_params))
             .unwrap_or_else(|| (
-                Default::default(),
                 crate::dsp::modules::default_amp_modes(),
                 crate::dsp::modules::default_amp_params(),
             ));
         let mut route_matrix_snap = crate::dsp::modules::RouteMatrix {
             send: [[0.0f32; crate::dsp::modules::MAX_SLOTS]; crate::dsp::modules::MAX_MATRIX_ROWS],
-            virtual_rows: virt,
+            virtual_rows: self.virtual_rows_cache,
             amp_mode,
             amp_params,
         };

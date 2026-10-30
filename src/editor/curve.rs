@@ -315,6 +315,10 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
             3 | 4 => 16,        // TRANSIENT / PAN → bipolar −100…+100 % (neutral = 0)
             _ => 6,             // DECORREL → 0–100 %
         },
+        ModuleType::Harmonic => match curve_idx {
+            1 | 2 => 16,        // BALANCE / TILT → bipolar −100…+100 % (neutral = 0)
+            _ => 6,             // AMOUNT / REACH / MIX → 0–100 %
+        },
         ModuleType::TransientSustainedSplit => match curve_idx {
             0 => 6,             // SENSITIVITY → 0–100 %
             1 => 11,            // SMOOTHNESS → 0–2 dimensionless (idx 11 = Resistance scale)

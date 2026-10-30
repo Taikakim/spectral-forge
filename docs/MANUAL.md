@@ -370,14 +370,14 @@ Nothing is routed to Master unless explicitly connected. If no sends reach slot 
 | Phase Smear       | Per-bin phase randomisation                               |
 | Contrast          | Spectral contrast enhancer — boosts peaks, cuts valleys (Spatial / Temporal / Tilt mode picker in dev builds only) |
 | Gain              | Per-bin gain shaping (Add / Subtract / Pull / Match modes) |
-| Mid/Side          | M/S balance, expansion, phase decorrelation               |
-| T/S Split         | Transient/Sustained spectral split with virtual T and S rows in the matrix (max 2 active) |
-| Harmonic          | Placeholder — passes audio through unchanged; no curves, no DSP yet |
+| Mid/Side          | M/S balance, expansion, phase decorrelation, onset-driven side level (TRANSIENT) and per-bin constant-power pan (PAN); TRANSIENT and PAN are bipolar, centre = no change |
+| T/S Split         | Transient/Sustained spectral split with virtual T and S rows in the matrix |
+| Harmonic          | H/P Split (harmonic/percussive streams as virtual H and P rows), Partial EQ (gain by partial number), Exciter (adds 2nd–5th harmonics) |
 | Future            | Print-through and pre-echo from spectral history (Print-Through / Pre-Echo) |
-| Punch             | Sidechain-driven spectral carving with neighbour fill (Direct / Inverse) |
+| Punch             | Spectral carving with neighbour fill: Direct / Inverse (sidechain-driven) or Self (input is its own sidechain) |
 | Rhythm            | Host-tempo-locked spectral gating (Euclidean / Arpeggiator / Phase Reset) |
 | Geometry          | Physical-resonator carving (Chladni / Helmholtz)          |
-| Modulate          | Bin modulators — 8 modes: Phase Phaser, Bin Swapper, RM/FM, Diode RM, Ground Loop, Gravity Phaser, PLL Tear, FM Network |
+| Modulate          | Bin modulators — 9 modes: Phase Phaser, Bin Swapper, RM/FM, Diode RM, Ground Loop, Gravity Phaser, PLL Tear, FM Network, Slew Lag |
 | Circuit           | Analogue-component models — 10 modes: BBD, Schmitt, Crossover, Vactrol, Transformer, Power Sag, Component Drift, PCB Crosstalk, Slew, Bias Fuzz |
 | LIFE              | Physics-of-matter effects — 10 modes: Viscosity, Surface Tension, Crystallization, Archimedes, Non-Newtonian, Stiction, Yield, Capillary, Sandpaper, Brownian |
 | PAST              | Rolling spectral-history playback — Granular, Decay Sorter, Convolution, Reverse, Stretch |
@@ -610,10 +610,14 @@ The dispatch happens once at startup based on CPUID flags. No runtime branching 
 slot `s`:
 
 1. Build the slot's input by summing `send[src][s] × slot_out[src]` for all `src < s`.
-2. Also accumulate from virtual rows (T/S Split outputs) for `src_slot < s`.
+2. Also accumulate from virtual rows (T/S Split, Harmonic H/P Split outputs) for `src_slot < s`.
 3. Call the module's `process()`.
 4. Store the output in `slot_out[s]`.
-5. If the module exposes virtual outputs (T/S Split), copy them into `virtual_out[v]`.
+5. If the module exposes virtual outputs, copy them into `virtual_out[v]`.
+
+The virtual-row table (which matrix source column carries which stream) is derived each block
+from the slot types and Harmonic modes by `split_virtual_rows()`: each split slot takes two
+consecutive rows in slot order, up to 4 rows in total; further splits get none.
 
 Slot 8 (Master) is handled as the final mix: all `send[src][8]` sums are accumulated into the
 output buffer. If nothing routes to slot 8, the output is silence (no implicit passthrough).

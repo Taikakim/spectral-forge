@@ -82,7 +82,6 @@ fn no_existing_module_declares_needs_chromagram_or_groups() {
         ModuleType::Gain,
         ModuleType::MidSide,
         ModuleType::TransientSustainedSplit,
-        ModuleType::Harmonic,
         ModuleType::Future,
         ModuleType::Punch,
         ModuleType::Rhythm,
@@ -98,6 +97,9 @@ fn no_existing_module_declares_needs_chromagram_or_groups() {
         assert!(!spec.needs_chromagram,
             "{:?} should not need chromagram in v1 (Harmony is the v1 consumer in Phase 6.5)", ty);
         assert!(!spec.needs_harmonic_groups,
-            "{:?} should not need harmonic groups in v1 (Harmony is the v1 consumer in Phase 6.5)", ty);
+            "{:?} should not need harmonic groups (consumers: Harmony, Harmonic Partial EQ)", ty);
     }
+    // Harmonic's Partial EQ mode consumes harmonic groups but not the chromagram.
+    let harmonic = module_spec(ModuleType::Harmonic);
+    assert!(harmonic.needs_harmonic_groups && !harmonic.needs_chromagram);
 }
