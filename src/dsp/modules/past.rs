@@ -315,8 +315,8 @@ impl SpectralModule for PastModule {
         ctx: &ModuleContext<'_>,
     ) {
         debug_assert_eq!(curves.len(), 5, "Past expects 5 curves");
-        // TODO(5b2.5+): once kernels write to the full read range, decide whether
-        // FxChannelTarget::Mid/Side gating is needed here. Current stubs are no-op.
+        // TODO(5b2.5+): decide whether FxChannelTarget::Mid/Side gating is needed
+        // here. The kernels currently ignore `target` and process every channel.
         // Conservative defaults if curves are missing (should never happen).
         let amount    = curves.get(0).map(|c| &c[..]).unwrap_or(&[]);
         let time      = curves.get(1).map(|c| &c[..]).unwrap_or(&[]);
@@ -409,7 +409,7 @@ impl SpectralModule for PastModule {
     fn last_probe(&self) -> crate::dsp::modules::ProbeSnapshot { self.last_probe }
 }
 
-// ── Mode kernels (stubs — Tasks 5–9 fill them in) ────────────────────────────
+// ── Mode kernels ─────────────────────────────────────────────────────────────
 
 impl PastModule {
     fn apply_granular(

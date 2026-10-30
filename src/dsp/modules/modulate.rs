@@ -1,15 +1,15 @@
 //! Modulate module — spectral modulation / ring-mod / cross-synthesis effects.
 //!
-//! Five modes ship across Phase 2f tasks:
+//! Phase 2f shipped five light modes:
 //! - **PhasePhaser**  — per-bin animated phase rotation driven by a RATE curve.
 //! - **BinSwapper**   — displaces bin energy by a REACH offset with wet/dry blend.
 //! - **RmFmMatrix**   — ring-mod (magnitude) and frequency-mod (bin-shift) from sidechain.
 //! - **DiodeRm**      — amplitude-gated leaky ring mod (AMPGATE curve controls threshold).
 //! - **GroundLoop**   — mains-hum injection + sag-gated harmonic spray.
 //!
-//! Kernel implementations are added in Tasks 3–7 of Phase 2f. This skeleton
-//! provides the enum, struct, and stub `process()` that passes audio through
-//! unmodified and zeroes suppression_out.
+//! Later phases added **GravityPhaser** and **PllTear** (5b.4, BinPhysics-aware),
+//! **FmNetwork** (6.6, IF-driven partial web) and **SlewLag** (sidechain-loosened
+//! per-bin magnitude slew limit).
 
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
@@ -258,6 +258,121 @@ fn apply_ground_loop(
         let dry          = bins[target];
         let wet          = bins[target] * scale;
         bins[target]     = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
+// ── Slew Lag kernel ───────────────────────────────────────────────────────
+
+/// Fastest magnitude slew Slew Lag allows (AMOUNT → 0⁺), dB/s. ≈ 43 dB/hop at
+/// hop 512 / 48 kHz, i.e. effectively unlimited.
+const SLEW_MAX_RATE_DB_S: f32 = 4000.0;
+/// Slowest magnitude slew (AMOUNT = 1), dB/s.
+const SLEW_MIN_RATE_DB_S: f32 = 20.0;
+/// Sidechain motion (dB/s, after the THRESH deadband) that fully tightens the limit.
+const SLEW_SC_FULL_DB_S: f32 = 1000.0;
+/// Deadband at THRESH = 1, dB/s of sidechain motion.
+const SLEW_DEADBAND_MAX_DB_S: f32 = 500.0;
+/// REACH = 1 averages sidechain motion over ±this many bins.
+const SLEW_REACH_MAX_BINS: f32 = 16.0;
+/// Fraction of the limit kept at full sidechain motion so bins never lock solid.
+const SLEW_MIN_LIMIT_FRAC: f32 = 0.05;
+/// Magnitude floor before taking logs.
+const SLEW_MAG_FLOOR: f32 = 1e-9;
+
+/// Slew Lag — per-bin log-magnitude slew limiter. AMOUNT sets the slew rate
+/// (exponential between `SLEW_MAX_RATE_DB_S` and `SLEW_MIN_RATE_DB_S`); sidechain
+/// motion, averaged over ±REACH bins and gated by the THRESH deadband, tightens
+/// the limit further. Phase is untouched.
+///
+/// Output magnitude never exceeds max(input, previous output), so the kernel
+/// cannot create gain spikes — it only delays rises and stretches falls.
+#[allow(clippy::too_many_arguments)]
+fn apply_slew_lag(
+    bins: &mut [Complex<f32>],
+    sidechain: Option<&[f32]>,
+    curves: &[&[f32]],
+    hop_seconds: f32,
+    prev_out_ln: &mut [f32],
+    prev_sc_ln: &mut [f32],
+    sc_prefix: &mut [f32],
+    primed: &mut bool,
+    sc_primed: &mut bool,
+) {
+    const DB_TO_LN: f32 = std::f32::consts::LN_10 / 20.0;
+
+    let amount_c = curves[0];
+    let reach_c  = curves[1];
+    let thresh_c = curves[3];
+    let mix_c    = curves[5];
+
+    let n = bins.len();
+    if n == 0 { return; }
+
+    // First hop after reset / mode change: start from the input so the limiter
+    // does not ramp up from silence.
+    if !*primed {
+        for k in 0..n {
+            prev_out_ln[k] = bins[k].norm().max(SLEW_MAG_FLOOR).ln();
+        }
+        *primed = true;
+    }
+
+    // Sidechain motion as prefix sums of |Δ level| in dB/s, so a ±REACH window
+    // average is O(1) per bin.
+    let have_sc = match sidechain {
+        Some(sc) if sc.len() >= n => {
+            sc_prefix[0] = 0.0;
+            for k in 0..n {
+                let l = sc[k].max(SLEW_MAG_FLOOR).ln();
+                let motion = if *sc_primed {
+                    (l - prev_sc_ln[k]).abs() / DB_TO_LN / hop_seconds
+                } else {
+                    0.0
+                };
+                prev_sc_ln[k] = l;
+                sc_prefix[k + 1] = sc_prefix[k] + motion;
+            }
+            *sc_primed = true;
+            true
+        }
+        _ => {
+            *sc_primed = false;
+            false
+        }
+    };
+
+    let rate_ratio = SLEW_MIN_RATE_DB_S / SLEW_MAX_RATE_DB_S;
+    for k in 0..n {
+        let amount = amount_c[k].clamp(0.0, 1.0);
+        let mix    = mix_c[k].clamp(0.0, 1.0);
+        let dry    = bins[k];
+        let in_ln  = dry.norm().max(SLEW_MAG_FLOOR).ln();
+
+        if amount < 1e-4 || mix < 1e-6 {
+            // Passthrough, but keep tracking so re-engaging doesn't jump.
+            prev_out_ln[k] = in_ln;
+            continue;
+        }
+
+        let mut rate_db_s = SLEW_MAX_RATE_DB_S * rate_ratio.powf(amount);
+        if have_sc {
+            let r  = (reach_c[k].clamp(0.0, 1.0) * SLEW_REACH_MAX_BINS).round() as usize;
+            let lo = k.saturating_sub(r);
+            let hi = (k + r).min(n - 1);
+            let avg = (sc_prefix[hi + 1] - sc_prefix[lo]) / (hi - lo + 1) as f32;
+            let deadband = thresh_c[k].clamp(0.0, 1.0) * SLEW_DEADBAND_MAX_DB_S;
+            let motion = ((avg - deadband).max(0.0) / SLEW_SC_FULL_DB_S).min(1.0);
+            rate_db_s *= 1.0 - motion * (1.0 - SLEW_MIN_LIMIT_FRAC);
+        }
+
+        let lim    = rate_db_s * hop_seconds * DB_TO_LN;
+        let prev   = prev_out_ln[k];
+        let out_ln = prev + (in_ln - prev).clamp(-lim, lim);
+        prev_out_ln[k] = out_ln;
+
+        // |dry| ≥ floor ⇒ |dry·scale| = exp(out_ln). |dry| < floor ⇒ smaller.
+        let scale = (out_ln - in_ln).exp();
+        bins[k] = dry * (1.0 - mix + mix * scale);
     }
 }
 
@@ -588,8 +703,8 @@ impl Default for ModulateScalars {
 // ── ModulateMode ───────────────────────────────────────────────────────────
 
 /// Per-mode heavy-CPU markers for ModulateMode. Order MUST match enum declaration.
-/// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear, FmNetwork.
-const MOD_HEAVY: [bool; 8] = [false, false, false, false, false, false, true /* [6] PllTear */, false /* [7] FmNetwork */];
+/// PhasePhaser, BinSwapper, RmFmMatrix, DiodeRm, GroundLoop, GravityPhaser, PllTear, FmNetwork, SlewLag.
+const MOD_HEAVY: [bool; 9] = [false, false, false, false, false, false, true /* [6] PllTear */, false /* [7] FmNetwork */, false /* [8] SlewLag */];
 
 // ── PLL Tear constants ─────────────────────────────────────────────────────
 
@@ -614,6 +729,7 @@ pub enum ModulateMode {
     GravityPhaser,
     PllTear,
     FmNetwork,
+    SlewLag,
 }
 
 impl Default for ModulateMode {
@@ -677,6 +793,15 @@ pub struct ModulateModule {
     fm_partial_freq: [f32; 16],
     /// Number of valid entries in `fm_partials` / `fm_partial_freq` after last detection.
     fm_partial_count: usize,
+    // ── Slew Lag state ────────────────────────────────────────────────────
+    /// Per-channel previous output log-magnitude per bin.
+    slew_prev_out_ln: [Vec<f32>; 2],
+    /// Per-channel previous sidechain log-level per bin.
+    slew_prev_sc_ln: [Vec<f32>; 2],
+    /// Shared prefix-sum scratch for sidechain motion (num_bins + 1).
+    slew_sc_prefix: Vec<f32>,
+    slew_primed: [bool; 2],
+    slew_sc_primed: [bool; 2],
     sample_rate: f32,
     fft_size: usize,
     /// PllTear-mode tuning scalars (damping + tear_angle_rad).
@@ -714,6 +839,11 @@ impl ModulateModule {
             fm_partials:      [crate::dsp::modules::harmony_helpers::PeakRecord::default(); 16],
             fm_partial_freq:  [0.0; 16],
             fm_partial_count: 0,
+            slew_prev_out_ln: [Vec::new(), Vec::new()],
+            slew_prev_sc_ln:  [Vec::new(), Vec::new()],
+            slew_sc_prefix:   Vec::new(),
+            slew_primed:      [false; 2],
+            slew_sc_primed:   [false; 2],
             sample_rate:  48_000.0,
             fft_size:     2048,
             scalars:      ModulateScalars::safe_default(),
@@ -731,6 +861,8 @@ impl ModulateModule {
             for ch in 0..2 {
                 for v in self.swap_scratch[ch].iter_mut() { *v = Complex::new(0.0, 0.0); }
             }
+            self.slew_primed    = [false; 2];
+            self.slew_sc_primed = [false; 2];
             self.mode = mode;
         }
     }
@@ -972,6 +1104,21 @@ impl SpectralModule for ModulateModule {
             ModulateMode::FmNetwork => {
                 self.process_fm_network(bins, curves, ctx);
             }
+            ModulateMode::SlewLag => {
+                let n = bins.len();
+                let hop_seconds = (self.fft_size as f32 / 4.0) / self.sample_rate.max(1.0);
+                apply_slew_lag(
+                    bins,
+                    sidechain,
+                    curves,
+                    hop_seconds,
+                    &mut self.slew_prev_out_ln[channel][..n],
+                    &mut self.slew_prev_sc_ln[channel][..n],
+                    &mut self.slew_sc_prefix[..n + 1],
+                    &mut self.slew_primed[channel],
+                    &mut self.slew_sc_primed[channel],
+                );
+            }
             ModulateMode::PllTear => {
                 let num_bins = bins.len();
                 self.refresh_smoothed(channel, curves, num_bins);
@@ -1108,7 +1255,16 @@ impl SpectralModule for ModulateModule {
             self.unwrap_local[ch].resize(num_bins, 0.0);
             // Seed RNG distinctly per channel (wrapping_mul to avoid debug-mode overflow).
             self.tear_rng[ch] = 0xC0FFEE_u32 ^ (ch as u32 + 1).wrapping_mul(0xDEAD_BEEF_u32);
+            // Slew Lag state.
+            self.slew_prev_out_ln[ch].clear();
+            self.slew_prev_out_ln[ch].resize(num_bins, 0.0);
+            self.slew_prev_sc_ln[ch].clear();
+            self.slew_prev_sc_ln[ch].resize(num_bins, 0.0);
         }
+        self.slew_sc_prefix.clear();
+        self.slew_sc_prefix.resize(num_bins + 1, 0.0);
+        self.slew_primed    = [false; 2];
+        self.slew_sc_primed = [false; 2];
         self.hop_count = [0; 2];
         // FM Network scratch — resized once per reset; no-op if already at num_bins.
         self.scratch_mag.resize(num_bins, 0.0);
@@ -1163,6 +1319,7 @@ impl SpectralModule for ModulateModule {
 /// - GravityPhaser: reads 0, 1, 3, 4, 5  — RATE(2) marked `_rate_c` (unused).
 /// - PllTear:       reads 0, 1, 2, 3, 5  — smoothed[4]=AMPGATE unused in kernel.
 /// - FmNetwork:     reads 0, 1, 4, 5     — RATE(2) and THRESH(3) not used.
+/// - SlewLag:       reads 0, 1, 3, 5     — RATE(2) and AMPGATE(4) not used.
 ///
 /// Wired via `active_layout: Some(crate::dsp::modules::modulate::active_layout)` on MODULATE.
 pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
@@ -1222,6 +1379,14 @@ pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
             label_overrides: &[],
             help_for:        |_| "",
             mode_overview:   Some("PLL Tear: per-bin 2nd-order PI PLL; bins that lose lock emit chaotic phase rotations; RATE sets loop bandwidth."),
+        },
+        8 => super::CurveLayout {
+            // SlewLag: AMOUNT = slew rate, REACH = sidechain averaging width,
+            // THRESH = sidechain-motion deadband. RATE(2) and AMPGATE(4) not read.
+            active:          &[0, 1, 3, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Slew Lag: limits how fast each bin's level can change; sidechain movement makes bins even slower."),
         },
         _ => super::CurveLayout {
             // FmNetwork: partial detection uses REACH as magnitude threshold; partial-pair

@@ -187,3 +187,82 @@ fn filter_state_skips_when_already_migrated() {
         "filter_state should not inject params when migrated_v1 is present"
     );
 }
+
+// ── Mid/Side bipolar migration (2026-10-30) ──────────────────────────────────
+
+fn midside_state(marker: bool) -> nih_plug::prelude::PluginState {
+    use nih_plug::wrapper::state::ParamValue;
+    use spectral_forge::dsp::modules::ModuleType;
+    let mut types = [ModuleType::Empty; 9];
+    types[2] = ModuleType::MidSide;
+    let mut params = std::collections::BTreeMap::new();
+    for c in [2, 3, 4] {
+        params.insert(spectral_forge::param_ids::offset_id(2, c), ParamValue::F32(1.0));
+    }
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert("slot_module_types".to_string(), serde_json::to_string(&types).unwrap());
+    fields.insert("migrated_v1".to_string(), "true".to_string());
+    if marker {
+        fields.insert(spectral_forge::MIDSIDE_BIPOLAR_KEY.to_string(), "true".to_string());
+    }
+    nih_plug::prelude::PluginState { version: String::new(), params, fields }
+}
+
+fn offset_of(state: &nih_plug::prelude::PluginState, s: usize, c: usize) -> f32 {
+    use nih_plug::wrapper::state::ParamValue;
+    match state.params.get(&spectral_forge::param_ids::offset_id(s, c)) {
+        Some(ParamValue::F32(v)) => *v,
+        other => panic!("expected F32 offset for s{s}c{c}, got {other:?}"),
+    }
+}
+
+#[test]
+fn filter_state_resets_legacy_midside_transient_and_pan_offsets() {
+    use nih_plug::prelude::Plugin;
+    use spectral_forge::SpectralForge;
+
+    let mut state = midside_state(false);
+    SpectralForge::filter_state(&mut state);
+    assert_eq!(offset_of(&state, 2, 3), 0.0, "legacy TRANSIENT offset must reset to 0");
+    assert_eq!(offset_of(&state, 2, 4), 0.0, "legacy PAN offset must reset to 0");
+    assert_eq!(offset_of(&state, 2, 2), 1.0, "DECORREL offset must be left alone");
+    assert!(state.fields.contains_key(spectral_forge::MIDSIDE_BIPOLAR_KEY));
+}
+
+#[test]
+fn filter_state_keeps_midside_offsets_when_marker_present() {
+    use nih_plug::prelude::Plugin;
+    use spectral_forge::SpectralForge;
+
+    let mut state = midside_state(true);
+    SpectralForge::filter_state(&mut state);
+    assert_eq!(offset_of(&state, 2, 3), 1.0, "new-state TRANSIENT offset must survive");
+    assert_eq!(offset_of(&state, 2, 4), 1.0, "new-state PAN offset must survive");
+}
+
+#[test]
+fn legacy_preset_lists_midside_offsets_for_reset() {
+    use spectral_forge::dsp::modules::ModuleType;
+    use spectral_forge::preset::{GuiState, Preset, PRESET_SCHEMA_VERSION};
+
+    let mut gui = GuiState::default();
+    gui.slot_module_types = vec![ModuleType::Empty as u8; 9];
+    gui.slot_module_types[5] = ModuleType::MidSide as u8;
+    let legacy: Preset = serde_json::from_value(serde_json::json!({
+        "schema_version": PRESET_SCHEMA_VERSION,
+        "plugin_version": "0.15.0",
+        "name": "old",
+        "params": {},
+        "gui": gui,
+    })).unwrap();
+    assert!(!legacy.midside_bipolar, "missing field must deserialize as false");
+    let ids = legacy.legacy_midside_offset_ids();
+    assert_eq!(ids, vec![
+        spectral_forge::param_ids::offset_id(5, 3),
+        spectral_forge::param_ids::offset_id(5, 4),
+    ]);
+
+    let mut fresh = legacy.clone();
+    fresh.midside_bipolar = true;
+    assert!(fresh.legacy_midside_offset_ids().is_empty());
+}

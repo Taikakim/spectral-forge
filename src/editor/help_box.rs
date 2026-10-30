@@ -489,6 +489,11 @@ fn multi_mode_curve_help(ty: ModuleType, mode: u8, curve_idx: usize) -> &'static
         (ModuleType::Modulate, 7, 1) => "FM Network · REACH — partial detection magnitude threshold. Only bins above this strength qualify as carriers.",
         (ModuleType::Modulate, 7, 4) => "FM Network · COEFFICIENT — partial-pair AM modulation depth. Modulates one partial's amplitude with another's carrier.",
         (ModuleType::Modulate, 7, 5) => "FM Network · MIX — wet/dry between modulated and original.",
+        // 8=SlewLag  curves: AMOUNT(0), REACH(1), THRESH(3), MIX(5) — sidechain optional
+        (ModuleType::Modulate, 8, 0) => "Slew Lag · AMOUNT — how slowly each bin's level may change. 0 = unlimited (passthrough); 100% = 20 dB/s, so attacks swell in and releases hang.",
+        (ModuleType::Modulate, 8, 1) => "Slew Lag · REACH — how many neighbouring sidechain bins (up to ±16) are averaged when measuring sidechain movement.",
+        (ModuleType::Modulate, 8, 3) => "Slew Lag · THRESH — sidechain-movement deadband. Movement below it is ignored; above it the bins get progressively slower (down to 5% of the AMOUNT rate).",
+        (ModuleType::Modulate, 8, 5) => "Slew Lag · MIX — wet/dry between slew-limited and original.",
 
         // ── Kinetics (SC: yes — Gravity Well and Inertial Mass read sidechain) ──
         // 0=Hooke  curves: STRENGTH(0), REACH(2), DAMPING(3), MIX(4)
@@ -746,8 +751,8 @@ fn single_mode_curve_help(ty: ModuleType, curve_idx: usize) -> &'static str {
         (ModuleType::MidSide, 0) => "Mid/Side · BALANCE — per-bin mid/side gain balance. v=0 leaves mid/side untouched; v<0 favours mid (mono-up the bin); v>0 favours side (widen the bin).",
         (ModuleType::MidSide, 1) => "Mid/Side · EXPANSION — per-bin M/S width expansion. Positive widens the side relative to mid, negative narrows.",
         (ModuleType::MidSide, 2) => "Mid/Side · DECORREL — per-bin phase decorrelation between L and R. Higher = wider stereo image at that frequency by injecting phase difference between channels.",
-        (ModuleType::MidSide, 3) => "Mid/Side · TRANSIENT — per-bin transient bias toward mid. Useful for keeping kicks/snares mono while widening the surrounding pads.",
-        (ModuleType::MidSide, 4) => "Mid/Side · PAN — per-bin pan offset. v=0 centres; v=±1 pans fully L/R for that bin only.",
+        (ModuleType::MidSide, 3) => "Mid/Side · TRANSIENT — side level on onsets (detected on the mid). 0 = no change; −100% mutes the side on transients (mono kicks/snares while pads stay wide); +100% doubles it (wider hits).",
+        (ModuleType::MidSide, 4) => "Mid/Side · PAN — per-bin constant-power pan of the mid content. 0 = centre; −100% = hard left; +100% = hard right, for that bin only.",
 
         // TsSplit — 2 curves (2026-05-08). SC: no.
         (ModuleType::TransientSustainedSplit, 0) => "T/S Split · SENSITIVITY — per-bin transient/sustained discriminator sensitivity. Higher = bins are more readily classed as transient. The split feeds two virtual rows in the routing matrix (look for the slot's 'T' and 'S' rows beneath it).",

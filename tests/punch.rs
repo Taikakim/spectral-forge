@@ -271,3 +271,64 @@ fn healing_follows_chosen_time_constant() {
     assert!(ratio < 0.5,
         "after one τ the depth should be < 0.5× initial; got ratio {}", ratio);
 }
+
+#[test]
+fn self_punch_carves_input_peak_without_sidechain() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::dsp::modules::punch::{PunchModule, PunchMode};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = PunchModule::new();
+    m.set_mode(PunchMode::SelfPunch);
+    m.reset(48000.0, 1024);
+
+    // AMOUNT=1.5 → relative threshold ≈ 0.1125; baseline 0.1 sits below it, so
+    // only the genuine peak at 150 (relative 1.0) is detected.
+    let amount = vec![1.5f32; 513];
+    let width  = vec![1.0f32; 513];
+    let fillm  = vec![0.0f32; 513];
+    let ampfl  = vec![1.0f32; 513];
+    let heal   = vec![0.13f32; 513];
+    let mix    = vec![2.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&amount, &width, &fillm, &ampfl, &heal, &mix];
+    let ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    let mut supp = vec![0.0f32; 513];
+
+    // Level-independence: the same shape at two input scales carves the same way.
+    for scale in [1.0f32, 300.0] {
+        let mut out = Vec::new();
+        for _ in 0..8 {
+            let mut bins = vec![Complex::new(0.1 * scale, 0.0); 513];
+            bins[150] = Complex::new(1.0 * scale, 0.0);
+            m.process(0, StereoLink::Linked, FxChannelTarget::All,
+                &mut bins, None, &curves, &mut supp, None, &ctx);
+            out = bins;
+        }
+        assert!(out[150].norm() < 0.5 * scale,
+            "self punch should carve its own peak at scale {scale}; got {}", out[150].norm());
+        assert!((out[400].norm() - 0.1 * scale).abs() < 0.01 * scale,
+            "far-away bin should be untouched at scale {scale}; got {}", out[400].norm());
+        m.clear_state();
+    }
+}
+
+#[test]
+fn self_punch_silent_input_stays_silent() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{SpectralModule, ModuleContext};
+    use spectral_forge::dsp::modules::punch::{PunchModule, PunchMode};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let mut m = PunchModule::new();
+    m.set_mode(PunchMode::SelfPunch);
+    m.reset(48000.0, 1024);
+    let one = vec![1.0f32; 513];
+    let curves: Vec<&[f32]> = vec![&one, &one, &one, &one, &one, &one];
+    let ctx = ModuleContext::new(48000.0, 1024, 513, 10.0, 100.0, 0.5, 1.0, false, false);
+    let mut supp = vec![0.0f32; 513];
+    let mut bins = vec![Complex::new(0.0, 0.0); 513];
+    m.process(0, StereoLink::Linked, FxChannelTarget::All,
+        &mut bins, None, &curves, &mut supp, None, &ctx);
+    assert!(bins.iter().all(|b| b.norm() == 0.0));
+}

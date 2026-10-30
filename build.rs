@@ -474,7 +474,8 @@ fn emit_curvature_dispatch(f: &mut File) {
 //   - past_reverse_window_s Linear 0.05..30 s, default 1.0
 //   - past_stretch_rate    Skewed 0.05..4.0 ×, default 1.0
 //   - past_stretch_dither  Linear 0..1, default 0.0
-//   - past_soft_clip       Bool, default true
+//   - past_soft_clip       Bool, default true — inert and host-hidden since the
+//                          clipper moved to Master (2026-05-06); kept for state compat
 //
 // See docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
 
@@ -525,10 +526,12 @@ fn emit_past_scalar_inits(f: &mut File) {
              .with_unit(\" %\")\
              .hide_in_generic_ui(),"
         ).unwrap();
+        // Inert since the clipper moved to Master (2026-05-06). Kept so saved
+        // state still loads; `.hide()` removes it from the host automation list.
         writeln!(
             f,
             "            s{s}_past_soft_clip: BoolParam::new(\"s{s}past_soft_clip\", true)\
-             .hide_in_generic_ui(),"
+             .hide(),"
         ).unwrap();
     }
 }

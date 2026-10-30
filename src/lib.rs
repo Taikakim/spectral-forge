@@ -11,6 +11,33 @@ use nih_plug::prelude::*;
 use params::SpectralForgeParams;
 use std::sync::Arc;
 
+/// Persist-field marker written by every save since Mid/Side TRANSIENT / PAN
+/// became bipolar (gain 1.0 = neutral).
+pub const MIDSIDE_BIPOLAR_KEY: &str = "midside_bipolar_v1";
+
+/// Before the bipolar change, assigning Mid/Side stored the TRANSIENT and PAN
+/// offsets at +1 (their old natural-at-max default). Those curves did nothing
+/// then; under the bipolar mapping +1 would mean "full wide" and "hard right".
+/// Reset them to 0 for any state saved without the marker.
+pub fn migrate_midside_bipolar(state: &mut nih_plug::prelude::PluginState) {
+    use nih_plug::wrapper::state::ParamValue;
+    if state.fields.contains_key(MIDSIDE_BIPOLAR_KEY) {
+        return;
+    }
+    if let Some(types_json) = state.fields.get("slot_module_types") {
+        if let Ok(types) = serde_json::from_str::<[dsp::modules::ModuleType; 9]>(types_json) {
+            for (s, t) in types.iter().enumerate() {
+                if *t == dsp::modules::ModuleType::MidSide {
+                    for c in [3, 4] {
+                        state.params.insert(param_ids::offset_id(s, c), ParamValue::F32(0.0));
+                    }
+                }
+            }
+        }
+    }
+    state.fields.insert(MIDSIDE_BIPOLAR_KEY.to_string(), "true".to_string());
+}
+
 pub struct SpectralForge {
     params:   Arc<SpectralForgeParams>,
     pipeline: Option<dsp::pipeline::Pipeline>,
@@ -184,6 +211,8 @@ impl Plugin for SpectralForge {
     }
 
     fn filter_state(state: &mut nih_plug::prelude::PluginState) {
+        migrate_midside_bipolar(state);
+
         // If `migrated_v1` is already in the persist fields, this is new state — no migration.
         if state.fields.contains_key("migrated_v1") {
             return;

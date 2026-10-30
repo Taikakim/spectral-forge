@@ -306,7 +306,24 @@ fn mid_side_config(i: usize) -> CurveDisplayConfig {
             offset_fn: off_amount_200,
             natural_at_max: false,
         },
-        // DECORREL / TRANSIENT / PAN: gain=1.0 → 100% (at y_max); off=-1 → 0%
+        // TRANSIENT: bipolar, gain=1.0 → 0 (no change). −100 % mutes the side on
+        // onsets (mono transients); +100 % doubles it (wide transients).
+        3 => CurveDisplayConfig {
+            y_label: "%", y_min: -100.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(-100.0, "mono"), (-50.0, "-50"), (50.0, "+50"), (100.0, "wide")],
+            y_natural: 0.0,
+            offset_fn: off_amount_200,
+            natural_at_max: false,
+        },
+        // PAN: bipolar, gain=1.0 → 0 (centre); −100 % = hard left, +100 % = hard right.
+        4 => CurveDisplayConfig {
+            y_label: "%", y_min: -100.0, y_max: 100.0, y_log: false,
+            grid_lines: &[(-100.0, "L"), (-50.0, "L50"), (50.0, "R50"), (100.0, "R")],
+            y_natural: 0.0,
+            offset_fn: off_amount_200,
+            natural_at_max: false,
+        },
+        // DECORREL: gain=1.0 → 100% (at y_max); off=-1 → 0%
         _ => CurveDisplayConfig {
             y_label: "%", y_min: 0.0, y_max: 100.0, y_log: false,
             grid_lines: &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")],

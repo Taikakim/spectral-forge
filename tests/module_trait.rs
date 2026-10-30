@@ -2284,6 +2284,8 @@ fn modulate_mode_enum_has_new_variants() {
     assert_eq!(ModulateMode::GroundLoop    as u8, 4);
     assert_eq!(ModulateMode::GravityPhaser as u8, 5);
     assert_eq!(ModulateMode::PllTear       as u8, 6);
+    assert_eq!(ModulateMode::FmNetwork     as u8, 7);
+    assert_eq!(ModulateMode::SlewLag       as u8, 8);
 }
 
 // ── Phase 5b4.3 — Curve smoothing infrastructure ──────────────────────────

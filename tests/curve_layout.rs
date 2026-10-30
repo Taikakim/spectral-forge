@@ -132,7 +132,7 @@ fn harmony_active_layout_matches_kernel_signatures() {
     }
 }
 
-/// Modulate has 8 modes. Curves: 0=AMOUNT, 1=REACH, 2=RATE, 3=THRESH, 4=AMPGATE, 5=MIX.
+/// Modulate has 9 modes. Curves: 0=AMOUNT, 1=REACH, 2=RATE, 3=THRESH, 4=AMPGATE, 5=MIX.
 /// Each mode reads a distinct subset of curves.
 #[test]
 fn modulate_active_layout_matches_kernel_signatures() {
@@ -150,6 +150,7 @@ fn modulate_active_layout_matches_kernel_signatures() {
         (ModulateMode::GravityPhaser,&[0, 1, 3, 4, 5]),
         (ModulateMode::PllTear,      &[0, 1, 2, 3, 5]),
         (ModulateMode::FmNetwork,    &[0, 1, 4, 5]),
+        (ModulateMode::SlewLag,      &[0, 1, 3, 5]),
     ];
     for (mode, expected) in modes_and_active {
         let layout = layout_fn(*mode as u8);
@@ -191,6 +192,7 @@ fn punch_active_layout_matches_kernel_signatures() {
     let modes_and_active: &[(PunchMode, &[u8])] = &[
         (PunchMode::Direct,  &[0, 1, 2, 3, 4, 5]),
         (PunchMode::Inverse, &[0, 1, 2, 3, 4, 5]),
+        (PunchMode::SelfPunch, &[0, 1, 2, 3, 4, 5]),
     ];
     for (mode, expected) in modes_and_active {
         let layout = layout_fn(*mode as u8);

@@ -310,7 +310,7 @@ impl KineticsModule {
     pub fn set_mass_source(&mut self, src: MassSource) { self.mass_source = src; }
 }
 
-// ── Mode kernel stubs (bodies added in Tasks 5-12) ─────────────────────────
+// ── Mode kernels ───────────────────────────────────────────────────────────
 
 impl KineticsModule {
     /// Hooke spring restoring force per bin. Reads dry mag from `self.dry_mag_scratch[channel]`.

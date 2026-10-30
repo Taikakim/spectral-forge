@@ -1,13 +1,13 @@
 //! Circuit module — analog circuit-inspired spectral distortion / saturation effects.
 //!
-//! Three modes ship across Phase 2g tasks:
+//! Ten modes. Phase 2g shipped the three BinPhysics-free kernels:
 //! - **BbdBins**             — 4-stage bucket-brigade delay on per-bin magnitudes + LP + dither.
 //! - **SpectralSchmitt**     — branch-free hysteresis latch per FFT bin (Schmitt trigger).
 //! - **CrossoverDistortion** — C¹-smooth deadzone mimicking BJT crossover artefacts.
 //!
-//! Kernel implementations are added in Tasks 3–5 of Phase 2g. This skeleton
-//! provides the enum, struct, and stub `process()` that passes audio through
-//! unmodified and zeroes suppression_out.
+//! Phase 5c added seven BinPhysics-aware modes: Vactrol, TransformerSaturation,
+//! PowerSag, ComponentDrift, PcbCrosstalk, SlewDistortion and BiasFuzz. Shared
+//! primitives live in `crate::dsp::circuit_kernels`.
 
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};

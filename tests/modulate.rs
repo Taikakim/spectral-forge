@@ -574,6 +574,7 @@ fn modulate_finite_bounded_all_modes_dual_channel() {
         ModulateMode::GroundLoop,
         ModulateMode::GravityPhaser,
         ModulateMode::PllTear,
+        ModulateMode::SlewLag,
     ] {
         let mut module = ModulateModule::new();
         module.reset(48_000.0, 2048);
@@ -878,4 +879,109 @@ fn fm_network_emits_sidebands_when_coefficient_nonzero() {
         "carrier at bin 100 must be modulated, delta {}",
         (bins[100] - snapshot[100]).norm(),
     );
+}
+
+// ── Slew Lag ────────────────────────────────────────────────────────────────
+
+/// Runs one Slew Lag hop on a flat-magnitude spectrum and returns bin magnitudes.
+fn slew_lag_hop(
+    module: &mut spectral_forge::dsp::modules::modulate::ModulateModule,
+    mag: f32,
+    sidechain: Option<&[f32]>,
+    curves: &[&[f32]],
+) -> Vec<f32> {
+    use num_complex::Complex;
+    use spectral_forge::dsp::modules::{ModuleContext, SpectralModule};
+    use spectral_forge::params::{FxChannelTarget, StereoLink};
+
+    let num_bins = curves[0].len();
+    let ctx = ModuleContext::new(48_000.0, 2048, num_bins, 10.0, 100.0, 1.0, 1.0, false, false);
+    let mut bins: Vec<Complex<f32>> = (0..num_bins)
+        .map(|k| Complex::from_polar(mag, k as f32 * 0.3))
+        .collect();
+    let mut supp = vec![0.0_f32; num_bins];
+    module.process(0, StereoLink::Linked, FxChannelTarget::All,
+                   &mut bins, sidechain, curves, &mut supp, None, &ctx);
+    bins.iter().map(|b| b.norm()).collect()
+}
+
+#[test]
+fn slew_lag_limits_rise_rate_and_never_overshoots() {
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let num_bins = 1025;
+    let amount = vec![1.0_f32; num_bins]; // slowest: 20 dB/s
+    let half   = vec![0.5_f32; num_bins];
+    let mix    = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &half, &half, &half, &half, &mix];
+
+    let mut m = ModulateModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(ModulateMode::SlewLag);
+
+    // Prime at -40 dB, then step to 0 dB.
+    slew_lag_hop(&mut m, 0.01, None, &curves);
+    let hop_s = 512.0 / 48_000.0;
+    let max_step_db = 20.0 * hop_s;
+    let mut prev_db = -40.0_f32;
+    for _ in 0..20 {
+        let out = slew_lag_hop(&mut m, 1.0, None, &curves);
+        let db = 20.0 * out[300].log10();
+        assert!(db - prev_db <= max_step_db * 1.01 + 1e-4,
+            "rise {} dB/hop exceeds limit {}", db - prev_db, max_step_db);
+        assert!(out.iter().all(|&v| v <= 1.0 + 1e-4), "output exceeded input level");
+        prev_db = db;
+    }
+    assert!(prev_db < -30.0, "after 20 hops at 20 dB/s the level should still be low, got {prev_db}");
+}
+
+#[test]
+fn slew_lag_amount_zero_is_passthrough() {
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let num_bins = 1025;
+    let zero = vec![0.0_f32; num_bins];
+    let one  = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&zero, &one, &one, &one, &one, &one];
+
+    let mut m = ModulateModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(ModulateMode::SlewLag);
+    slew_lag_hop(&mut m, 0.01, None, &curves);
+    let out = slew_lag_hop(&mut m, 1.0, None, &curves);
+    assert!(out.iter().all(|&v| (v - 1.0).abs() < 1e-5), "AMOUNT=0 must pass through");
+}
+
+#[test]
+fn slew_lag_sidechain_motion_tightens_limit() {
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let num_bins = 1025;
+    let amount = vec![0.3_f32; num_bins];
+    let reach  = vec![0.0_f32; num_bins];
+    let thresh = vec![0.0_f32; num_bins];
+    let one    = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &reach, &one, &thresh, &one, &one];
+
+    let run = |moving: bool| -> f32 {
+        let mut m = ModulateModule::new();
+        m.reset(48_000.0, 2048);
+        m.set_mode(ModulateMode::SlewLag);
+        let sc_a = vec![0.01_f32; num_bins];
+        let sc_b = vec![1.0_f32; num_bins];
+        slew_lag_hop(&mut m, 0.01, Some(&sc_a), &curves);
+        let mut last = 0.0;
+        for i in 0..5 {
+            let sc = if moving && i % 2 == 0 { &sc_b } else { &sc_a };
+            last = slew_lag_hop(&mut m, 1.0, Some(sc), &curves)[300];
+        }
+        last
+    };
+    let still  = run(false);
+    let moving = run(true);
+    assert!(moving < still * 0.5,
+        "a moving sidechain should slow the rise: still={still}, moving={moving}");
 }

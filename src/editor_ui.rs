@@ -991,8 +991,9 @@ pub fn create_editor(
                                     let cur_mode = params.slot_punch_mode.lock()[edit_slot];
                                     use crate::dsp::modules::punch::PunchMode;
                                     for (label, hint, mode) in [
-                                        ("Direct",  "Direct — emphasise transients in the wet signal.",        PunchMode::Direct),
-                                        ("Inverse", "Inverse — duck transients (attenuate them on the way out).", PunchMode::Inverse),
+                                        ("Direct",  "Direct — carves notches where the sidechain has spectral peaks and fills the neighbours.",           PunchMode::Direct),
+                                        ("Inverse", "Inverse — carves notches where the sidechain has spectral troughs.",                                PunchMode::Inverse),
+                                        ("Self",    "Self — the input is its own sidechain: carves around its loudest peaks and spills energy outward.", PunchMode::SelfPunch),
                                     ] {
                                         let is_active = cur_mode == mode;
                                         let fill     = if is_active { th::BORDER } else { th::BG };
@@ -1063,6 +1064,7 @@ pub fn create_editor(
                                         ("Gravity",      "Gravity Phaser — pulls/pushes bins toward a moving gravity well; combine with Repel to invert and SC-pos to position via sidechain.", ModulateMode::GravityPhaser),
                                         ("PLL Tear",     "PLL Tear — phase-locked loop on dominant peaks; modulation introduces controlled lock-loss artefacts.",                                ModulateMode::PllTear),
                                         ("FM Network",   "FM Network — graph of frequency-modulating bin pairs producing complex sideband structures.",                                          ModulateMode::FmNetwork),
+                                        ("Slew Lag",     "Slew Lag — limits how fast each bin's level can change; sidechain movement makes the bins even more sluggish.",                       ModulateMode::SlewLag),
                                     ] {
                                         let is_active = cur_mode == mode;
                                         let fill     = if is_active { th::BORDER } else { th::BG };

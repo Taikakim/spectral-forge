@@ -11,16 +11,24 @@ pub enum PunchMode {
     #[default]
     Direct,
     Inverse,
+    /// The input is its own sidechain: carve around the loudest input peaks and
+    /// spill their energy into the neighbours. No sidechain needed.
+    SelfPunch,
 }
 
 impl PunchMode {
     pub fn label(self) -> &'static str {
         match self {
-            PunchMode::Direct  => "Direct",
-            PunchMode::Inverse => "Inverse",
+            PunchMode::Direct    => "Direct",
+            PunchMode::Inverse   => "Inverse",
+            PunchMode::SelfPunch => "Self",
         }
     }
 }
+
+/// Self-Punch detects peaks on bin magnitudes normalised to the frame's loudest
+/// bin; frames whose loudest bin is below this are treated as silent.
+const SELF_PUNCH_SILENCE: f32 = 1e-9;
 
 pub struct PunchModule {
     mode:        PunchMode,
@@ -32,8 +40,9 @@ pub struct PunchModule {
     /// Sub-bin pitch-drift accumulator (in fractional bins), per channel × per bin.
     /// Allocated in `reset()`. Task 2c.5 populates.
     drift_accum:         [Vec<f32>; 2],
-    /// Inverted-SC scratch for `PunchMode::Inverse` peak detection. One Vec per channel,
-    /// sized in `reset()`. Contents are transient per process() call.
+    /// Peak-detection scratch: inverted SC for `PunchMode::Inverse`, normalised input
+    /// magnitudes for `PunchMode::SelfPunch`. One Vec per channel, sized in `reset()`.
+    /// Contents are transient per process() call.
     peak_scratch:        [Vec<f32>; 2],
     /// Sidechain peak indices detected this hop (Task 2c.3 fills).
     peak_bin:            [u32; MAX_PEAKS],
@@ -131,26 +140,46 @@ impl SpectralModule for PunchModule {
         #[cfg(any(test, feature = "probe"))]
         let mut probe_mix_pct    = 0.0f32;
 
-        // ── Detect peaks in the (possibly inverted) sidechain ─────────────────────
+        // ── Detect peaks in the (possibly inverted) sidechain, or in the input ─────
         self.peak_count = 0;
-        if let Some(sc) = sidechain {
+        {
             // Slot-wide peak-detection params read at probe_k.
             let amount_g = amount_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
             let threshold = 0.05_f32 + (1.0 - amount_g / 2.0) * 0.25; // 0.05..0.30
             let width_g   = width_curve.get(probe_k).copied().unwrap_or(1.0).clamp(0.0, 2.0);
             let min_dist  = ((width_g * 4.0).round() as usize).max(2);
 
-            let nn = n.min(sc.len());
-            let peak_source: &[f32] = match self.mode {
-                PunchMode::Direct  => &sc[..nn],
-                PunchMode::Inverse => {
+            let peak_source: Option<&[f32]> = match (self.mode, sidechain) {
+                (PunchMode::Direct, Some(sc)) => Some(&sc[..n.min(sc.len())]),
+                (PunchMode::Inverse, Some(sc)) => {
                     // Build inverted SC into peak_scratch (a dedicated buffer — does NOT
                     // touch current_carve_depth, which holds the smoothing follower state).
+                    let nn = n.min(sc.len());
                     for k in 0..nn { self.peak_scratch[ch][k] = (1.0 - sc[k]).max(0.0); }
-                    &self.peak_scratch[ch][..nn]
+                    Some(&self.peak_scratch[ch][..nn])
                 }
+                (PunchMode::SelfPunch, _) => {
+                    // Input magnitudes normalised to the frame's loudest bin, so the
+                    // 0.05..0.30 threshold is relative and level-independent.
+                    let mut peak = 0.0f32;
+                    for k in 0..n {
+                        let m = bins[k].norm();
+                        self.peak_scratch[ch][k] = m;
+                        if m > peak { peak = m; }
+                    }
+                    if peak > SELF_PUNCH_SILENCE {
+                        let inv = 1.0 / peak;
+                        for v in self.peak_scratch[ch][..n].iter_mut() { *v *= inv; }
+                        Some(&self.peak_scratch[ch][..n])
+                    } else {
+                        None
+                    }
+                }
+                (_, None) => None,
             };
-            self.peak_count = detect_peaks(peak_source, &mut self.peak_bin, threshold, min_dist);
+            if let Some(src) = peak_source {
+                self.peak_count = detect_peaks(src, &mut self.peak_bin, threshold, min_dist);
+            }
         }
 
         // ── Apply carve, amp-fill, healing follower, and mix ─────────────────────
@@ -277,9 +306,9 @@ impl SpectralModule for PunchModule {
 ///
 /// Curves: 0=AMOUNT, 1=WIDTH, 2=FILL_MODE, 3=AMP_FILL, 4=HEAL, 5=MIX.
 ///
-/// Both Direct and Inverse share a single kernel that reads all 6 curves.
+/// Direct, Inverse and SelfPunch share a single kernel that reads all 6 curves.
 /// The only difference is which `peak_source` slice is used for detection;
-/// the curve consumption is identical, so both modes expose the full set.
+/// the curve consumption is identical, so every mode exposes the full set.
 ///
 /// Wired via `active_layout: Some(crate::dsp::modules::punch::active_layout)` on PUNCH.
 pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
@@ -291,12 +320,19 @@ pub fn active_layout(mode_byte: u8) -> super::CurveLayout {
             help_for:        |_| "",
             mode_overview:   Some("Direct: carves notches at sidechain spectral peaks; fills neighbours with AMP_FILL boost."),
         },
-        _ => super::CurveLayout {
+        1 => super::CurveLayout {
             // Inverse: peaks at sidechain minima (1 - sc); same curves, inverted detection.
             active:          &[0, 1, 2, 3, 4, 5],
             label_overrides: &[],
             help_for:        |_| "",
             mode_overview:   Some("Inverse: carves notches at sidechain spectral troughs (inverted peaks); fills neighbours."),
+        },
+        _ => super::CurveLayout {
+            // SelfPunch: peaks of the input itself (normalised to the loudest bin).
+            active:          &[0, 1, 2, 3, 4, 5],
+            label_overrides: &[],
+            help_for:        |_| "",
+            mode_overview:   Some("Self: the input is its own sidechain — carves around its loudest peaks and spills their energy into the neighbours (no sidechain needed)."),
         },
     }
 }

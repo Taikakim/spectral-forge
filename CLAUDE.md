@@ -139,15 +139,16 @@ src/
       phase_smear.rs  — Phase randomisation
       contrast.rs     — Spectral contrast (Spatial / Temporal / Tilt modes)
       gain.rs         — Per-bin gain shaping (Add / Subtract / Pull / Match modes)
-      mid_side.rs     — M/S balance, expansion, phase decorrelation
+      mid_side.rs     — M/S balance, expansion, phase decorrelation, onset-driven side
+                        level (TRANSIENT) and constant-power pan (PAN); both bipolar
       ts_split.rs     — Transient/Sustained split (exposes T and S virtual rows)
       harmonic.rs     — Harmonic placeholder stub (no DSP; 0 curves)
       future.rs       — Print-Through / Pre-Echo
-      punch.rs        — Sidechain-driven peak carving (Direct / Inverse)
+      punch.rs        — Peak carving: sidechain-driven (Direct / Inverse) or self-driven (Self)
       rhythm.rs       — Tempo-synced Euclidean / Arpeggiator / Phase Reset
       geometry.rs     — Chladni Plate Nodes / Helmholtz Traps
-      modulate.rs     — 8 modes: Phase Phaser, Bin Swapper, RM/FM Matrix, Diode RM, Ground Loop,
-                        Gravity Phaser, PLL Tear, FM Network
+      modulate.rs     — 9 modes: Phase Phaser, Bin Swapper, RM/FM Matrix, Diode RM, Ground Loop,
+                        Gravity Phaser, PLL Tear, FM Network, Slew Lag
       circuit.rs      — 10 analog-circuit modes: BBD, Schmitt, Crossover, Vactrol, Transformer
                         Saturation, Power Sag, Component Drift, PCB Crosstalk, Slew Distortion,
                         Bias Fuzz

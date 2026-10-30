@@ -813,8 +813,8 @@ pub fn module_spec(ty: ModuleType) -> &'static ModuleSpec {
         panel_widget: Some(crate::editor::circuit_panel::draw as PanelWidgetFn),
         #[cfg(not(feature = "dev-build"))]
         panel_widget: None,
-        // Opt-in ahead of Phases 5c.4–5c.10 (Vactrol/Transformer/Sag/Drift/Slew/BiasFuzz).
-        // v1 BBD/Schmitt/Crossover kernels do not yet write any BinPhysics field.
+        // Vactrol/Transformer/Sag/Drift/Slew/BiasFuzz read or write BinPhysics;
+        // the v1 BBD/Schmitt/Crossover kernels do not touch it.
         writes_bin_physics: true,
         needs_instantaneous_freq: false,
         needs_cepstrum: false,

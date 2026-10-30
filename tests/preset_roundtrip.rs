@@ -44,6 +44,7 @@ fn scan_filters_by_schema_version() {
         name: "good".into(),
         params: HashMap::new(),
         gui: GuiState::default(),
+        midside_bipolar: true,
     };
     good.save(&dir.path().join("good.sfpreset")).unwrap();
 

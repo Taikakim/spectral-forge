@@ -262,6 +262,8 @@ pub fn screen_to_freq(x: f32, rect: Rect, max_hz: f32) -> f32 {
 ///   4  Knee dB                  5  Makeup/Gain dB        6  Mix %
 ///   7  Amount 0–200%            8  Freeze Length ms      9  Freeze Threshold dBFS
 ///   10 Portamento/SC-smooth ms  11 Resistance 0–2        12 Dry-mix % (shares idx-5 dB mapping)
+///   13 History seconds          14 Peak-hold ms          15 Freeze portamento ms
+///   16 Bipolar % (gain 1.0 = 0, 0 → −100, 2 → +100)
 pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: GainMode) -> usize {
     match module_type {
         ModuleType::Dynamics => match curve_idx {
@@ -310,7 +312,8 @@ pub fn display_curve_idx(module_type: ModuleType, curve_idx: usize, gain_mode: G
         },
         ModuleType::MidSide => match curve_idx {
             0 | 1 => 7,         // BALANCE / EXPANSION → 0–200 % (neutral = 100 %)
-            _ => 6,             // DECORREL / TRANSIENT / PAN → 0–100 %
+            3 | 4 => 16,        // TRANSIENT / PAN → bipolar −100…+100 % (neutral = 0)
+            _ => 6,             // DECORREL → 0–100 %
         },
         ModuleType::TransientSustainedSplit => match curve_idx {
             0 => 6,             // SENSITIVITY → 0–100 %
@@ -425,6 +428,7 @@ pub fn curve_offset_max(display_idx: usize) -> f32 {
         8      => 7.0,   // Freeze Length 0–4000 ms: offset +7 reaches 4000 ms from 500 ms
         10     => 4.0,   // Portamento/SC Smooth 0–1000 ms: offset +4 reaches 1000 ms
         11     => 1.0,   // Resistance 0–2: ±1 covers full range around neutral 1.0
+        16     => 1.0,   // Bipolar %: ±1 covers −100…+100 around neutral 0
         _      => 1.5,
     }
 }
@@ -698,6 +702,9 @@ pub fn gain_to_display(
         // Punch/4 callers; this idx 15 is for the new freeze portamento
         // calibration with neutral 150 ms.
         15 => (gain * 150.0).max(1.0),
+        // Bipolar % (Mid/Side TRANSIENT / PAN): gain 1.0 = centre. No clamp so
+        // the curve can flow into the headroom strip like the other % axes.
+        16 => (gain - 1.0) * 100.0,
         _ => gain,
     }
 }

@@ -499,9 +499,7 @@ fn mid_side_decorrel_offset_extremes() {
         "mid_side decorrel lo: want {}, got {}", cfg.y_min, probe.decorrel_pct.unwrap());
 }
 
-/// NOTE: TRANSIENT (curve 3) is currently a STUB — the MidSide DSP does not
-/// consume this curve. The probe reads curve 3 at probe_k so the calibration
-/// contract is enforced for when this parameter is implemented.
+/// TRANSIENT (curve 3) is bipolar: offset −1 → −100 % (mono onsets), +1 → +100 %.
 #[test]
 fn mid_side_transient_offset_extremes() {
     let mut m = create_module(ModuleType::MidSide, SAMPLE_RATE, FFT_SIZE);
@@ -520,9 +518,7 @@ fn mid_side_transient_offset_extremes() {
         "mid_side transient lo: want {}, got {}", cfg.y_min, probe.transient_pct.unwrap());
 }
 
-/// NOTE: PAN (curve 4) is currently a STUB — the MidSide DSP does not
-/// consume this curve. The probe reads curve 4 at probe_k so the calibration
-/// contract is enforced for when this parameter is implemented.
+/// PAN (curve 4) is bipolar: offset −1 → −100 % (hard left), +1 → +100 % (hard right).
 #[test]
 fn mid_side_pan_offset_extremes() {
     let mut m = create_module(ModuleType::MidSide, SAMPLE_RATE, FFT_SIZE);

@@ -11,7 +11,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 realfft = "3"
 triple_buffer = "9"
@@ -23,6 +23,12 @@ serde_json = "1"
 directories = "5.0"
 opener = "0.7"
 smallvec = "1"
+
+# Audio-thread allocation assertions. nih-plug refuses this feature on
+# x86_64-pc-windows-gnu (rust-assert-no-alloc issue #7), so it is enabled
+# everywhere except that target.
+[target.'cfg(not(all(windows, target_env = "gnu")))'.dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
 
 [features]
 # Enables probe infrastructure for calibration integration tests.

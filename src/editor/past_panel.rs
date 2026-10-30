@@ -1,11 +1,14 @@
 //! Per-slot panel widget for `PastModule`.
 //!
-//! Hosts the module-wide Soft Clip toggle (always visible) plus the
-//! mode-specific scalar fields:
+//! Hosts the mode-specific scalar fields:
 //!   * DecaySorter → Floor (Hz)
 //!   * Reverse     → Window (s)
 //!   * Stretch     → Rate (×) + Dither (%)
-//!   * Granular / Convolution → toggle only
+//!   * Granular / Convolution → none
+//!
+//! The per-slot `s{s}past_soft_clip` BoolParam still exists so saved presets and
+//! host automation keep loading, but it is no longer drawn: the clipper moved to
+//! the Master stage on 2026-05-06 and the per-slot toggle has no audio effect.
 //!
 //! See spec docs/superpowers/specs/2026-05-04-past-module-ux-design.md §2 + §3.
 //!
@@ -33,17 +36,6 @@ pub fn draw(
     let mode  = params.slot_past_mode.lock()[slot];
 
     ui.horizontal(|ui| {
-        // ── Soft Clip toggle (always visible) ────────────────────────────
-        if let Some(p) = params.past_soft_clip_param(slot) {
-            let mut on = p.value();
-            let resp = ui.checkbox(&mut on, "Soft Clip");
-            if resp.changed() {
-                setter.begin_set_parameter(p);
-                setter.set_parameter(p, on);
-                setter.end_set_parameter(p);
-            }
-        }
-
         // ── Mode-specific scalars ────────────────────────────────────────
         match mode {
             PastMode::DecaySorter => {

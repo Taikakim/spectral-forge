@@ -1195,6 +1195,8 @@ unsafe impl Params for SpectralForgeParams {
         persist_out!("peak_falloff_ms",    peak_falloff_ms);
         persist_out!("ui_scale",           ui_scale);
         persist_out!("migrated_v1",        migrated_v1);
+        // Marker only (no backing field): see `crate::migrate_midside_bipolar`.
+        serialized.insert(crate::MIDSIDE_BIPOLAR_KEY.to_string(), "true".to_string());
 
         serialized
     }
@@ -1262,6 +1264,7 @@ unsafe impl Params for SpectralForgeParams {
                 "peak_falloff_ms"     => persist_in!("peak_falloff_ms",    peak_falloff_ms,    data),
                 "ui_scale"            => persist_in!("ui_scale",           ui_scale,           data),
                 "migrated_v1"         => persist_in!("migrated_v1",        migrated_v1,        data),
+                "midside_bipolar_v1"  => { /* marker consumed by `filter_state` */ }
                 _ => nih_plug::nih_trace!(
                     "Unknown serialized field name: {} (this may not be accurate when using nested param structs)",
                     field_name

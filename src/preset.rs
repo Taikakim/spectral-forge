@@ -14,6 +14,11 @@ pub struct Preset {
     pub name: String,
     pub params: HashMap<String, f32>,
     pub gui: GuiState,
+    /// `true` for presets saved after Mid/Side TRANSIENT / PAN became bipolar
+    /// (2026-10-30). Older presets stored those offsets at +1, which used to be
+    /// inert; `apply` resets them to 0 so they don't load as wide / hard right.
+    #[serde(default)]
+    pub midside_bipolar: bool,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -45,7 +50,21 @@ impl Preset {
             name,
             params: p,
             gui,
+            midside_bipolar: true,
         }
+    }
+
+    /// Param IDs whose stored value predates the bipolar Mid/Side curves and
+    /// must load as plain 0.0 instead (see `midside_bipolar`).
+    pub fn legacy_midside_offset_ids(&self) -> Vec<String> {
+        if self.midside_bipolar {
+            return Vec::new();
+        }
+        let ms = crate::dsp::modules::ModuleType::MidSide as u8;
+        self.gui.slot_module_types.iter().enumerate()
+            .filter(|(_, &t)| t == ms)
+            .flat_map(|(s, _)| [3, 4].map(|c| crate::param_ids::offset_id(s, c)))
+            .collect()
     }
 
     /// Serialize to a pretty-printed JSON file at `path`.
@@ -73,10 +92,16 @@ impl Preset {
             .map(|(id, ptr, _group)| (id, ptr))
             .collect();
 
+        let legacy_ms = self.legacy_midside_offset_ids();
         for (id, &v) in &self.params {
             if let Some(ptr) = map.get(id) {
                 // SAFETY: `params` is alive and the ParamPtr is valid. We use the raw
                 // GuiContext methods so the host is notified of the automation gesture.
+                let v = if legacy_ms.contains(id) {
+                    unsafe { ptr.preview_normalized(0.0) }
+                } else {
+                    v
+                };
                 unsafe {
                     setter.raw_context.raw_begin_set_parameter(*ptr);
                     setter.raw_context.raw_set_parameter_normalized(*ptr, v);
