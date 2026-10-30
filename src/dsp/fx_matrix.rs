@@ -54,6 +54,11 @@ pub struct FxMatrix {
     /// order — to feed a reader from a writer's output, place the writer at a lower
     /// slot index than the reader.
     writer_bits: [bool; MAX_SLOTS],
+
+    /// Live monitor of one slot's input vs output (dev overlay). `monitor_slot`
+    /// is set by `Pipeline` each block; `None` skips all monitor work.
+    pub monitor: crate::dsp::slot_monitor::SlotMonitor,
+    pub monitor_slot: Option<usize>,
 }
 
 impl FxMatrix {
@@ -83,6 +88,8 @@ impl FxMatrix {
             prev_mags:   vec![0.0; MAX_SLOTS * MAX_NUM_BINS],
             bin_physics_in_use: false,
             writer_bits: [false; MAX_SLOTS],
+            monitor: crate::dsp::slot_monitor::SlotMonitor::new(),
+            monitor_slot: None,
         };
         this.recompute_phys_topology();
         this
@@ -802,6 +809,8 @@ impl FxMatrix {
                     }
                     physics_arg = None;
                 }
+                let monitored = self.monitor_slot == Some(s);
+                if monitored { self.monitor.capture_pre(&self.mix_buf[..num_bins]); }
                 module.process(
                     channel, stereo_link, slot_targets[s],
                     &mut self.mix_buf[..num_bins],
@@ -810,6 +819,7 @@ impl FxMatrix {
                     physics_arg,
                     &ctx_for_slot,
                 );
+                if monitored { self.monitor.observe_post(&self.mix_buf[..num_bins]); }
                 // Snapshot mix_phys → slot_phys[s] and reset the workspace for the next slot.
                 if self.bin_physics_in_use {
                     // mix_phys and slot_phys[s] are disjoint struct fields — safe split borrow.

@@ -16,5 +16,6 @@ pub mod pipeline;
 pub mod engines;
 pub mod fx_matrix;
 pub mod plpv;
+pub mod slot_monitor;
 pub mod soft_clip;
 pub mod utils;

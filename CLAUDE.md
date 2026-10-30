@@ -127,6 +127,9 @@ src/
     amp_modes.rs      — AmpMode kernels for matrix cells (Linear / Vactrol / Schmitt / Slew / Stiction)
     circuit_kernels.rs — Circuit scalar primitives (lp_step, tanh_levien_poly, spread_3tap, SimdRng)
     soft_clip.rs      — Master output soft clipper
+    slot_monitor.rs   — Live in/out bin levels + change stats for the edited slot
+                        (FxMatrix captures, Pipeline publishes via SharedState.monitor_tx;
+                        drawn by editor/slot_monitor_overlay.rs in dev builds)
     engines/
       mod.rs          — SpectralEngine trait + BinParams<'_> struct + EngineSelection enum
       spectral_compressor.rs — envelope → gain_computer → smoother → apply
@@ -164,6 +167,15 @@ src/
       harmony_helpers.rs — Harmony helpers: peak picking, Bessel-zero / prime LUTs, chord templates
       master.rs       — Master output slot + EmptyModule passthrough
 ```
+
+## Parameter bracketing
+
+`cargo run --release --example bracket -- --threads 4` sweeps every module × mode × curve
+(offset slider + curve-node range, plus a live ramp) on noise / chord / drums and writes
+`target/bracket/{settings,live,baselines,findings}.csv`. `--only TEXT` filters
+("Modulate/SlewLag"), `--wav TEXT` renders the node brackets to WAV. See
+`docs/BRACKETING-2026-10-30.md` for the method, its limits and the first run's findings.
+Re-run it after touching any module's curve mapping.
 
 ## Key constants
 

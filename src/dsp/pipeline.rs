@@ -833,6 +833,16 @@ impl Pipeline {
             }
         }
 
+        // Live slot monitor (dev overlay): watch the edited slot while enabled.
+        // On lock contention the previous block's choice is kept.
+        if shared.monitor_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(s) = params.editing_slot.try_lock().map(|g| *g as usize) {
+                self.fx_matrix.monitor_slot = (s < 8).then_some(s);
+            }
+        } else {
+            self.fx_matrix.monitor_slot = None;
+        }
+
         // Propagate modulate modes each block (try_lock is non-blocking; skipped if GUI holds lock).
         if let Some(modes) = params.slot_modulate_mode.try_lock() {
             self.fx_matrix.set_modulate_modes(&*modes);
@@ -1460,6 +1470,15 @@ impl Pipeline {
             shared.suppression_tx.publish();
             for v in spectrum_buf.iter_mut()    { *v = 0.0; }
             for v in suppression_buf.iter_mut() { *v = 0.0; }
+        }
+
+        // Publish the live slot monitor once at least one hop has been observed.
+        if let Some(slot) = self.fx_matrix.monitor_slot {
+            if self.fx_matrix.monitor.hops() > 0 {
+                self.fx_matrix.monitor.publish_into(slot, shared.monitor_tx.input_buffer_mut());
+                shared.monitor_tx.publish();
+                self.fx_matrix.monitor.clear();
+            }
         }
 
         // Publish SC envelope for the currently-edited slot, if it is an SC-aware Gain slot.

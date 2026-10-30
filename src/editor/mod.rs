@@ -27,6 +27,8 @@ pub mod circuit_panel;
 pub mod modulate_panel;
 #[cfg(feature = "dev-build")]
 pub mod contrast_panel;
+#[cfg(feature = "dev-build")]
+pub mod slot_monitor_overlay;
 pub mod help_box;
 
 /// Show a tooltip for `response` only after the pointer has been stationary

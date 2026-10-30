@@ -54,6 +54,7 @@ pub struct SpectralForge {
     gui_sidechain_active: Option<Arc<std::sync::atomic::AtomicBool>>,
     gui_reset_requested: Option<Arc<std::sync::atomic::AtomicBool>>,
     gui_ring_states: Option<Arc<parking_lot::Mutex<crate::dsp::modulation_ring::RingStateBank>>>,
+    gui_monitor: Option<bridge::MonitorLink>,
     /// Liveness token: the editor holds a Weak clone of this. When the plugin
     /// is destroyed (this Arc drops), the editor detects it and closes itself.
     plugin_alive: Arc<()>,
@@ -77,6 +78,7 @@ impl Default for SpectralForge {
         let gui_sidechain_active = Some(shared.sidechain_active.clone());
         let gui_reset_requested  = Some(shared.reset_requested.clone());
         let gui_ring_states      = Some(shared.ring_states.clone());
+        let gui_monitor          = Some(shared.monitor_link());
 
         Self {
             params:   Arc::new(SpectralForgeParams::default()),
@@ -91,6 +93,7 @@ impl Default for SpectralForge {
             gui_sidechain_active,
             gui_reset_requested,
             gui_ring_states,
+            gui_monitor,
             plugin_alive: Arc::new(()),
             num_channels: 2,
             sample_rate:  dummy_sr,
@@ -140,6 +143,7 @@ impl Plugin for SpectralForge {
             self.gui_sidechain_active.clone(),
             self.gui_reset_requested.clone(),
             self.gui_ring_states.clone(),
+            self.gui_monitor.clone(),
             Arc::downgrade(&self.plugin_alive),
         )
     }

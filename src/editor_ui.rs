@@ -21,6 +21,7 @@ pub fn create_editor(
     sidechain_active: Option<Arc<std::sync::atomic::AtomicBool>>,
     reset_requested: Option<Arc<std::sync::atomic::AtomicBool>>,
     ring_states: Option<Arc<Mutex<RingStateBank>>>,
+    monitor: Option<crate::bridge::MonitorLink>,
     plugin_alive: std::sync::Weak<()>,
 ) -> Option<Box<dyn Editor>> {
     create_egui_editor(
@@ -631,6 +632,17 @@ pub fn create_editor(
                                 &cfg, total_history_seconds,
                             );
                         }
+
+                        // Live slot monitor (dev builds): in/out spectra + change stats.
+                        #[cfg(feature = "dev-build")]
+                        if let Some(ref mon) = monitor {
+                            crate::editor::slot_monitor_overlay::draw(
+                                ui, curve_rect, mon, editing_slot, spec.color_lit,
+                                sr, fft_size, db_min, db_max, scale,
+                            );
+                        }
+                        #[cfg(not(feature = "dev-build"))]
+                        let _ = &monitor;
 
                         // Draw active curve (lit) + interactive widget
                         if editing_curve_visible && editing_curve < num_c && !all_gains.is_empty() {

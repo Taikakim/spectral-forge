@@ -41,12 +41,30 @@ pub struct SharedState {
     /// SC peak-hold envelope for the currently-edited Gain slot (per-bin f32 magnitudes).
     pub sc_envelope_tx:   TbInput<Vec<f32>>,
     pub sc_envelope_rx:   Arc<Mutex<TbOutput<Vec<f32>>>>,
+    /// Live slot monitor for the edited slot (layout: `dsp::slot_monitor::MONITOR_LEN`).
+    pub monitor_tx:       TbInput<Vec<f32>>,
+    pub monitor_rx:       Arc<Mutex<TbOutput<Vec<f32>>>>,
+    /// GUI → audio: run the slot monitor (dev overlay toggle).
+    pub monitor_enabled:  Arc<AtomicBool>,
 
     pub sample_rate: Arc<AtomicF32>,
 
     /// Per-node modulation ring state. GUI writes on click; audio thread may
     /// clone for RT-safe read (378-byte copy, no heap).
     pub ring_states: Arc<Mutex<RingStateBank>>,
+}
+
+/// GUI-side handles for the live slot monitor.
+#[derive(Clone)]
+pub struct MonitorLink {
+    pub rx:      Arc<Mutex<TbOutput<Vec<f32>>>>,
+    pub enabled: Arc<AtomicBool>,
+}
+
+impl SharedState {
+    pub fn monitor_link(&self) -> MonitorLink {
+        MonitorLink { rx: self.monitor_rx.clone(), enabled: self.monitor_enabled.clone() }
+    }
 }
 
 /// Wait-free f32 atomic using bit-casting.
@@ -91,6 +109,8 @@ impl SharedState {
         let (spectrum_tx, spectrum_rx) = TripleBuffer::new(&zero_bins).split();
         let (suppression_tx, suppression_rx) = TripleBuffer::new(&zero_bins).split();
         let (sc_envelope_tx, sc_envelope_rx) = TripleBuffer::new(&zero_bins).split();
+        let (monitor_tx, monitor_rx) =
+            TripleBuffer::new(&vec![0.0f32; crate::dsp::slot_monitor::MONITOR_LEN]).split();
 
         Self {
             num_bins: MAX_NUM_BINS,
@@ -105,6 +125,9 @@ impl SharedState {
             suppression_rx: Arc::new(Mutex::new(suppression_rx)),
             sc_envelope_tx,
             sc_envelope_rx: Arc::new(Mutex::new(sc_envelope_rx)),
+            monitor_tx,
+            monitor_rx: Arc::new(Mutex::new(monitor_rx)),
+            monitor_enabled: Arc::new(AtomicBool::new(false)),
             sample_rate: Arc::new(AtomicF32::new(sample_rate)),
             ring_states: Arc::new(Mutex::new(RingStateBank::default())),
         }

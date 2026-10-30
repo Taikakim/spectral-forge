@@ -194,6 +194,16 @@ pub const MOD_RING_LIT:      Color32 = Color32::from_rgb(0xff, 0xc8, 0x40);
 pub const MOD_RING_DIM:      Color32 = Color32::from_rgb(0x60, 0x40, 0x18);
 pub const MOD_RING_DISABLED: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
 
+// ─── Slot monitor overlay (dev builds) ────────────────────────────────────────
+
+/// Toggle checkbox size, anchored to the curve view's top-right corner.
+pub const MONITOR_TOGGLE_W:   f32 = 82.0;
+pub const MONITOR_TOGGLE_H:   f32 = 16.0;
+/// Inset of the toggle and the stats line from the curve view's edges.
+pub const MONITOR_INSET:      f32 = 2.0;
+/// Vertical offset of the stats line below the curve view's top edge.
+pub const MONITOR_TEXT_Y:     f32 = 20.0;
+
 // ─── Scaling helpers ──────────────────────────────────────────────────────────
 
 /// Scale a layout measurement by the UI scale factor.
