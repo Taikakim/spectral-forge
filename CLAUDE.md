@@ -174,7 +174,8 @@ src/
 (offset slider + curve-node range, plus a live ramp) on noise / chord / drums and writes
 `target/bracket/{settings,live,baselines,findings}.csv`. `--only TEXT` filters
 ("Modulate/SlewLag"), `--wav TEXT` renders the node brackets to WAV. See
-`docs/BRACKETING-2026-10-30.md` for the method, its limits and the first run's findings.
+`docs/BRACKETING-2026-10-30.md` for the method, its limits and the first run's findings;
+`docs/OPEN-ISSUES-2026-10-31.md` is the review queue of everything still open.
 Re-run it after touching any module's curve mapping.
 
 ## Real-plugin audition (pedalboard)

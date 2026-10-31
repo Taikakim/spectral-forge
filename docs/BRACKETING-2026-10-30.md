@@ -117,6 +117,9 @@ so pedalboard's latency compensation lines up exactly.
 
 ### Still open after the fixes
 
+All open items, with the offline findings, are consolidated in
+[`OPEN-ISSUES-2026-10-31.md`](OPEN-ISSUES-2026-10-31.md).
+
 - **Silent alone, by dependency:** Circuit Vactrol (needs upstream flux),
   Component Drift (temperature feedback starts at zero), Life Brownian
   (needs temperature). Each is silent or inert as the only module; worth either
