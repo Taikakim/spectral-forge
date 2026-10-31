@@ -78,6 +78,33 @@ pub fn rewrap_phase(unwrapped: &[f32], wrapped_out: &mut [f32], num_bins: usize)
     }
 }
 
+/// A bin whose output phase differs from its pre-module phase by more than this
+/// was rotated by a module directly. Well above magnitude-only round-off (~1e-7 rad).
+pub const KEEP_MODULE_PHASE_RAD: f32 = 1e-3;
+
+/// Rebuild each bin from its (possibly module-modified) magnitude and the
+/// re-wrapped PLPV phase — except bins whose phase the module chain rotated
+/// directly in the complex domain (phasers, PLL, orbital phase, generated
+/// partials, …), which keep the module's phase. Without that exception every
+/// phase-only effect would be silently undone whenever PLPV is on.
+///
+/// `input_phase` is each bin's wrapped phase before the module chain ran;
+/// `rewrapped` is the output of [`rewrap_phase`].
+pub fn recombine_with_module_phase(
+    bins: &mut [num_complex::Complex<f32>],
+    input_phase: &[f32],
+    rewrapped: &[f32],
+    num_bins: usize,
+) {
+    debug_assert!(bins.len() >= num_bins && input_phase.len() >= num_bins && rewrapped.len() >= num_bins);
+    for k in 0..num_bins {
+        let moved = principal_arg(bins[k].arg() - input_phase[k]).abs() > KEEP_MODULE_PHASE_RAD;
+        if !moved {
+            bins[k] = num_complex::Complex::from_polar(bins[k].norm(), rewrapped[k]);
+        }
+    }
+}
+
 /// Damp the unwrapped phase of low-energy bins toward their expected-advance
 /// value, using a soft-sigmoid blend across a ±6 dB band centred on the
 /// noise floor. Avoids letting noise-dominated phase pollute downstream

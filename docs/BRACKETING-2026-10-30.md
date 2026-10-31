@@ -74,3 +74,66 @@ Punch FILL_MODE in every mode (drift slew-limited to 0.005 bin/hop);
 Past Granular / Convolution / Stretch AMOUNT and MIX; Life Non-Newtonian
 AMOUNT/THRESHOLD/MIX, Brownian AMOUNT/MIX; Kinetics Gravity Well (all), Inertial Mass
 MASS/MIX, Tuning Fork and Diamagnet REACH/MIX; Harmony Formant Rotation AMOUNT/MIX.
+
+## Real-plugin audition — October 31, 2026
+
+`examples/bracket.rs` runs modules in isolation, so it cannot see bugs in the
+pipeline around them. `tools/audition.py` (see CLAUDE.md) drives the built VST3
+through pedalboard instead: one module in slot 0 → Master, the fresh-assignment
+defaults, then each active curve's Offset at −1 / +1, judged against each
+mode's help-text claim on material chosen to show it (pad with silences for
+holds/pre-echo, drums for transients, a three-partial tone for new partials,
+the stereo mix for width). The empty-slot null test leaves −66 dB of residual,
+so pedalboard's latency compensation lines up exactly.
+
+### Plugin bugs it found (fixed on this branch)
+
+1. **PLPV re-wrap erased every phase-only effect (verified).** With
+   `plpv_enable` on (the default) the pipeline rebuilt every bin from the
+   module's magnitude and the *pre-module* phase. Phase Phaser, Gravity
+   Phaser, PLL Tear, Rhythm Phase Reset, Kinetics Orbital Phase,
+   Ferromagnetism and Thermal Expansion were bit-exact null (−66 dB); Exciter
+   partials and Mid/Side DECORREL were altered. Fix:
+   `plpv::recombine_with_module_phase` keeps the phase of bins a module rotated
+   directly (> 1e-3 rad) and rebuilds only the rest. All seven now pass.
+2. **Split rows sent straight to Master were silent (verified).** The Master
+   sum in `FxMatrix` only added real slots; T/S and H/P rows reached Master
+   only through another slot. Fix: virtual rows join the Master sum and the
+   reach-Master check. T stream is now 90 dB punchier than S on drums, P 47 dB
+   punchier than H.
+3. **Life Non-Newtonian, Stiction and Brownian read physics only from `ctx`
+   (verified).** Life is a BinPhysics writer, so the FxMatrix hands it its own
+   `physics` handle and `ctx.bin_physics = None`; velocity and temperature were
+   always zero. Non-Newtonian did nothing, Stiction muted at default (finding 4
+   above), Brownian never drifted even after a temperature writer. Fix: read
+   from whichever is present. Non-Newtonian and Stiction now pass; Brownian
+   alone is still inert by design (needs an upstream temperature writer).
+4. **Slew Lag muted notes after silence (verified, new mode).** The slewed
+   level fell to the 1e-9 floor (≈ 240 dB below a note at raw-FFT scale), so
+   the next note needed seconds to climb back. Now floored at 60 dB below the
+   input: a note after silence swells in over at most 3 s (20 dB/s).
+5. **Circuit help text for BBD and Crossover Distortion was swapped**
+   (mode byte 0 showed Crossover text). Keyed by enum value now, with a test.
+
+### Still open after the fixes
+
+- **Silent alone, by dependency:** Circuit Vactrol (needs upstream flux),
+  Component Drift (temperature feedback starts at zero), Life Brownian
+  (needs temperature). Each is silent or inert as the only module; worth either
+  a self-driven fallback or a "needs an upstream …" note in the help text.
+- **Rhythm mutes with a stopped transport (verified).** With a tempo but no
+  running transport, the beat position sits at a step edge and the
+  attack-fade gate is 0, so AMOUNT 100 % mutes. The same happens in a DAW when
+  monitoring with the transport stopped. Rhythm passes through only when the
+  host gives no tempo at all. Design call: bypass or free-run when stopped.
+- **No effect alone at any single-knob setting:** Geometry Chladni (−40 dB
+  change at most), Life Surface Tension (−28 dB), Past Granular and
+  Convolution, Kinetics Gravity Well. Same list as the offline harness;
+  these need a look at their defaults and amount mapping.
+- **Changes the sound, claim not confirmed by the metric (listen):** Gain
+  Match, Future Print-Through / Pre-Echo (no energy before the onset, so the
+  "pre" part is not happening on a pad), Slew Lag (no hang over true
+  silence — it only scales existing content), PCB Crosstalk, Viscosity, Past
+  Reverse / Stretch, Harmony Inharmonic.
+- **Not covered here:** sidechain modes (Punch Direct/Inverse, RM/FM, Diode
+  RM) — pedalboard exposes no sidechain bus; see the offline harness.

@@ -642,20 +642,20 @@ fn multi_mode_curve_help(ty: ModuleType, mode: u8, curve_idx: usize) -> &'static
         (ModuleType::Life, 9, 4) => "Brownian · MIX — wet/dry.",
 
         // ── Circuit (SC: no) ──
-        // CircuitMode order from popup: Crossover(0), SpectralSchmitt(1), BbdBins(2), Vactrol(3),
-        //                               TransformerSaturation(4), PowerSag(5), ComponentDrift(6),
-        //                               PcbCrosstalk(7), SlewDistortion(8), BiasFuzz(9)
+        // Mode bytes are CircuitMode discriminants: BbdBins(0), SpectralSchmitt(1),
+        // CrossoverDistortion(2), Vactrol(3), TransformerSaturation(4), PowerSag(5),
+        // ComponentDrift(6), PcbCrosstalk(7), SlewDistortion(8), BiasFuzz(9).
         // Most modes use AMOUNT(0), THRESH(1), SPREAD(2), RELEASE(3), MIX(4) selectively.
-        (ModuleType::Circuit, 0, 0) => "Crossover Distortion · AMOUNT — diode deadzone strength. Higher = wider silenced region around zero, more sputtering on tails.",
-        (ModuleType::Circuit, 0, 1) => "Crossover Distortion · THRESH — diode threshold (deadzone width). Bins below this are silenced, bins above re-emerge smoothly.",
-        (ModuleType::Circuit, 0, 3) => "Crossover Distortion · RELEASE — re-emergence smoothing time when bins cross out of the deadzone.",
-        (ModuleType::Circuit, 0, 4) => "Crossover Distortion · MIX — wet/dry.",
+        (ModuleType::Circuit, 0, 0) => "BBD Bins · AMOUNT — bucket-brigade depth (how aggressively each stage's LP smooths the magnitude).",
+        (ModuleType::Circuit, 0, 4) => "BBD Bins · MIX — wet/dry of the 4-stage delayed/dithered output vs original.",
         (ModuleType::Circuit, 1, 0) => "Spectral Schmitt · AMOUNT — latch attenuation depth on bins below the lower trip point.",
         (ModuleType::Circuit, 1, 1) => "Spectral Schmitt · THRESH — upper trip point. Bins above latch on; the lower trip sits below this with hysteresis.",
         (ModuleType::Circuit, 1, 3) => "Spectral Schmitt · RELEASE — latch decay time when a bin drops below the lower trip.",
         (ModuleType::Circuit, 1, 4) => "Spectral Schmitt · MIX — wet/dry.",
-        (ModuleType::Circuit, 2, 0) => "BBD Bins · AMOUNT — bucket-brigade depth (how aggressively each stage's LP smooths the magnitude).",
-        (ModuleType::Circuit, 2, 4) => "BBD Bins · MIX — wet/dry of the 4-stage delayed/dithered output vs original.",
+        (ModuleType::Circuit, 2, 0) => "Crossover Distortion · AMOUNT — diode deadzone strength. Higher = wider silenced region around zero, more sputtering on tails.",
+        (ModuleType::Circuit, 2, 1) => "Crossover Distortion · THRESH — diode threshold (deadzone width). Bins below this are silenced, bins above re-emerge smoothly.",
+        (ModuleType::Circuit, 2, 3) => "Crossover Distortion · RELEASE — re-emergence smoothing time when bins cross out of the deadzone.",
+        (ModuleType::Circuit, 2, 4) => "Crossover Distortion · MIX — wet/dry.",
         (ModuleType::Circuit, 3, 0) => "Vactrol · AMOUNT — soft-saturation drive applied via the cascaded fast/slow opto-coupler caps. Reads BinPhysics flux.",
         (ModuleType::Circuit, 3, 3) => "Vactrol · RELEASE — slow-cap time constant. Longer = more pronounced opto-coupler ringing on transient releases.",
         (ModuleType::Circuit, 3, 4) => "Vactrol · MIX — wet/dry.",
@@ -838,6 +838,26 @@ mod tests {
         // Past static description starts with "Past —"; curve label appended.
         assert!(body.starts_with("Past —"));
         assert!(body.contains("Curve: AMOUNT"));
+    }
+
+    #[test]
+    fn circuit_curve_help_is_keyed_by_enum_discriminant() {
+        use crate::dsp::modules::circuit::CircuitMode as M;
+        for (mode, name) in [
+            (M::BbdBins, "BBD Bins"),
+            (M::SpectralSchmitt, "Spectral Schmitt"),
+            (M::CrossoverDistortion, "Crossover Distortion"),
+            (M::Vactrol, "Vactrol"),
+            (M::TransformerSaturation, "Transformer Saturation"),
+            (M::PowerSag, "Power Sag"),
+            (M::ComponentDrift, "Component Drift"),
+            (M::PcbCrosstalk, "PCB Crosstalk"),
+            (M::SlewDistortion, "Slew Distortion"),
+            (M::BiasFuzz, "Bias Fuzz"),
+        ] {
+            let s = multi_mode_curve_help(ModuleType::Circuit, mode as u8, 0);
+            assert!(s.starts_with(name), "{mode:?} shows help {s:?}");
+        }
     }
 
     #[test]

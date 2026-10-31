@@ -177,6 +177,20 @@ src/
 `docs/BRACKETING-2026-10-30.md` for the method, its limits and the first run's findings.
 Re-run it after touching any module's curve mapping.
 
+## Real-plugin audition (pedalboard)
+
+`tools/audition.py` drives the built VST3 through Spotify's pedalboard (Python): one module
+in slot 0 → Master, fresh-assignment defaults, then each active curve's Offset at ±1; it
+checks each mode's help-text claim, flags NaN / > +12 dB / silence, and writes
+`target/audition/index.html` with listening renders. It edits module type/mode through the
+VST3 state blob (JUCE "VC2!" XML wrapping nih-plug JSON in JUCE base64). Setup:
+`cargo xtask bundle spectral_forge --release`, then
+`cargo run --release --example bracket -- --dump-specs target/specs.json`, then
+`python tools/audition.py --plugin target/bundled/spectral_forge.vst3/Contents/<arch>/spectral_forge.vst3`
+(point at the inner binary — JUCE fails to scan the bundle folder on Windows). No sidechain
+bus or running transport reaches the plugin, so SC modes and Rhythm are only covered offline.
+This catches pipeline-level bugs the module harness cannot (PLPV re-wrap, Master routing).
+
 ## Key constants
 
 ```rust

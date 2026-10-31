@@ -663,6 +663,16 @@ impl FxMatrix {
                     }
                 }
             }
+            // A split slot also reaches Master through its virtual rows.
+            for (v, &vrow) in route_matrix.virtual_rows.iter().enumerate() {
+                let Some((owner, _)) = vrow else { continue };
+                let owner = owner as usize;
+                if owner >= 8 || snapshot[owner] { continue; }
+                let row = &route_matrix.send[MAX_SLOTS + v];
+                if row[8].abs() > 0.001 || (0..8).any(|mid| row[mid].abs() > 0.001 && snapshot[mid]) {
+                    can_reach_master[owner] = true;
+                }
+            }
         }
 
         // Iterate slots strictly in numerical order (Master at slot 8 is handled separately
@@ -856,6 +866,19 @@ impl FxMatrix {
             self.amp_scratch[..num_bins].copy_from_slice(&self.slot_out[src][..num_bins]);
             let amp_params_cell = &route_matrix.amp_params[src][8];
             let amp_state_cell  = &mut self.amp_state[amp_ch][src][8];
+            amp_state_cell.apply(amp_params_cell, &mut self.amp_scratch[..num_bins], hop_dt);
+            for k in 0..num_bins {
+                self.mix_buf[k] += self.amp_scratch[k] * send;
+            }
+        }
+        // Virtual rows (split streams) sent straight to Master.
+        for (v, &vrow) in route_matrix.virtual_rows.iter().enumerate() {
+            if vrow.is_none() { continue; }
+            let send = route_matrix.send[MAX_SLOTS + v][8];
+            if send.abs() < 0.001 { continue; }
+            self.amp_scratch[..num_bins].copy_from_slice(&self.virtual_out[v][..num_bins]);
+            let amp_params_cell = &route_matrix.amp_params[MAX_SLOTS + v][8];
+            let amp_state_cell  = &mut self.amp_state[amp_ch][MAX_SLOTS + v][8];
             amp_state_cell.apply(amp_params_cell, &mut self.amp_scratch[..num_bins], hop_dt);
             for k in 0..num_bins {
                 self.mix_buf[k] += self.amp_scratch[k] * send;

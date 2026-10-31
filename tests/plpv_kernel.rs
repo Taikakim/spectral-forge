@@ -142,3 +142,26 @@ fn voronoi_assigns_skirts_to_nearest_peak() {
     assert_eq!(peaks[1].low_k, 41);
     assert_eq!(peaks[1].high_k, 99);
 }
+
+#[test]
+fn recombine_keeps_module_rotated_phase_and_rebuilds_the_rest() {
+    use num_complex::Complex;
+    use spectral_forge::dsp::plpv::recombine_with_module_phase;
+
+    // Bin 0: magnitude-only edit (×0.5) → takes the PLPV phase.
+    // Bin 1: a phaser rotated it by 0.8 rad → keeps the module's phase.
+    // Bin 2: untouched → takes the PLPV phase.
+    let input_phase = [0.3_f32, -1.0, 2.0];
+    let rewrapped = [0.35_f32, -0.9, 2.1];
+    let mut bins = [
+        Complex::from_polar(0.5, 0.3),
+        Complex::from_polar(2.0, -1.0 + 0.8),
+        Complex::from_polar(1.0, 2.0),
+    ];
+    recombine_with_module_phase(&mut bins, &input_phase, &rewrapped, 3);
+
+    assert!((bins[0].arg() - 0.35).abs() < 1e-5 && (bins[0].norm() - 0.5).abs() < 1e-5);
+    assert!((bins[1].arg() - (-0.2)).abs() < 1e-5, "rotated phase must survive, got {}", bins[1].arg());
+    assert!((bins[1].norm() - 2.0).abs() < 1e-5);
+    assert!((bins[2].arg() - 2.1).abs() < 1e-5);
+}

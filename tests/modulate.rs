@@ -937,6 +937,32 @@ fn slew_lag_limits_rise_rate_and_never_overshoots() {
 }
 
 #[test]
+fn slew_lag_note_after_silence_swells_in_from_at_most_60_db_down() {
+    use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
+    use spectral_forge::dsp::modules::SpectralModule;
+
+    let num_bins = 1025;
+    let amount = vec![1.0_f32; num_bins]; // slowest: 20 dB/s
+    let half   = vec![0.5_f32; num_bins];
+    let mix    = vec![1.0_f32; num_bins];
+    let curves: Vec<&[f32]> = vec![&amount, &half, &half, &half, &half, &mix];
+
+    let mut m = ModulateModule::new();
+    m.reset(48_000.0, 2048);
+    m.set_mode(ModulateMode::SlewLag);
+    // A loud note at raw-FFT scale, then ~10 s of digital silence.
+    for _ in 0..4 { slew_lag_hop(&mut m, 500.0, None, &curves); }
+    for _ in 0..940 { slew_lag_hop(&mut m, 0.0, None, &curves); }
+    // The next note starts no lower than 60 dB down and is within 1 dB of the
+    // input after 3 s (60 dB at 20 dB/s ≈ 282 hops).
+    let first = slew_lag_hop(&mut m, 500.0, None, &curves)[300];
+    assert!(20.0 * (first / 500.0).log10() >= -60.5, "first hop {first} is more than 60 dB down");
+    let mut last = first;
+    for _ in 0..285 { last = slew_lag_hop(&mut m, 500.0, None, &curves)[300]; }
+    assert!(20.0 * (last / 500.0).log10() > -1.0, "after 3 s the note should be back, got {last}");
+}
+
+#[test]
 fn slew_lag_amount_zero_is_passthrough() {
     use spectral_forge::dsp::modules::modulate::{ModulateMode, ModulateModule};
     use spectral_forge::dsp::modules::SpectralModule;

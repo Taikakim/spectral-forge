@@ -278,6 +278,11 @@ const SLEW_REACH_MAX_BINS: f32 = 16.0;
 const SLEW_MIN_LIMIT_FRAC: f32 = 0.05;
 /// Magnitude floor before taking logs.
 const SLEW_MAG_FLOOR: f32 = 1e-9;
+/// Deepest the slewed level may sit below the current input, dB. Without it a
+/// bin that decayed into silence (raw-FFT scale ≈ 240 dB below a note) would
+/// need seconds to climb back, muting the next note; with it a note after
+/// silence swells in from −60 dB (3 s at 20 dB/s, 15 ms at 4000 dB/s).
+const SLEW_SWELL_DEPTH_DB: f32 = 60.0;
 
 /// Slew Lag — per-bin log-magnitude slew limiter. AMOUNT sets the slew rate
 /// (exponential between `SLEW_MAX_RATE_DB_S` and `SLEW_MIN_RATE_DB_S`); sidechain
@@ -367,7 +372,8 @@ fn apply_slew_lag(
 
         let lim    = rate_db_s * hop_seconds * DB_TO_LN;
         let prev   = prev_out_ln[k];
-        let out_ln = prev + (in_ln - prev).clamp(-lim, lim);
+        let out_ln = (prev + (in_ln - prev).clamp(-lim, lim))
+            .max(in_ln - SLEW_SWELL_DEPTH_DB * DB_TO_LN);
         prev_out_ln[k] = out_ln;
 
         // |dry| ≥ floor ⇒ |dry·scale| = exp(out_ln). |dry| < floor ⇒ smaller.

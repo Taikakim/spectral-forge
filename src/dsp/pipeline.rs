@@ -1364,17 +1364,22 @@ impl Pipeline {
             // PLPV: re-wrap unwrapped phase back into (-π, π] and recombine with the (possibly
             // modified) magnitude. When no module touched ctx.unwrapped_phase this is a no-op
             // up to f32 round-off (typically ≤ 1 ULP).
+            //
+            // Bins whose phase the module chain changed directly in the complex domain keep
+            // that phase (see `recombine_with_module_phase`). `scratch_curr_phase_ref` still
+            // holds this channel's pre-module wrapped phase (filled above, untouched by dispatch).
             if plpv_enable {
                 crate::dsp::plpv::rewrap_phase(
                     &unwrapped_phase_ref[ch][..num_bins],
                     &mut rewrap_buf_ref[ch][..num_bins],
                     num_bins,
                 );
-                for k in 0..num_bins {
-                    let m = complex_buf[k].norm();
-                    let p = rewrap_buf_ref[ch][k];
-                    complex_buf[k] = Complex::from_polar(m, p);
-                }
+                crate::dsp::plpv::recombine_with_module_phase(
+                    &mut complex_buf[..num_bins],
+                    &scratch_curr_phase_ref[..num_bins],
+                    &rewrap_buf_ref[ch][..num_bins],
+                    num_bins,
+                );
             }
 
             // realfft requires Im(X[0]) == Im(X[Nyquist]) == 0 (Hermitian invariant

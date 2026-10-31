@@ -702,6 +702,49 @@ fn fx_matrix_ts_split_routes_sustained_to_next_slot() {
 }
 
 #[test]
+fn fx_matrix_virtual_row_sent_straight_to_master_is_heard() {
+    use spectral_forge::dsp::{
+        modules::{ModuleType, ModuleContext, RouteMatrix, VirtualRowKind, MAX_SLOTS, MAX_MATRIX_ROWS},
+        fx_matrix::FxMatrix,
+        pipeline::MAX_NUM_BINS,
+    };
+    use spectral_forge::params::{StereoLink, FxChannelTarget};
+    use num_complex::Complex;
+
+    let n = 1025usize;
+    let mut types = [ModuleType::Empty; 9];
+    types[0] = ModuleType::TransientSustainedSplit;
+    types[8] = ModuleType::Master;
+    let mut fm = FxMatrix::new(44100.0, 2048, &types);
+
+    // Only route: virtual row 0 (sustained of slot 0) → Master. Slot 0's own
+    // output goes nowhere, so anything at the output came through the row.
+    let mut rm = RouteMatrix::default();
+    rm.send = [[0.0f32; MAX_SLOTS]; MAX_MATRIX_ROWS];
+    rm.send[MAX_SLOTS][8] = 1.0;
+    rm.virtual_rows[0] = Some((0, VirtualRowKind::Sustained));
+    rm.virtual_rows[1] = Some((0, VirtualRowKind::Transient));
+
+    let bins: Vec<Complex<f32>> = vec![Complex::new(1.0, 0.0); n];
+    let curves: Vec<Vec<Vec<f32>>> = (0..9)
+        .map(|_| (0..7).map(|_| vec![1.0f32; MAX_NUM_BINS]).collect())
+        .collect();
+    let mut supp = vec![0.0f32; n];
+    let sc: [Option<&[f32]>; 9] = [None; 9];
+    let targets = [FxChannelTarget::All; 9];
+    let ctx = ModuleContext::new(44100.0, 2048, n, 10.0, 100.0, 0.0, 0.0, false, false);
+
+    let mut out = bins.clone();
+    for _ in 0..100 {
+        out = bins.clone();
+        fm.process_hop(0, StereoLink::Linked, &mut out, &sc, &targets, &curves, &rm, &ctx, &mut supp, n, true);
+    }
+    let energy: f32 = out.iter().map(|b| b.norm_sqr()).sum();
+    assert!(energy > 0.25 * n as f32,
+        "steady input routed through the sustained row must reach Master (energy {energy})");
+}
+
+#[test]
 fn mid_side_module_processes_in_linked_mode() {
     use spectral_forge::dsp::modules::{
         create_module, ModuleType, ModuleContext, SpectralModule,

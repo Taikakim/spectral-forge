@@ -753,6 +753,22 @@ fn apply_sandpaper(
     }
 }
 
+/// One BinPhysics field for a Life mode, copied into `scratch`. Reader slots see
+/// physics through `ctx.bin_physics`; Life is a writer, so in the FxMatrix it gets
+/// `ctx.bin_physics = None` and its own `physics` handle instead — already holding
+/// the mixed upstream physics and this hop's auto-computed velocity. The copy lets
+/// the caller pass the slice and the mutable handle at once (no allocation).
+fn physics_field<'a>(
+    from_ctx: Option<&[f32]>,
+    from_own: Option<&[f32]>,
+    scratch: &'a mut [f32],
+    num_bins: usize,
+) -> Option<&'a [f32]> {
+    let src = from_ctx.or(from_own)?;
+    scratch[..num_bins].copy_from_slice(&src[..num_bins]);
+    Some(&scratch[..num_bins])
+}
+
 // ── Task 12: Brownian ──────────────────────────────────────────────────────
 
 /// Temperature-driven random walk. Reads `BinPhysics.temperature[k]` (set by
@@ -822,11 +838,13 @@ impl SpectralModule for LifeModule {
                 apply_archimedes(bins, curves, ctx.num_bins);
             }
             LifeMode::NonNewtonian => {
-                let velocity = ctx.bin_physics.map(|bp| &bp.velocity[..ctx.num_bins]);
+                let own = physics.as_deref().map(|p| &p.velocity[..]);
+                let velocity = physics_field(ctx.bin_physics.map(|bp| &bp.velocity[..]), own, scratch_mag, ctx.num_bins);
                 apply_non_newtonian(bins, curves, velocity, physics, ctx.num_bins, sc.non_newtonian_scale);
             }
             LifeMode::Stiction => {
-                let velocity = ctx.bin_physics.map(|bp| &bp.velocity[..ctx.num_bins]);
+                let own = physics.as_deref().map(|p| &p.velocity[..]);
+                let velocity = physics_field(ctx.bin_physics.map(|bp| &bp.velocity[..]), own, scratch_mag, ctx.num_bins);
                 let is_moving = &mut self.is_moving[channel];
                 apply_stiction(bins, is_moving, curves, velocity, physics, ctx.num_bins, sc.stiction_scale);
             }
@@ -846,8 +864,8 @@ impl SpectralModule for LifeModule {
                 apply_sandpaper(bins, scratch_mag, curves, ctx.num_bins, sc.sandpaper_scale);
             }
             LifeMode::Brownian => {
-                let _ = physics;
-                let temp = ctx.bin_physics.map(|bp| &bp.temperature[..ctx.num_bins]);
+                let own = physics.as_deref().map(|p| &p.temperature[..]);
+                let temp = physics_field(ctx.bin_physics.map(|bp| &bp.temperature[..]), own, scratch_mag, ctx.num_bins);
                 let rng  = &mut self.rng_state[channel];
                 apply_brownian(bins, rng, curves, temp, ctx.num_bins, sc.brownian_scale);
             }

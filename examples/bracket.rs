@@ -4,7 +4,11 @@
 //! ```text
 //! cargo run --release --example bracket -- [--threads N] [--only TEXT] [--hops N]
 //!                                           [--out DIR] [--wav TEXT]
+//! cargo run --release --example bracket -- --dump-specs specs.json
 //! ```
+//!
+//! `--dump-specs` writes every module × mode's curves and offset ranges as JSON
+//! for `tools/audition.py`, which drives the built VST3 through pedalboard.
 //!
 //! For each job (module, mode, curve, stimulus) it runs
 //! - **static brackets**: a fresh module per setting — 13 offset-slider positions
@@ -735,11 +739,76 @@ fn write_wav(path: &Path, frames: &[[Vec<Complex<f32>>; 2]]) {
     let _ = std::fs::write(path, bytes);
 }
 
+// ── Spec dump (for the host-side audition script) ─────────────────────────
+
+/// Persisted-state field that holds a module's per-slot mode, if it has modes.
+fn mode_field(ty: ModuleType) -> Option<&'static str> {
+    Some(match ty {
+        ModuleType::Gain => "slot_gain_mode",
+        ModuleType::Future => "slot_future_mode",
+        ModuleType::Punch => "slot_punch_mode",
+        ModuleType::Rhythm => "slot_rhythm_mode",
+        ModuleType::Geometry => "slot_geometry_mode",
+        ModuleType::Modulate => "slot_modulate_mode",
+        ModuleType::Harmonic => "slot_harmonic_mode",
+        ModuleType::Circuit => "slot_circuit_mode",
+        ModuleType::Life => "slot_life_mode",
+        ModuleType::Past => "slot_past_mode",
+        ModuleType::Contrast => "slot_contrast_mode",
+        ModuleType::Kinetics => "slot_kinetics_mode",
+        ModuleType::Harmony => "slot_harmony_mode",
+        _ => return None,
+    })
+}
+
+/// Write every module × mode with its curves (label, active, offset default and
+/// what the Offset knob's range means in display units) as JSON.
+fn dump_specs(path: &Path) {
+    let mut entries = Vec::new();
+    for &ty in &MODULES {
+        let spec = module_spec(ty);
+        for mode in modes_for(ty) {
+            let layout = spec.active_layout.map(|f| f(mode.byte()));
+            let curves: Vec<serde_json::Value> = (0..spec.num_curves).map(|c| {
+                let (label, active) = curve_label(ty, mode, c);
+                let cfg = curve_display_config(ty, c, mode.gain_mode());
+                let didx = display_curve_idx(ty, c, mode.gain_mode());
+                let anchors = runtime_anchors(&cfg, didx, 4.0, -160.0, 0.0, 10.0, 100.0);
+                let offsets: Vec<serde_json::Value> = [-1.0f32, -0.5, 0.0, 0.5, 1.0].iter().map(|&o| {
+                    let g = (cfg.offset_fn)(1.0, o, anchors);
+                    let d = gain_to_display(didx, g, 10.0, 100.0, -160.0, 0.0, 4.0);
+                    serde_json::json!({ "offset": o, "gain": g, "display": d })
+                }).collect();
+                serde_json::json!({
+                    "index": c, "label": label, "active": active,
+                    "offset_default": if cfg.natural_at_max { 1.0 } else { 0.0 },
+                    "unit": cfg.y_label, "offsets": offsets,
+                })
+            }).collect();
+            entries.push(serde_json::json!({
+                "module": format!("{ty:?}"),
+                "display_name": spec.display_name,
+                "mode": mode.name(),
+                "mode_field": mode_field(ty),
+                "supports_sidechain": spec.supports_sidechain,
+                "overview": layout.and_then(|l| l.mode_overview),
+                "curves": curves,
+            }));
+        }
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&entries).unwrap()).expect("write specs");
+    eprintln!("wrote {} module/mode specs to {}", entries.len(), path.display());
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    if let Some(p) = arg("--dump-specs") {
+        dump_specs(Path::new(&p));
+        return;
+    }
     let threads: usize = arg("--threads").and_then(|v| v.parse().ok()).unwrap_or_else(|| {
         std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(2).clamp(1, 6)
     });
